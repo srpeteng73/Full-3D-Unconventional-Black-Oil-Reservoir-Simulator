@@ -535,36 +535,82 @@ with tabs[3]:
         "This chart shows pseudo-frictional pressure drop from heel to toe. "
         "Stage markers (vertical dotted lines) indicate limited-entry points."
     )
-# --- inside with tabs[4]: RTA — Quick Diagnostics ---
-def _get_sim_preview():
-    """Return a safe preview result for RTA."""
-    try:
-        if st.session_state.get("sim") is not None:
-            return st.session_state.sim
-        seed = int(st.session_state.get("rng_seed", 1234))
-        return fallback_fast_solver(state, np.random.default_rng(seed))
-    except Exception as e:
-        # Guard against any session-state/name errors
-        st.warning(f"Preview run failed; using safe defaults ({type(e).__name__}).")
-        tmp = dict(state)
-        return fallback_fast_solver(tmp, np.random.default_rng(1234))
+with tabs[4]:
+    st.header("RTA — Quick Diagnostics")
+    st.info(
+        "**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes. "
+        "The **log-log derivative** plot is key: a slope of ~0.5 can indicate linear flow (common in early unconventional well life), "
+        "while a slope of ~0 can indicate boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior."
+    )
 
-sim_data = _get_sim_preview()
-t = np.asarray(sim_data.get("t", np.geomspace(1.0, 5500.0, 280)))
-qg = np.asarray(sim_data.get("qg", np.zeros_like(t)))
+    # --- Local helper to build a preview sim if no full sim has been run yet ---
+    def _get_sim_preview():
+        """
+        Make a small, deterministic preview simulation for RTA when the user hasn't run the full sim yet.
+        Uses the fallback solver with a fixed RNG so the preview is stable across reruns.
+        """
+        tmp = state.copy()
+        # You can further lighten the preview here if needed; leaving geometry as-is is fine.
+        rng_preview = np.random.default_rng(int(st.session_state.rng_seed) + 999)
+        return fallback_fast_solver(tmp, rng_preview)
 
+    # Use existing sim if available; otherwise build a quick preview
+    sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
+    t, qg = sim_data["t"], sim_data["qg"]
+
+    # --- Y-axis toggle for rates (Linear / Log) ---
+    rate_y_mode_rta = st.radio(
+        "Rate y-axis",
+        ["Linear", "Log"],
+        index=0,
+        horizontal=True,
+        key="rta_rate_y_mode",
+    )
+    y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
+
+    # R1. Gas rate (q) vs time (x uses log scale in helper layout; here we only toggle y)
+    fig_rta_rate = go.Figure()
+    fig_rta_rate.add_trace(
+        go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas")
+    )
+    fig_rta_rate.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
+    fig_rta_rate.update_yaxes(type=y_type_rta)
+    st.plotly_chart(fig_rta_rate, use_container_width=True, key="rta_rate_plot")
+
+    # R2. Log-log derivative (keep linear y for slope clarity)
+    logt = np.log10(np.where(t <= 0.0, 1e-3, t))
+    logq = np.log10(np.maximum(qg, 1e-9))
+    slope = np.gradient(logq, logt)
+
+    fig_rta_deriv = go.Figure()
+    fig_rta_deriv.add_trace(
+        go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt")
+    )
+    fig_rta_deriv.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
+    st.plotly_chart(fig_rta_deriv, use_container_width=True, key="rta_deriv_plot")
 
 
 with tabs[5]:
     st.header("Simulation Results")
+
+    # Run button
     if st.button("Run simulation", type="primary"):
         with st.spinner("Running simulation..."):
             st.session_state.sim = run_simulation(state)
 
-    if st.session_state.sim is not None:
-        sim = st.session_state.sim
-        st.info("**Interpretation:** The primary results include Estimated Ultimate Recovery (EUR) gauges, production rate declines over time, cumulative production, and pressure maps. These outputs allow you to assess the well's performance, diagnose production behavior (like GOR changes), and visualize reservoir depletion.")
+    # Only draw results if a run exists
+    sim = st.session_state.get("sim", None)
+    if sim is None:
+        st.info("Click **Run simulation** to compute rates, pressures, and EUR gauges.")
+    else:
+        st.info(
+            "**Interpretation:** The primary results include Estimated Ultimate Recovery (EUR) gauges, "
+            "production rate declines over time, cumulative production, and pressure maps. "
+            "These outputs allow you to assess the well's performance, diagnose production behavior "
+            "(like GOR changes), and visualize reservoir depletion."
+        )
 
+        # Gauges
         g_g, o_g = eur_gauges(sim["EUR_g_BCF"], sim["EUR_o_MMBO"])
         c1, c2 = st.columns(2)
         with c1:
@@ -572,9 +618,13 @@ with tabs[5]:
         with c2:
             st.plotly_chart(o_g, use_container_width=True, key="res_gauge_oil")
 
-        rate_y_mode_results = st.radio("Rate y-axis (Results)", ["Linear", "Log"], index=0, horizontal=True, key="results_rate_y_mode")
+        # Rate axis toggle
+        rate_y_mode_results = st.radio(
+            "Rate y-axis (Results)", ["Linear", "Log"], index=0, horizontal=True, key="results_rate_y_mode"
+        )
         y_type_results = "log" if rate_y_mode_results == "Log" else "linear"
 
+        # Figure 7. Gas & Oil rates
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=sim["t"], y=sim["qg"], name="Gas (Mscf/d)", line=dict(color="#d62728", width=3)))
         fig.add_trace(go.Scatter(x=sim["t"], y=sim["qo"], name="Oil (STB/d)",  line=dict(color="#2ca02c", width=3)))
@@ -582,30 +632,34 @@ with tabs[5]:
         fig.update_yaxes(type=y_type_results)
         st.plotly_chart(fig, use_container_width=True, key="res_rates_plot")
 
+        # Figure 8. Oil decline
         fig8 = go.Figure()
         fig8.add_trace(go.Scatter(x=sim["t"], y=sim["qo"], line=dict(color="#2ca02c", width=3), name="Oil"))
         fig8.update_layout(**semi_log_layout("Figure 8. Oil Decline", yaxis="Oil rate (STB/d)"))
         fig8.update_yaxes(type=y_type_results)
         st.plotly_chart(fig8, use_container_width=True, key="res_oil_decline_plot")
 
-        # --- UPDATED cumulative using exact dt (handles log-spaced time correctly) ---
-        dt = np.gradient(sim["t"])
-        cum_g = np.cumsum(sim["qg"] * dt)   # Mscf
-        cum_o = np.cumsum(sim["qo"] * dt)   # STB
-
+        # Cumulative
+        cum_g = np.cumsum(sim["qg"]) * np.mean(np.diff(sim["t"]))
+        cum_o = np.cumsum(sim["qo"]) * np.mean(np.diff(sim["t"]))
         fig9 = go.Figure()
-        fig9.add_trace(go.Scatter(x=sim["t"], y=cum_g / 1e6, name="Gas (BCF)",  line=dict(color="#d62728", width=3)))
-        fig9.add_trace(go.Scatter(x=sim["t"], y=cum_o / 1e6, name="Oil (MMBO)", line=dict(color="#2ca02c", width=3)))
+        fig9.add_trace(go.Scatter(x=sim["t"], y=cum_g/1e6, name="Gas (BCF)",  line=dict(color="#d62728", width=3)))
+        fig9.add_trace(go.Scatter(x=sim["t"], y=cum_o/1e6, name="Oil (MMBO)", line=dict(color="#2ca02c", width=3)))
         fig9.update_layout(**semi_log_layout("Figure 9. Cumulative Production", yaxis="Cumulative"))
         st.plotly_chart(fig9, use_container_width=True, key="res_cum_plot")
 
+        # BHP
         bhp_t = sim.get("bhp_t", sim["t"])
-        bhp_psi = sim.get("bhp_psi", np.full_like(bhp_t, float(state["pad_bhp_psi"]) if state["pad_ctrl"] == "BHP" else float(state["p_min_bhp_psi"])))
+        bhp_psi = sim.get(
+            "bhp_psi",
+            np.full_like(bhp_t, float(state["pad_bhp_psi"]) if state["pad_ctrl"] == "BHP" else float(state["p_min_bhp_psi"]))
+        )
         fig_bhp = go.Figure()
         fig_bhp.add_trace(go.Scatter(x=bhp_t, y=bhp_psi, name="BHP (psi)", line=dict(width=3, color="purple")))
         fig_bhp.update_layout(**semi_log_layout("Bottom-Hole Pressure vs Time", yaxis="BHP (psi)"))
         st.plotly_chart(fig_bhp, use_container_width=True, key="res_bhp_plot")
 
+        # GOR (guard divide-by-zero)
         qo_safe = np.where(sim["qo"] <= 1e-9, np.nan, sim["qo"])
         gor = sim["qg"] * 1000 / qo_safe
         fig_gor = go.Figure()
@@ -613,6 +667,7 @@ with tabs[5]:
         fig_gor.update_layout(**semi_log_layout("GOR vs Time", yaxis="GOR (scf/STB)"))
         st.plotly_chart(fig_gor, use_container_width=True, key="res_gor_plot")
 
+        # Mid-layer maps
         c1, c2 = st.columns(2)
         with c1:
             st.plotly_chart(
@@ -628,8 +683,6 @@ with tabs[5]:
             )
 
         st.caption(f"Runtime: {sim.get('runtime_s', 0):.2f} s")
-    else:
-        st.info("Click **Run simulation** to compute rates, pressures, and EUR gauges.")
 
 
 with tabs[6]:
