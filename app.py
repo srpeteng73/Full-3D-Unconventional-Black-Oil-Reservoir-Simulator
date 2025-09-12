@@ -977,6 +977,20 @@ with tabs[11]:
             s = fallback_fast_solver(tmp, rng)
             samples.append([s["EUR_g_BCF"], s["EUR_o_MMBO"], tmp["k_stdev"], tmp["hf_ft"], tmp["xf_ft"], tmp["pad_interf"]])
         S = np.array(samples)
+# --- Backward-compat shim (temporary; safe to keep) ---
+def _get_sim_preview():
+    """
+    Fallback preview used by any legacy code paths that still call _get_sim_preview().
+    Returns a lightweight sim using the fallback solver so NameError is eliminated.
+    """
+    # Build a state dict even if the 'state' variable hasn't been created yet
+    if 'state' in globals():
+        tmp = state.copy()
+    else:
+        tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
+
+    rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
+    return fallback_fast_solver(tmp, rng_preview)
 
     def plot_dist_and_tornado(data, name, unit, color, key_prefix):
         st.subheader(f"{name} EUR Analysis")
