@@ -204,41 +204,50 @@ def call_external_engine(state_dict):
     except Exception:
         return None
 
-# ------------------------ Fallback Solver (MODE-AWARE) ------------------------
-def fallback_fast_solver(state, rng):
-    """
-    Fast synthetic production + 3D fields generator.
-    Mode-aware (unconventional vs black-oil) via st.session_state.fluid_model.
-    """
-    t = np.geomspace(1, 5500, 280)
+    # --- initial rates + declines (model-specific) ---
+    # Common geometry & interference terms
+    geo_g = (L / 10_000.0)**0.85 * (xf / 300.0)**0.55 * (hf / 180.0)**0.20
+    geo_o = (L / 10_000.0)**0.85 * (xf / 300.0)**0.40 * (hf / 180.0)**0.30
+    interf_mul = 1.0 / (1.00 + 1.25*pad_interf + 0.35*max(0, nlats - 1))
 
-    # Geometry / scaling
-    L, xf, hf = float(state["L_ft"]), float(state["xf_ft"]), float(state["hf_ft"])
-    pad_interf, nlats = float(state["pad_interf"]), int(state["n_laterals"])
-    richness = float(state.get("Rs_pb_scf_stb", 0.0)) / 650.0  # 0 for black-oil, ~1 for volatile
-    interf = (1 + 0.25*pad_interf) * (1 + 0.1*(nlats-1))
+    if st.session_state.get("fluid_model", "unconventional") == "unconventional":
+        # UNCONVENTIONAL (volatile/tight): usually higher gas tilt; modest oil
+        qi_g_base = 12_000.0   # Mscf/d baseline per well
+        qi_o_base = 1_000.0    # STB/d   baseline per well
+        # Composition/richness tilt (uses Rs proxy): richer → a bit more gas & oil
+        rich_g = 1.0 + 0.30 * np.clip(richness, 0.0, 1.4)
+        rich_o = 1.0 + 0.12 * np.clip(richness, 0.0, 1.4)
 
-    # --- key change: mode-aware initial rates + decline exponents ---
-    fluid_model = st.session_state.get("fluid_model", "unconventional")
-    if fluid_model == "black_oil":
-        # Oil-dominant with modest associated gas
-        qi_o = 1800.0 * (L/10_000.0) * (hf/180.0) * (1.00 + 0.10*richness) * interf
-        qi_g = 2500.0 * (L/10_000.0) * (xf/300.0) * (0.30 + 0.20*richness) * interf
-        Di_o_yr, b_o = 0.45, 0.70
-        Di_g_yr, b_g = 0.60, 0.60
+        # Initial rates (caps keep EURs in check)
+        qi_g = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  3_000.0, 28_000.0)
+        qi_o = np.clip(qi_o_base * geo_o * interf_mul * rich_o,    400.0,  2_500.0)
+
+        # Declines: a bit steeper for gas, typical for shale oils
+        Di_g_yr, b_g = 0.60, 0.85
+        Di_o_yr, b_o = 0.50, 1.00
+
     else:
-        # Unconventional / volatile
-        qi_g = 80_000.0 * (L/10_000.0) * (xf/300.0) * interf
-        qi_o = 1_500.0 * (L/10_000.0) * (hf/180.0) * (0.7 + 0.6*richness) * interf
-        Di_g_yr, b_g = 0.70, 0.70
-        Di_o_yr, b_o = 0.50, 0.80
+        # BLACK-OIL (solution-gas dominated oil window): stronger oil, subdued gas
+        qi_g_base = 8_000.0    # Mscf/d
+        qi_o_base = 1_600.0    # STB/d
+        # Little “richness” leverage (Rs≈0 in BO presets anyway)
+        rich_g = 1.0 + 0.05 * np.clip(richness, 0.0, 1.4)
+        rich_o = 1.0 + 0.08 * np.clip(richness, 0.0, 1.4)
 
-    # Daily decline parameters
-    Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0
+        qi_g = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  2_000.0, 18_000.0)
+        qi_o = np.clip(qi_o_base * geo_o * interf_mul * rich_o,    700.0,  3_500.0)
 
-    # Hyperbolic declines
-    qg = qi_g / (1 + b_g*Di_g*t)**(1/b_g)
-    qo = qi_o / (1 + b_o*Di_o*t)**(1/b_o)
+        # Declines: slightly gentler for gas; oil similar or a touch flatter
+        Di_g_yr, b_g = 0.45, 0.80
+        Di_o_yr, b_o = 0.42, 0.95
+
+    # Convert yearly to daily
+    Di_g = Di_g_yr / 365.0
+    Di_o = Di_o_yr / 365.0
+
+    # Hyperbolic profiles
+    qg = qi_g / (1.0 + b_g*Di_g*t)**(1.0/b_g)  # Mscf/d
+    qo = qi_o / (1.0 + b_o*Di_o*t)**(1.0/b_o)  # STB/d
 
     # EURs
     EUR_g_BCF = np.trapz(qg, t) / 1e6
