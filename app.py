@@ -64,30 +64,29 @@ if st.session_state.apply_preset_payload is not None:
     _safe_rerun()
 
 # ------------------------ Presets ------------------------
+# THIS SECTION HAS BEEN UPDATED WITH ALL YOUR SHALE PLAYS
 PLAY_PRESETS = {
-    "Permian — Wolfcamp (volatile oil window)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0, Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0),
-    "Permian — Bone Spring (volatile)": dict(L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=160.0, Rs_pb_scf_stb=600.0, pb_psi=5400.0, Bo_pb_rb_stb=1.33, p_init_psi=5900.0),
-    "Eagle Ford — volatile oil": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0, Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
-    "Bakken — Middle Bakken (CGR-lite)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=260.0, hf_ft=150.0, Rs_pb_scf_stb=450.0, pb_psi=4200.0, Bo_pb_rb_stb=1.30, p_init_psi=5200.0),
-    "Niobrara — volatile oil": dict(L_ft=8000.0, stage_spacing_ft=220.0, xf_ft=240.0, hf_ft=140.0, Rs_pb_scf_stb=500.0, pb_psi=5000.0, Bo_pb_rb_stb=1.32, p_init_psi=5500.0),
-    "Haynesville — rich gas": dict(L_ft=9500.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8000.0),
-    "Montney — liquids-rich": dict(L_ft=10500.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6200.0),
-    "Duvernay — condensate": dict(L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=290.0, hf_ft=175.0, Rs_pb_scf_stb=800.0, pb_psi=5600.0, Bo_pb_rb_stb=1.38, p_init_psi=6400.0),
-    "Cardium — light oil": dict(L_ft=7000.0, stage_spacing_ft=260.0, xf_ft=220.0, hf_ft=120.0, Rs_pb_scf_stb=400.0, pb_psi=3800.0, Bo_pb_rb_stb=1.28, p_init_psi=4200.0),
-    "Mancos — liquids-rich gas": dict(L_ft=9000.0, stage_spacing_ft=250.0, xf_ft=310.0, hf_ft=180.0, Rs_pb_scf_stb=300.0, pb_psi=4500.0, Bo_pb_rb_stb=1.22, p_init_psi=5200.0),
-    "Tuscaloosa Marine — volatile oil": dict(L_ft=10000.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=650.0, pb_psi=5300.0, Bo_pb_rb_stb=1.34, p_init_psi=5900.0),
-    "Barnett — dry gas": dict(L_ft=7500.0, stage_spacing_ft=230.0, xf_ft=280.0, hf_ft=150.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5000.0),
-    "Fayetteville — gas": dict(L_ft=7000.0, stage_spacing_ft=220.0, xf_ft=270.0, hf_ft=140.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=4800.0),
-    "Woodford — condensate": dict(L_ft=9000.0, stage_spacing_ft=240.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5600.0, Bo_pb_rb_stb=1.37, p_init_psi=6200.0),
-    "Cana-Woodford — liquids-rich": dict(L_ft=10000.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=600.0, pb_psi=5200.0, Bo_pb_rb_stb=1.34, p_init_psi=6000.0),
-    "Marcellus — dry gas": dict(L_ft=9000.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=180.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0),
-    "Marcellus — wet gas": dict(L_ft=9000.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=180.0, Rs_pb_scf_stb=150.0, pb_psi=3000.0, Bo_pb_rb_stb=1.15, p_init_psi=6000.0),
-    "Utica — deep gas/condensate": dict(L_ft=10000.0, stage_spacing_ft=220.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=200.0, pb_psi=3500.0, Bo_pb_rb_stb=1.18, p_init_psi=8000.0),
-    "Antrim — shallow gas": dict(L_ft=4000.0, stage_spacing_ft=300.0, xf_ft=150.0, hf_ft=80.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=1200.0),
-    "New Albany — gas/oil": dict(L_ft=5000.0, stage_spacing_ft=280.0, xf_ft=180.0, hf_ft=100.0, Rs_pb_scf_stb=300.0, pb_psi=3000.0, Bo_pb_rb_stb=1.22, p_init_psi=2500.0),
-    "Chattanooga/Devonian — gas": dict(L_ft=6000.0, stage_spacing_ft=260.0, xf_ft=220.0, hf_ft=120.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=3500.0),
+    # --- US Plays ---
+    "Permian Basin (Wolfcamp)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0, Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0),
+    "Eagle Ford (Oil Window)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0, Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
+    "Marcellus (Dry Gas)": dict(L_ft=9000.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=180.0, Rs_pb_scf_stb=50.0, pb_psi=1500.0, Bo_pb_rb_stb=1.05, p_init_psi=6500.0),
+    "Haynesville (Dry Gas)": dict(L_ft=9500.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8000.0),
+    "Bakken (Light Oil)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=260.0, hf_ft=150.0, Rs_pb_scf_stb=450.0, pb_psi=4200.0, Bo_pb_rb_stb=1.30, p_init_psi=5200.0),
+    "Niobrara (Oil & Gas)": dict(L_ft=8000.0, stage_spacing_ft=220.0, xf_ft=240.0, hf_ft=140.0, Rs_pb_scf_stb=500.0, pb_psi=5000.0, Bo_pb_rb_stb=1.32, p_init_psi=5500.0),
+    "Barnett (Gas)": dict(L_ft=7500.0, stage_spacing_ft=230.0, xf_ft=280.0, hf_ft=150.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5000.0),
+    "Utica (Gas & NGLs)": dict(L_ft=10000.0, stage_spacing_ft=220.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=200.0, pb_psi=3500.0, Bo_pb_rb_stb=1.18, p_init_psi=8000.0),
+    "Anadarko-Woodford (Oil & Gas)": dict(L_ft=9000.0, stage_spacing_ft=240.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5600.0, Bo_pb_rb_stb=1.37, p_init_psi=6200.0),
+    "Granite Wash (Gas & Liquids)": dict(L_ft=8500.0, stage_spacing_ft=250.0, xf_ft=280.0, hf_ft=160.0, Rs_pb_scf_stb=600.0, pb_psi=5000.0, Bo_pb_rb_stb=1.33, p_init_psi=6000.0),
+    # --- Canadian Plays ---
+    "Montney (Gas, Condensate, NGLs)": dict(L_ft=10500.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6200.0),
+    "Duvernay (Liquids-Rich Gas)": dict(L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=290.0, hf_ft=175.0, Rs_pb_scf_stb=800.0, pb_psi=5600.0, Bo_pb_rb_stb=1.38, p_init_psi=6400.0),
+    "Horn River Basin (Dry Gas)": dict(L_ft=8000.0, stage_spacing_ft=280.0, xf_ft=350.0, hf_ft=200.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7500.0),
+    "Liard Basin (Dry Gas)": dict(L_ft=8500.0, stage_spacing_ft=300.0, xf_ft=380.0, hf_ft=220.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8200.0),
+    "Cordova Embayment (Gas)": dict(L_ft=7800.0, stage_spacing_ft=260.0, xf_ft=330.0, hf_ft=190.0, Rs_pb_scf_stb=20.0, pb_psi=1000.0, Bo_pb_rb_stb=1.02, p_init_psi=7000.0),
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
+
+# ... (The rest of the app.py file remains the same) ...
 
 # ------------------------ ALL HELPER FUNCTIONS (DEFINED BEFORE USE) ------------------------
 def Rs_of_p(p, pb, Rs_pb):
@@ -226,20 +225,75 @@ with st.sidebar:
     st.markdown("## Play Preset")
     model_choice = st.selectbox("Model", ["3D Unconventional Reservoir Simulator — Implicit Engine Ready","3D Black Oil Reservoir Simulator — Implicit Engine Ready"], key="sim_mode")
     st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
-    play = st.selectbox("Shale play", list(PLAY_PRESETS.keys()), index=0, key="play_sel")
+    play = st.selectbox("Shale play", PLAY_LIST, index=0, key="play_sel")
     if st.button("Apply preset", use_container_width=True):
         payload = defaults.copy(); payload.update(PLAY_PRESETS[st.session_state.play_sel])
         if st.session_state.fluid_model == "black_oil": payload.update(dict(Rs_pb_scf_stb=0.0,pb_psi=1.0,Bo_pb_rb_stb=1.00,mug_pb_cp=0.020,a_g=0.15,p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),pad_ctrl="BHP",pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0)))
         st.session_state.sim, st.session_state.apply_preset_payload = None, payload
         _safe_rerun()
-    # (The rest of the sidebar controls from your original file are included here)
+
+    st.markdown("### Grid (ft)")
+    c1,c2,c3 = st.columns(3); st.number_input("nx",10,500,key="nx"); st.number_input("ny",10,500,key="ny"); st.number_input("nz",1,200,key="nz")
+    c1,c2,c3 = st.columns(3); st.number_input("dx (ft)",step=1.0,key="dx"); st.number_input("dy (ft)",step=1.0,key="dy"); st.number_input("dz (ft)",step=1.0,key="dz")
+
+    st.markdown("### Heterogeneity & Anisotropy")
+    st.selectbox("Facies style", ["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"], key="facies_style")
+    st.slider("k stdev (mD around 0.02)",0.0,0.20,float(st.session_state.k_stdev),0.01,key="k_stdev")
+    st.slider("ϕ stdev",0.0,0.20,float(st.session_state.phi_stdev),0.01,key="phi_stdev")
+    st.slider("Anisotropy kx/ky",0.5,3.0,float(st.session_state.anis_kxky),0.05,key="anis_kxky")
+
+    st.markdown("### Faults")
+    st.checkbox("Enable fault TMULT",value=bool(st.session_state.use_fault),key="use_fault")
+    st.selectbox("Fault plane",["i-plane (vertical)","j-plane (vertical)"],index=0,key="fault_plane")
+    st.number_input("Plane index",1,max(1,int(st.session_state.nx)-2),int(st.session_state.fault_index),1,key="fault_index")
+    st.number_input("Transmissibility multiplier",value=float(st.session_state.fault_tm),step=0.01,key="fault_tm")
+
+    st.markdown("### Pad / Wellbore & Frac")
+    st.number_input("Laterals",1,6,int(st.session_state.n_laterals),1,key="n_laterals")
+    st.number_input("Lateral length (ft)",value=float(st.session_state.L_ft),step=50.0,key="L_ft")
+    st.number_input("Stage spacing (ft)",value=float(st.session_state.stage_spacing_ft),step=5.0,key="stage_spacing_ft")
+    st.number_input("Clusters per stage",1,12,int(st.session_state.clusters_per_stage),1,key="clusters_per_stage")
+    st.number_input("Δp limited-entry (psi)",value=float(st.session_state.dP_LE_psi),step=5.0,key="dP_LE_psi")
+    st.number_input("Wellbore friction factor (pseudo)",value=float(st.session_state.f_fric),step=0.005,key="f_fric")
+    st.number_input("Wellbore ID (ft)",value=float(st.session_state.wellbore_ID_ft),step=0.01,key="wellbore_ID_ft")
+    st.number_input("Frac half-length xf (ft)",value=float(st.session_state.xf_ft),step=5.0,key="xf_ft")
+    st.number_input("Frac height hf (ft)",value=float(st.session_state.hf_ft),step=5.0,key="hf_ft")
+    st.slider("Pad interference coeff.",0.00,0.80,float(st.session_state.pad_interf),0.01,key="pad_interf")
+
+    st.markdown("### Controls & Boundary")
+    st.selectbox("Pad control",["BHP","RATE"],index=0,key="pad_ctrl")
+    st.number_input("Pad BHP (psi)",value=float(st.session_state.pad_bhp_psi),step=10.0,key="pad_bhp_psi")
+    st.number_input("Pad RATE (Mscf/d)",value=float(st.session_state.pad_rate_mscfd),step=1000.0,key="pad_rate_mscfd")
+    st.selectbox("Outer boundary",["Infinite-acting","Constant-p"],index=0,key="outer_bc")
+    st.number_input("Boundary pressure (psi)",value=float(st.session_state.p_outer_psi),step=10.0,key="p_outer_psi")
+
+    st.markdown("### DFN (Discrete Fracture Network)")
+    st.checkbox("Use DFN-driven sink in solver",value=bool(st.session_state.use_dfn_sink),key="use_dfn_sink")
+    st.checkbox("Auto-generate DFN from stages when no upload",value=bool(st.session_state.use_auto_dfn),key="use_auto_dfn")
+    st.number_input("DFN influence radius (ft)",value=float(st.session_state.dfn_radius_ft),step=5.0,key="dfn_radius_ft")
+    st.number_input("DFN sink strength (psi)",value=float(st.session_state.dfn_strength_psi),step=10.0,key="dfn_strength_psi")
+    dfn_up = st.file_uploader("Upload DFN CSV: x0,y0,z0,x1,y1,z1[,k_mult,aperture_ft]",type=["csv"],key="dfn_csv")
+    c1,c2 = st.columns(2)
+    with c1:
+        if st.button("Load DFN from CSV"):
+            try:
+                if dfn_up is None: st.warning("Please choose a DFN CSV first.")
+                else:
+                    st.session_state.dfn_segments = parse_dfn_csv(dfn_up)
+                    st.success(f"Loaded DFN segments: {len(st.session_state.dfn_segments)}")
+            except Exception as e: st.error(f"DFN parse error: {e}")
+    with c2:
+        if st.button("Generate DFN from stages"):
+            segs = gen_auto_dfn_from_stages(int(st.session_state.nx),int(st.session_state.ny),int(st.session_state.nz), float(st.session_state.dx),float(st.session_state.dy),float(st.session_state.dz), float(st.session_state.L_ft),float(st.session_state.stage_spacing_ft), int(st.session_state.n_laterals),float(st.session_state.hf_ft))
+            st.session_state.dfn_segments = segs
+            st.success(f"Auto-generated DFN segments: {0 if segs is None else len(segs)}")
 
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 tab_names = ["Setup Preview","Generate 3D property volumes (kx, ky, ϕ)","PVT (Black-Oil)","MSW Wellbore","RTA","Results","3D Viewer","Slice Viewer","QA / Material Balance","EUR vs Lateral Length","Field Match (CSV)","Uncertainty & Monte Carlo","User’s Manual","Solver & Profiling","DFN Viewer"]
 tabs = st.tabs(tab_names)
 
-with tabs[0]: st.header("Setup Preview") # INDEX 0 (Tab 1)
-with tabs[1]: # INDEX 1 (Tab 2)
+with tabs[0]: st.header("Setup Preview") # INDEX 0
+with tabs[1]: # INDEX 1
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("**Interpretation:** These maps represent the spatial distribution of key reservoir properties...")
     rng = np.random.default_rng(int(st.session_state.rng_seed))
@@ -252,7 +306,7 @@ with tabs[1]: # INDEX 1 (Tab 2)
     with c2: st.plotly_chart(px.imshow(ky_mid,origin="lower",color_continuous_scale="Cividis",labels=dict(color="mD"),title="<b>Figure 3. ky — mid-layer (mD)</b>"),use_container_width=True,theme=None)
     st.plotly_chart(px.imshow(phi_mid,origin="lower",color_continuous_scale="Magma",labels=dict(color="ϕ"),title="<b>Figure 4. Porosity ϕ — mid-layer (fraction)</b>"),use_container_width=True,theme=None)
 
-with tabs[2]: # INDEX 2 (Tab 3)
+with tabs[2]: # INDEX 2
     st.header("PVT (Black-Oil) Analysis")
     st.info("**Interpretation:** These charts describe how the fluid properties change with pressure...")
     P = np.linspace(max(1000,state["p_min_bhp_psi"]),max(2000,state["p_init_psi"]+1000),120)
@@ -262,9 +316,8 @@ with tabs[2]: # INDEX 2 (Tab 3)
     f3=go.Figure();f3.add_trace(go.Scatter(x=P,y=Bg,line=dict(color="steelblue",width=3)));f3.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f3.update_layout(template="plotly_white",title="<b>P3. Gas FVF Bg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Bg (rb/scf)");st.plotly_chart(f3,use_container_width=True)
     f4=go.Figure();f4.add_trace(go.Scatter(x=P,y=mug,line=dict(color="mediumpurple",width=3)));f4.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f4.update_layout(template="plotly_white",title="<b>P4. Gas viscosity μg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="μg (cP)");st.plotly_chart(f4,use_container_width=True)
 
-with tabs[3]: st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry") # INDEX 3 (Tab 4)
-
-with tabs[4]: # INDEX 4 (Tab 5)
+with tabs[3]: st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry") # INDEX 3
+with tabs[4]: # INDEX 4
     st.header("RTA — Quick Diagnostics")
     st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes...")
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
@@ -276,23 +329,23 @@ with tabs[4]: # INDEX 4 (Tab 5)
     slope = np.gradient(logq, logt)
     fig2 = go.Figure(); fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt")); fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope")); st.plotly_chart(fig2, use_container_width=True)
 
-with tabs[5]: # INDEX 5 (Tab 6)
+with tabs[5]: # INDEX 5
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary"):
         with st.spinner("Running full 3D simulation..."): st.session_state.sim = run_simulation(state)
     if st.session_state.sim: st.success(f"Simulation complete in {st.session_state.sim.get('runtime_s', 0):.2f} seconds.")
     else: st.info("Click **Run simulation** to compute full results.")
 
-with tabs[6]: st.header("3D Viewer — Pressure / Saturations (Isosurface/Volume)") # INDEX 6 (Tab 7)
-with tabs[7]: st.header("Slice Viewer — k / i / j slices") # INDEX 7 (Tab 8)
-with tabs[8]: st.header("QA / Material Balance") # INDEX 8 (Tab 9)
-with tabs[9]: st.header("Sensitivity: EUR vs Lateral Length") # INDEX 9 (Tab 10)
-with tabs[10]: st.header("Field Match (CSV)") # INDEX 10 (Tab 11)
-with tabs[11]: st.header("Uncertainty & Monte Carlo") # INDEX 11 (Tab 12)
-with tabs[12]: st.header("User’s Manual") # INDEX 12 (Tab 13)
-with tabs[13]: st.header("Solver & Profiling") # INDEX 13 (Tab 14)
+with tabs[6]: st.header("3D Viewer") # INDEX 6
+with tabs[7]: st.header("Slice Viewer") # INDEX 7
+with tabs[8]: st.header("QA / Material Balance") # INDEX 8
+with tabs[9]: st.header("Sensitivity: EUR vs Lateral Length") # INDEX 9
+with tabs[10]: st.header("Field Match (CSV)") # INDEX 10
+with tabs[11]: st.header("Uncertainty & Monte Carlo") # INDEX 11
+with tabs[12]: st.header("User’s Manual") # INDEX 12
+with tabs[13]: st.header("Solver & Profiling") # INDEX 13
 
-with tabs[14]: # INDEX 14 (Tab 15)
+with tabs[14]: # INDEX 14 (The 15th Tab)
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.dfn_segments
     if segs is None or len(segs) == 0:
