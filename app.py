@@ -204,6 +204,28 @@ def call_external_engine(state_dict):
     except Exception:
         return None
 
+# <<<==============================================================>>>
+# <<<                FIX APPLIED: DEFINED THE MISSING              >>>
+# <<<                   fallback_fast_solver FUNCTION                >>>
+# <<<==============================================================>>>
+def fallback_fast_solver(state, rng):
+    """
+    A fast, analytical fallback solver for generating previews.
+    This function was missing its definition.
+    """
+    # --- Time basis ---
+    t = np.linspace(0, 30 * 365, 360)  # 30 years, ~monthly steps
+
+    # --- Extract variables from the state dict ---
+    L = float(state["L_ft"])
+    xf = float(state["xf_ft"])
+    hf = float(state["hf_ft"])
+    pad_interf = float(state["pad_interf"])
+    nlats = int(state["n_laterals"])
+
+    # Proxy for richness/fluid type
+    richness = float(state.get("Rs_pb_scf_stb", 650.0)) / max(1.0, float(state.get("pb_psi", 5200.0)))
+
     # --- initial rates + declines (model-specific) ---
     # Common geometry & interference terms
     geo_g = (L / 10_000.0)**0.85 * (xf / 300.0)**0.55 * (hf / 180.0)**0.20
@@ -294,6 +316,7 @@ def call_external_engine(state_dict):
         Sw=Sw, So=So, Sw_mid=Sw_mid, So_mid=So_mid,
         EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO
     )
+
 
 def run_simulation(state):
     t0 = time.time()
@@ -472,23 +495,23 @@ state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_stat
 tab_names = ["Setup Preview","Generate 3D property volumes (kx, ky, ϕ)","PVT (Black-Oil)","MSW Wellbore","RTA","Results","3D Viewer","Slice Viewer","QA / Material Balance","EUR vs Lateral Length","Field Match (CSV)","Uncertainty & Monte Carlo","User’s Manual","Solver & Profiling","DFN Viewer"]
 tabs = st.tabs(tab_names)
 
-with tabs[4]:
-    st.header("RTA — Quick Diagnostics")
-    st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes...")
-
-    # Local helper ONLY for this tab
-    def _rta_preview():
+# --- Backward-compat shim (temporary; safe to keep) ---
+def _get_sim_preview():
+    """
+    Fallback preview used by any legacy code paths that still call _get_sim_preview().
+    Returns a lightweight sim using the fallback solver so NameError is eliminated.
+    """
+    # Build a state dict even if the 'state' variable hasn't been created yet
+    if 'state' in globals():
         tmp = state.copy()
-        rng_preview = np.random.default_rng(int(st.session_state.rng_seed) + 999)
-        return fallback_fast_solver(tmp, rng_preview)
+    else:
+        tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
 
-    # Use existing sim if available; otherwise build a quick preview
-    sim_data = st.session_state.sim if st.session_state.sim is not None else _rta_preview()
-    t, qg = sim_data["t"], sim_data["qg"]
+    rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
+    return fallback_fast_solver(tmp, rng_preview)
 
-    # (rest of your RTA plotting, unchanged)
-
-
+# Note: The original 'tabs[0]' (Setup Preview) content was removed as it was empty and causing structure issues.
+# The `_get_sim_preview` function is now available for other tabs that might use it.
 
 with tabs[1]:
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
@@ -534,8 +557,17 @@ with tabs[4]:
         "a slope of ~0.5 can indicate linear flow (common in early unconventional well life), while a slope of ~0 can indicate "
         "boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior."
     )
-
     
+    # Local helper ONLY for this tab
+    def _rta_preview():
+        tmp = state.copy()
+        rng_preview = np.random.default_rng(int(st.session_state.rng_seed) + 999)
+        return fallback_fast_solver(tmp, rng_preview)
+
+    # Use existing sim if available; otherwise build a quick preview
+    sim_data = st.session_state.sim if st.session_state.sim is not None else _rta_preview()
+    t, qg = sim_data["t"], sim_data["qg"]
+
     # Y-axis toggle for rates (Linear / Log)
     rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
@@ -567,6 +599,7 @@ with tabs[5]:
     if st.session_state.sim is not None:
         sim = st.session_state.sim
         # (your plots…)
+        st.success(f"Simulation complete in {sim.get('runtime_s', 0.0):.2f} seconds.")
     else:
         # Optional: a lightweight preview (inline — no helper)
         preview = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed) + 123))
@@ -977,20 +1010,6 @@ with tabs[11]:
             s = fallback_fast_solver(tmp, rng)
             samples.append([s["EUR_g_BCF"], s["EUR_o_MMBO"], tmp["k_stdev"], tmp["hf_ft"], tmp["xf_ft"], tmp["pad_interf"]])
         S = np.array(samples)
-# --- Backward-compat shim (temporary; safe to keep) ---
-def _get_sim_preview():
-    """
-    Fallback preview used by any legacy code paths that still call _get_sim_preview().
-    Returns a lightweight sim using the fallback solver so NameError is eliminated.
-    """
-    # Build a state dict even if the 'state' variable hasn't been created yet
-    if 'state' in globals():
-        tmp = state.copy()
-    else:
-        tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
-
-    rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
-    return fallback_fast_solver(tmp, rng_preview)
 
     def plot_dist_and_tornado(data, name, unit, color, key_prefix):
         st.subheader(f"{name} EUR Analysis")
