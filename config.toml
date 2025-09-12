@@ -1,0 +1,13 @@
+[theme]
+base="light"
+
+[server]
+headless=true
+enableXsrfProtection=true
+runOnSave=false
+
+[client]
+toolbarMode="minimal"
+
+[ui]
+hideTopBar=false
