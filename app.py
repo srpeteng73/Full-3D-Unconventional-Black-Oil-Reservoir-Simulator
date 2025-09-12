@@ -177,7 +177,7 @@ def fallback_fast_solver(state, rng):
         Di_g_yr, b_g, Di_o_yr, b_o = 0.45, 0.80, 0.42, 0.95
     Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0
     qg, qo = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g), qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
-    EUR_g_BCF, EUR_o_MMBO = np.trapz(qg, t) / 1e6, np.trapz(qo, t) / 1e6
+    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6 # FIXED: trapz -> trapezoid
     return dict(t=t, qg=qg, qo=qo, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 
 def _get_sim_preview():
@@ -193,7 +193,7 @@ def run_full_3d_simulation(state):
     except Exception as e: st.error(f"Error in full3d.py engine: {e}"); return None
     t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
     if t is None or qg is None or qo is None: st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd)."); return None
-    EUR_g_BCF, EUR_o_MMBO = np.trapz(qg, t)/1e6, np.trapz(qo, t)/1e6
+    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6 # FIXED: trapz -> trapezoid
     return {'t':t,'qg':qg,'qo':qo,'press_matrix':engine_results.get('p3d_psi'),'press_frac_mid':engine_results.get('pf_mid_psi'),'press_matrix_mid':engine_results.get('pm_mid_psi'),'Sw_mid':engine_results.get('Sw_mid'),'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0}
 
 def run_simulation(state):
