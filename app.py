@@ -1,4 +1,3 @@
-%%writefile app.py
 # Cell #2 — Streamlit app (full replacement)
 # Full 3D Unconventional / Black-Oil Reservoir Simulator — Implicit Engine Ready (USOF units) + DFN support
 import time
