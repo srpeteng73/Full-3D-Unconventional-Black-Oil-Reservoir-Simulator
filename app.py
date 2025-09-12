@@ -474,30 +474,86 @@ tabs = st.tabs(tab_names)
 
 with tabs[0]:
     st.header("Figure 1. Mid-Layer Pad Layout")
-    st.info("**Interpretation:** This view shows the well laterals (gray), stimulation stages (red), and hydraulic fracture geometry (blue). Stage density and frac geometry (xf, hf) control the early-time drainage near the fractures. The SRV overlay provides a quick visual of the approximate stimulated rock volume.")
-    nx,ny = int(state["nx"]),int(state["ny"])
-    Lcells = int(state["L_ft"]/max(state["dx"],1.0))
-    n_stages = max(1, int(state["L_ft"]/max(state["stage_spacing_ft"],1.0)))
-    lat_rows = [ny//3, 2*ny//3] if int(state["n_laterals"]) >= 2 else [ny//2]
-    show_srv = st.checkbox("Show SRV overlay",value=False,key="show_srv_preview")
-    fig = go.Figure()
+    st.info(
+        "**Interpretation:** This view shows the well laterals (gray), stimulation stages (red), "
+        "and hydraulic fracture geometry (blue). Stage density and frac geometry (xf, hf) control "
+        "the early-time drainage near the fractures. The SRV overlay provides a quick visual of "
+        "the approximate stimulated rock volume."
+    )
+
+    # --- Geometry derived from current state (no simulation calls here) ---
+    nx, ny = int(state["nx"]), int(state["ny"])
+    Lcells = int(state["L_ft"] / max(state["dx"], 1.0))
+    n_stages = max(1, int(state["L_ft"] / max(state["stage_spacing_ft"], 1.0)))
+    lat_rows = [ny // 3, 2 * ny // 3] if int(state["n_laterals"]) >= 2 else [ny // 2]
+
+    show_srv = st.checkbox("Show SRV overlay", value=False, key="show_srv_preview")
+
+    fig_preview = go.Figure()
     stage_xs_all = []
+
+    # Laterals and stage markers
     for jr in lat_rows:
-        fig.add_trace(go.Scatter(x=[5,max(6,Lcells-5)],y=[jr,jr],mode="lines",line=dict(color="grey",width=8),showlegend=False))
-        xs = np.linspace(5,max(6,Lcells-5),n_stages)
+        fig_preview.add_trace(
+            go.Scatter(
+                x=[5, max(6, Lcells - 5)],
+                y=[jr, jr],
+                mode="lines",
+                line=dict(color="grey", width=8),
+                showlegend=False,
+            )
+        )
+        xs = np.linspace(5, max(6, Lcells - 5), n_stages)
         stage_xs_all.append(xs)
-        fig.add_trace(go.Scatter(x=xs,y=jr*np.ones_like(xs),mode="markers",marker=dict(color="firebrick",size=10,symbol="square"),name="Stages" if jr==lat_rows[0] else None,showlegend=(jr==lat_rows[0])))
-    dx,dy = float(state["dx"]),float(state["dy"])
-    xf_cells,hf_cells = float(state["xf_ft"])/max(dx,1e-6), float(state["hf_ft"])/max(dy,1e-6)
-    half_h = hf_cells/2.0
-    for xs,jr in zip(stage_xs_all,lat_rows):
+        fig_preview.add_trace(
+            go.Scatter(
+                x=xs,
+                y=jr * np.ones_like(xs),
+                mode="markers",
+                marker=dict(color="firebrick", size=10, symbol="square"),
+                name="Stages" if jr == lat_rows[0] else None,
+                showlegend=(jr == lat_rows[0]),
+            )
+        )
+
+    # Frac rectangles (+ optional SRV)
+    dx, dy = float(state["dx"]), float(state["dy"])
+    xf_cells = float(state["xf_ft"]) / max(dx, 1e-6)
+    hf_cells = float(state["hf_ft"]) / max(dy, 1e-6)
+    half_h = hf_cells / 2.0
+
+    for xs, jr in zip(stage_xs_all, lat_rows):
         for xi in xs:
-            x0,x1 = max(0,xi-xf_cells),min(Lcells,xi+xf_cells)
-            y0,y1 = max(0,jr-half_h),min(ny,jr+half_h)
-            fig.add_shape(type="rect",x0=x0,x1=x1,y0=y0,y1=y1,line=dict(color="rgba(30,144,255,0.6)",width=1),fillcolor="rgba(30,144,255,0.12)")
-            if show_srv: fig.add_shape(type="rect",x0=max(0,x0-0.2*xf_cells),x1=min(Lcells,x1+0.2*xf_cells),y0=max(0,y0-0.2*hf_cells),y1=min(ny,y1+0.2*hf_cells),line=dict(color="rgba(0,0,255,0.3)",width=1,dash="dot"),fillcolor="rgba(0,0,255,0.06)")
-    fig.update_layout(template="plotly_white",height=480,xaxis_title="i (cells)",yaxis_title="j (cells)",title="<b>Mid-layer pad layout (grey=laterals, red=stages, blue=frac rectangles)</b>")
-    st.plotly_chart(fig,use_container_width=True)
+            x0, x1 = max(0, xi - xf_cells), min(Lcells, xi + xf_cells)
+            y0, y1 = max(0, jr - half_h), min(ny, jr + half_h)
+            # frac rectangle
+            fig_preview.add_shape(
+                type="rect",
+                x0=x0, x1=x1, y0=y0, y1=y1,
+                line=dict(color="rgba(30,144,255,0.6)", width=1),
+                fillcolor="rgba(30,144,255,0.12)",
+            )
+            # optional SRV
+            if show_srv:
+                fig_preview.add_shape(
+                    type="rect",
+                    x0=max(0, x0 - 0.2 * xf_cells),
+                    x1=min(Lcells, x1 + 0.2 * xf_cells),
+                    y0=max(0, y0 - 0.2 * hf_cells),
+                    y1=min(ny, y1 + 0.2 * hf_cells),
+                    line=dict(color="rgba(0,0,255,0.3)", width=1, dash="dot"),
+                    fillcolor="rgba(0,0,255,0.06)",
+                )
+
+    fig_preview.update_layout(
+        template="plotly_white",
+        height=480,
+        xaxis_title="i (cells)",
+        yaxis_title="j (cells)",
+        title="<b>Mid-layer pad layout (grey=laterals, red=stages, blue=frac rectangles)</b>",
+    )
+    st.plotly_chart(fig_preview, use_container_width=True, key="setup_preview_fig")
+
 
 with tabs[1]:
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
