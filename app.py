@@ -597,18 +597,15 @@ with tabs[4]:
         "boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior."
     )
 
-    
     # Y-axis toggle for rates (Linear / Log)
     rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
-
     # R1. Gas rate (q) vs time (x is already log in the layout helper)
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
     fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
     fig.update_yaxes(type=y_type_rta)
     st.plotly_chart(fig, use_container_width=True, key="rta_rate_plot")
-
     # R2. Log-log derivative (keep linear y for slope clarity)
     logt = np.log10(np.maximum(t, 1e-9))
     logq = np.log10(np.maximum(qg, 1e-9))
@@ -618,16 +615,12 @@ with tabs[4]:
     fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt"))
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True, key="rta_deriv_plot")
-
-
 with tabs[5]:
     st.header("Simulation Results")
-
     # Run button
     if st.button("Run simulation", type="primary"):
         with st.spinner("Running simulation..."):
             st.session_state.sim = run_simulation(state)
-
     # Only draw results if a run exists
     sim = st.session_state.get("sim", None)
     if sim is None:
@@ -647,7 +640,6 @@ with tabs[5]:
             st.plotly_chart(g_g, use_container_width=True, key="res_gauge_gas")
         with c2:
             st.plotly_chart(o_g, use_container_width=True, key="res_gauge_oil")
-
         # Rate axis toggle
         rate_y_mode_results = st.radio(
             "Rate y-axis (Results)", ["Linear", "Log"], index=0, horizontal=True, key="results_rate_y_mode"
