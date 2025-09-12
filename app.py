@@ -468,7 +468,19 @@ with tabs[5]:
         fig_rate = go.Figure()
         fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], name="Gas Rate", line=dict(color="#d62728"), yaxis="y1"))
         fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], name="Oil Rate", line=dict(color="#2ca02c"), yaxis="y2"))
-        fig_rate.update_layout(**semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)"), yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728"), yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False))
+        
+        # --- THIS IS THE CORRECTED SECTION ---
+        # 1. Get the base layout from the helper function
+        layout_config = semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)")
+        
+        # 2. Update the layout with specific settings for the dual-axis chart
+        layout_config.update(
+            yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728"),
+            yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False)
+        )
+        
+        # 3. Apply the final, consolidated layout
+        fig_rate.update_layout(layout_config)
         st.plotly_chart(fig_rate, use_container_width=True)
 
         c1_res, c2_res = st.columns(2)
@@ -486,7 +498,6 @@ with tabs[5]:
             fig_cum.update_layout(**semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)"), xaxis_type="linear", yaxis=dict(title="Cumulative Gas (BCF)"), yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False))
             st.plotly_chart(fig_cum, use_container_width=True)
     else: st.info("Click **Run simulation** to compute and display the full 3D results.")
-
 with tabs[6]:
     st.header("3D Viewer")
     st.info("**Interpretation:** Visualize reservoir properties and simulation results in 3D. Use the options below to select the data and adjust the view. High-resolution volumes can be slow to render.")
