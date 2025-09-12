@@ -480,7 +480,7 @@ with tabs[0]:
         "drainage near the fractures. The SRV overlay provides a quick visual of the approximate stimulated rock volume."
     )
 
-    # --- Geometry-only drawing (no simulation dependency) ---
+    # --- Geometry-only drawing (no simulation dependency; no _get_sim_preview here) ---
     nx, ny = int(state["nx"]), int(state["ny"])
     dx, dy = float(state["dx"]), float(state["dy"])
 
