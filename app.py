@@ -605,10 +605,10 @@ with tabs[4]:
     fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
     fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
     fig.update_yaxes(type=y_type_rta)
-    st.plotly_chart(fig, use_container_width=True, key="rta_rate_plot")
+   
     # R2. Log-log derivative (keep linear y for slope clarity)
     logt = np.log10(np.maximum(t, 1e-9))
-    logq = np.log10(np.maximum(qg, 1e-9))
+    
     slope = np.gradient(logq, logt)
 
     fig2 = go.Figure()
