@@ -285,14 +285,27 @@ with tabs[0]: st.header("Setup Preview")
 with tabs[1]:
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("**Interpretation:** These maps represent the spatial distribution of key reservoir properties...")
-    # (Full tab content)
+    rng = np.random.default_rng(int(st.session_state.rng_seed))
+    nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
+    kx_mid,ky_mid,phi_mid = 0.05+state["k_stdev"]*rng.standard_normal((ny,nx)),(0.05/state["anis_kxky"])+state["k_stdev"]*rng.standard_normal((ny,nx)),0.10+state["phi_stdev"]*rng.standard_normal((ny,nx))
+    kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]
+    st.session_state.kx,st.session_state.ky,st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None),np.clip(ky_mid[None,...]*kz_scale,1e-4,None),np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
+    c1,c2=st.columns(2)
+    with c1: st.plotly_chart(px.imshow(kx_mid,origin="lower",color_continuous_scale="Viridis",labels=dict(color="mD"),title="<b>Figure 2. kx — mid-layer (mD)</b>"),use_container_width=True,theme=None)
+    with c2: st.plotly_chart(px.imshow(ky_mid,origin="lower",color_continuous_scale="Cividis",labels=dict(color="mD"),title="<b>Figure 3. ky — mid-layer (mD)</b>"),use_container_width=True,theme=None)
+    st.plotly_chart(px.imshow(phi_mid,origin="lower",color_continuous_scale="Magma",labels=dict(color="ϕ"),title="<b>Figure 4. Porosity ϕ — mid-layer (fraction)</b>"),use_container_width=True,theme=None)
+
 with tabs[2]:
     st.header("PVT (Black-Oil) Analysis")
     st.info("**Interpretation:** These charts describe how the fluid properties change with pressure...")
-    # (Full tab content)
-with tabs[3]:
-    st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
-    st.info("This chart shows pseudo-frictional pressure drop from heel to toe...")
+    P = np.linspace(max(1000,state["p_min_bhp_psi"]),max(2000,state["p_init_psi"]+1000),120)
+    Rs,Bo,Bg,mug = Rs_of_p(P,state["pb_psi"],state["Rs_pb_scf_stb"]),Bo_of_p(P,state["pb_psi"],state["Bo_pb_rb_stb"]),Bg_of_p(P),mu_g_of_p(P,state["pb_psi"],state["mug_pb_cp"])
+    f1=go.Figure();f1.add_trace(go.Scatter(x=P,y=Rs,line=dict(color="firebrick",width=3)));f1.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2,annotation_text="Bubble Point");f1.update_layout(template="plotly_white",title="<b>P1. Solution GOR Rs vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Rs (scf/STB)");st.plotly_chart(f1,use_container_width=True)
+    f2=go.Figure();f2.add_trace(go.Scatter(x=P,y=Bo,line=dict(color="seagreen",width=3)));f2.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2,annotation_text="Bubble Point");f2.update_layout(template="plotly_white",title="<b>P2. Oil FVF Bo vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Bo (rb/STB)");st.plotly_chart(f2,use_container_width=True)
+    f3=go.Figure();f3.add_trace(go.Scatter(x=P,y=Bg,line=dict(color="steelblue",width=3)));f3.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f3.update_layout(template="plotly_white",title="<b>P3. Gas FVF Bg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Bg (rb/scf)");st.plotly_chart(f3,use_container_width=True)
+    f4=go.Figure();f4.add_trace(go.Scatter(x=P,y=mug,line=dict(color="mediumpurple",width=3)));f4.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f4.update_layout(template="plotly_white",title="<b>P4. Gas viscosity μg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="μg (cP)");st.plotly_chart(f4,use_container_width=True)
+
+with tabs[3]: st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
 with tabs[4]:
     st.header("RTA — Quick Diagnostics")
     st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes...")
@@ -310,36 +323,23 @@ with tabs[5]:
         with st.spinner("Running full 3D simulation..."): st.session_state.sim = run_simulation(state)
     if st.session_state.sim: st.success(f"Simulation complete in {st.session_state.sim.get('runtime_s', 0):.2f} seconds.")
     else: st.info("Click **Run simulation** to compute full results.")
-with tabs[6]:
-    st.header("3D Viewer")
-    if st.session_state.sim is None: st.info("Run a simulation to view 3D volumes.")
-    else: st.info("**Interpretation:** This tool visualizes the 3D distribution of pressure or fluid saturations...")
-with tabs[7]:
-    st.header("Slice Viewer")
-    if st.session_state.sim is None: st.info("Run a simulation to view slices.")
-    else: st.info("**Interpretation:** This tool lets you inspect 2D cross-sections of the 3D data volumes...")
-with tabs[8]:
-    st.header("QA / Material Balance")
-    if st.session_state.sim is not None: st.info("**Interpretation:** These plots check for material balance closure...")
-    else: st.info("Run a simulation to view the Material Balance plots.")
-with tabs[9]:
-    st.header("Sensitivity: EUR vs Lateral Length")
-    st.info("Dual view: the Dual Axis tab gives a compact overview, while Stacked Panels separates the series for maximum readability.")
-with tabs[10]:
-    st.header("Field Match (CSV)")
-    st.info("Upload a CSV with historical production...")
-    up = st.file_uploader("Upload CSV", type=["csv"], key="field_csv_uploader")
-    if up is None: st.warning("Upload a CSV to run the history match.")
-with tabs[11]:
-    st.header("Uncertainty & Monte Carlo")
-    st.info("**Interpretation:** This tab runs a Monte Carlo simulation...")
-with tabs[12]:
-    st.header("User’s Manual")
-    st.markdown("""**Overview:** This application supports full 3D arrays...""")
-with tabs[13]:
-    st.header("Solver & Profiling")
-    st.info("**Interpretation:** Advanced controls for numerical solver tolerances and performance flags.")
+with tabs[6]: st.header("3D Viewer")
+with tabs[7]: st.header("Slice Viewer")
+with tabs[8]: st.header("QA / Material Balance")
+with tabs[9]: st.header("Sensitivity: EUR vs Lateral Length")
+with tabs[10]: st.header("Field Match (CSV)")
+with tabs[11]: st.header("Uncertainty & Monte Carlo")
+with tabs[12]: st.header("User’s Manual")
+with tabs[13]: st.header("Solver & Profiling")
 with tabs[14]:
     st.header("DFN Viewer — 3D line segments")
-    if st.session_state.dfn_segments is None: st.info("No DFN loaded.")
-    else: st.info("**Interpretation:** Displays the DFN as 3D line segments for QC.")
+    segs = st.session_state.dfn_segments
+    if segs is None or len(segs) == 0:
+        st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
+    else:
+        st.info("**Interpretation:** Displays the DFN as 3D line segments for QC.")
+        figd = go.Figure()
+        for i, seg in enumerate(segs):
+            figd.add_trace(go.Scatter3d(x=[seg[0], seg[3]], y=[seg[1], seg[4]], z=[seg[2], seg[5]], mode="lines", line=dict(width=6, color="red"), name="DFN" if i == 0 else None, showlegend=(i == 0)))
+        figd.update_layout(template="plotly_white", scene=dict(xaxis_title="x (ft)", yaxis_title="y (ft)", zaxis_title="z (ft)"), height=640, margin=dict(l=0, r=0, t=40, b=0))
+        st.plotly_chart(figd, use_container_width=True)
