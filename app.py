@@ -597,20 +597,7 @@ with tabs[4]:
         "boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior."
     )
 
-    # --- Local helper to build a preview sim if no full sim has been run yet ---
-    def _get_sim_preview():
-        """
-        Make a small, deterministic preview simulation for RTA when the user hasn't run the full sim yet.
-        Uses the fallback solver with a fixed RNG so the preview is stable across reruns.
-        """
-        tmp = state.copy()
-        rng_preview = np.random.default_rng(int(st.session_state.rng_seed) + 999)
-        return fallback_fast_solver(tmp, rng_preview)
-
-    # Use existing sim if available; otherwise build a quick preview
-    sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
-    t, qg = sim_data["t"], sim_data["qg"]
-
+    
     # Y-axis toggle for rates (Linear / Log)
     rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
