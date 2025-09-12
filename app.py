@@ -1,4 +1,4 @@
-#%%writefile app.py
+%%writefile app.py
 # Cell #2 — Streamlit app (full replacement)
 # Full 3D Unconventional / Black-Oil Reservoir Simulator — Implicit Engine Ready (USOF units) + DFN support
 import time
@@ -205,108 +205,86 @@ def call_external_engine(state_dict):
     except Exception:
         return None
 
-# ------------------------ Fallback Solver (UPDATED) ------------------------
+# ------------------------ Fallback Solver (MODE-AWARE) ------------------------
 def fallback_fast_solver(state, rng):
     """
-    Lightweight, unit-consistent surrogate. Designed to be conservative and avoid runaway EURs.
-    - qi_g and qi_o scale sub-linearly with geometry
-    - pad_interf reduces (not increases) rates
-    - gentle hyperbolic decline with caps
+    Fast synthetic production + 3D fields generator.
+    Mode-aware (unconventional vs black-oil) via st.session_state.fluid_model.
     """
-    # time vector
-    t = np.geomspace(1.0, 5500.0, 280)  # [days]
+    t = np.geomspace(1, 5500, 280)
 
-    # geometry & controls
-    L = float(state["L_ft"])
-    xf = float(state["xf_ft"])
-    hf = float(state["hf_ft"])
-    nlats = int(state["n_laterals"])
-    pad_interf = float(state["pad_interf"])
-    richness = float(state["Rs_pb_scf_stb"]) / 650.0  # 0~1+ proxy for volatile richness
+    # Geometry / scaling
+    L, xf, hf = float(state["L_ft"]), float(state["xf_ft"]), float(state["hf_ft"])
+    pad_interf, nlats = float(state["pad_interf"]), int(state["n_laterals"])
+    richness = float(state.get("Rs_pb_scf_stb", 0.0)) / 650.0  # 0 for black-oil, ~1 for volatile
+    interf = (1 + 0.25*pad_interf) * (1 + 0.1*(nlats-1))
 
-    # --- initial rates (sub-linear scalings + interference reduces rates) ---
-    # Baselines roughly in today’s Permian-style wells for a single lateral
-    qi_g_base = 15_000.0   # Mscf/d
-    qi_o_base = 1_500.0    # STB/d
+    # --- key change: mode-aware initial rates + decline exponents ---
+    fluid_model = st.session_state.get("fluid_model", "unconventional")
+    if fluid_model == "black_oil":
+        # Oil-dominant with modest associated gas
+        qi_o = 1800.0 * (L/10_000.0) * (hf/180.0) * (1.00 + 0.10*richness) * interf
+        qi_g = 2500.0 * (L/10_000.0) * (xf/300.0) * (0.30 + 0.20*richness) * interf
+        Di_o_yr, b_o = 0.45, 0.70
+        Di_g_yr, b_g = 0.60, 0.60
+    else:
+        # Unconventional / volatile
+        qi_g = 80_000.0 * (L/10_000.0) * (xf/300.0) * interf
+        qi_o = 1_500.0 * (L/10_000.0) * (hf/180.0) * (0.7 + 0.6*richness) * interf
+        Di_g_yr, b_g = 0.70, 0.70
+        Di_o_yr, b_o = 0.50, 0.80
 
-    # Sub-linear geometry scalings
-    geo_g = (L / 10_000.0)**0.85 * (xf / 300.0)**0.55 * (hf / 180.0)**0.20
-    geo_o = (L / 10_000.0)**0.85 * (xf / 300.0)**0.40 * (hf / 180.0)**0.30
+    # Daily decline parameters
+    Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0
 
-    # Interference should REDUCE rates as pads get tighter / more laterals
-    interf_mul = 1.0 / (1.00 + 1.25*pad_interf + 0.35*max(0, nlats - 1))
+    # Hyperbolic declines
+    qg = qi_g / (1 + b_g*Di_g*t)**(1/b_g)
+    qo = qi_o / (1 + b_o*Di_o*t)**(1/b_o)
 
-    # Composition/richness tilt (richer -> relatively more gas, modestly more oil)
-    rich_g = 1.0 + 0.20 * np.clip(richness, 0.0, 1.4)
-    rich_o = 1.0 + 0.10 * np.clip(richness, 0.0, 1.4)
+    # EURs
+    EUR_g_BCF = np.trapz(qg, t) / 1e6
+    EUR_o_MMBO = np.trapz(qo, t) / 1e6
 
-    qi_g = qi_g_base * geo_g * interf_mul * rich_g
-    qi_o = qi_o_base * geo_o * interf_mul * rich_o
+    # 3D pressure / saturation fields
+    nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
+    dx,dy,dz = float(state["dx"]),float(state["dy"]),float(state["dz"])
+    p_init = float(state["p_init_psi"])
 
-    # Reasonable caps so a single well doesn’t blow up EUR
-    qi_g = float(np.clip(qi_g, 4_000.0, 35_000.0))  # Mscf/d
-    qi_o = float(np.clip(qi_o,   500.0,  3_500.0))  # STB/d
-
-    # --- declines (mildly hyperbolic) ---
-    Di_g_yr, b_g = 0.55, 0.85
-    Di_o_yr, b_o = 0.45, 1.00
-    Di_g = Di_g_yr / 365.0
-    Di_o = Di_o_yr / 365.0
-
-    qg = qi_g / (1.0 + b_g*Di_g*t)**(1.0/b_g)              # Mscf/d
-    qo = qi_o / (1.0 + b_o*Di_o*t)**(1.0/b_o)              # STB/d
-
-    # --- EURs (units) ---
-    EUR_g_BCF  = float(np.trapz(qg, t) / 1e6)   # Mscf -> BCF
-    EUR_o_MMBO = float(np.trapz(qo, t) / 1e6)   # STB  -> MMBO
-
-    # --- build coarse 3D volumes (pressure/saturation) keyed to geometry ---
-    nz, ny, nx = int(state["nz"]), int(state["ny"]), int(state["nx"])
-    dx, dy, dz = float(state["dx"]), float(state["dy"]), float(state["dz"])
-    p_init     = float(state["p_init_psi"])
-
-    # Optional DFN-driven sink
     dfn = st.session_state.dfn_segments
-    use_dfn_sink = bool(st.session_state.use_dfn_sink) and (dfn is not None)
-    if use_dfn_sink:
-        sink3d = build_dfn_sink(nz, ny, nx, dx, dy, dz, dfn,
+    sink3d = None
+    if bool(st.session_state.use_dfn_sink) and (dfn is not None):
+        sink3d = build_dfn_sink(nz,ny,nx,dx,dy,dz,dfn,
                                 float(st.session_state.dfn_radius_ft),
                                 float(st.session_state.dfn_strength_psi))
-    else:
-        # Gentle Gaussian sinks at stage positions (two rows if two laterals)
-        y = np.linspace(0, 1, ny)
-        x = np.linspace(0, 1, nx)
+    if sink3d is None:
+        y, x = np.linspace(0,1,ny), np.linspace(0,1,nx)
         X, Y = np.meshgrid(x, y, indexing="xy")
-        lat_rows = [ny//3, 2*ny//3] if nlats >= 2 else [ny//2]
-        n_stages = max(1, int(L / max(state["stage_spacing_ft"], 1.0)))
-        xs_cells = np.linspace(5, max(6, int(L/max(dx,1.0)) - 5), n_stages)
+        lat_rows = [ny//3, 2*ny//3] if int(state["n_laterals"]) >= 2 else [ny//2]
+        n_stages = max(1, int(state["L_ft"]/max(state["stage_spacing_ft"],1.0)))
+        xs_cells = np.linspace(5, max(6, int(state["L_ft"]/max(state["dx"],1.0)) - 5), n_stages)
         sink2d = np.zeros((ny, nx))
         for jr in lat_rows:
             for xi in xs_cells:
-                sink2d += 150.0 * np.exp(-((Y - jr/ny)/0.06)**2) * np.exp(-((X - xi/nx)/0.04)**2)
-        sink3d = np.repeat(sink2d[None, :, :], nz, axis=0)
+                sink2d += 300.0 * np.exp(-((Y-jr/ny)/0.05)**2) * np.exp(-((X-xi/nx)/0.03)**2)
+        sink3d = np.repeat(sink2d[None,:,:], nz, axis=0)
 
-    # Pressures: mild vertical trend + depletion from sink (matrix a bit above frac)
-    z_rel = np.linspace(0, 1, nz)[:, None, None]
-    press_frac   = p_init - 260.0 - 65.0*z_rel - 0.9*sink3d
-    press_matrix = p_init - 120.0 - 35.0*z_rel - 0.50*sink3d + 3.0*rng.standard_normal((nz, ny, nx))
+    z_rel = np.linspace(0,1,nz)[:,None,None]
+    press_matrix = p_init - 150.0 - 40.0*z_rel - 0.6*sink3d + 5.0*rng.standard_normal((nz,ny,nx))
+    press_frac   = p_init - 300.0 - 70.0*z_rel - 1.0*sink3d
 
-    # Saturations: plausible bands with small noise
-    Sw_mid = np.clip(0.28 + 0.03*rng.standard_normal((ny, nx)), 0.05, 0.60)
-    So_mid = np.clip(0.66 - (Sw_mid - 0.28), 0.0, 0.95)
+    Sw_mid = 0.25 + 0.05*rng.standard_normal((ny,nx))
+    So_mid = np.clip(0.65 - (Sw_mid-0.25), 0.0, 1.0)
     z_trend = z_rel - 0.5
-    Sw = np.clip(Sw_mid[None, ...] + 0.02*z_trend + 0.015*rng.standard_normal((nz, ny, nx)), 0.0, 1.0)
-    So = np.clip(So_mid[None, ...] - 0.02*z_trend + 0.015*rng.standard_normal((nz, ny, nx)), 0.0, 1.0)
+    Sw = np.clip(Sw_mid[None,...] + 0.03*z_trend + 0.02*rng.standard_normal((nz,ny,nx)), 0.0, 1.0)
+    So = np.clip(So_mid[None,...] - 0.03*z_trend + 0.02*rng.standard_normal((nz,ny,nx)), 0.0, 1.0)
 
-    # Safe mid-layer extraction
-    k_mid = nz // 2
-
+    k_mid = nz//2
     return dict(
         t=t, qg=qg, qo=qo,
-        EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO,
         press_frac=press_frac, press_matrix=press_matrix,
         press_frac_mid=press_frac[k_mid], press_matrix_mid=press_matrix[k_mid],
-        Sw=Sw, So=So, Sw_mid=Sw_mid, So_mid=So_mid
+        Sw=Sw, So=So, Sw_mid=Sw_mid, So_mid=So_mid,
+        EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO
     )
 
 def run_simulation(state):
@@ -327,34 +305,77 @@ def run_simulation(state):
 # ------------------------ Sidebar controls ------------------------
 with st.sidebar:
     st.markdown("## Play Preset")
-    st.selectbox("Model", ["3D Unconventional Reservoir Simulator — Implicit Engine Ready", "3D Black Oil Reservoir Simulator — Implicit Engine Ready"], index=0, key="sim_mode")
+
+    # Model selector: sets a mode flag we use in the solver
+    model_choice = st.selectbox(
+        "Model",
+        [
+            "3D Unconventional Reservoir Simulator — Implicit Engine Ready",
+            "3D Black Oil Reservoir Simulator — Implicit Engine Ready",
+        ],
+        index=0 if "sim_mode" not in st.session_state
+        else [
+            "3D Unconventional Reservoir Simulator — Implicit Engine Ready",
+            "3D Black Oil Reservoir Simulator — Implicit Engine Ready",
+        ].index(st.session_state.sim_mode),
+        key="sim_mode",
+    )
+    # Simple model flag for use in the solver
+    st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
+
     play = st.selectbox("Shale play", list(PLAY_PRESETS.keys()), index=0, key="play_sel")
     st.caption("Presets adjust lateral length, stage spacing, frac geometry, and PVT primaries.")
+
     if st.button("Apply preset", use_container_width=True):
         payload = defaults.copy()
         payload.update(PLAY_PRESETS[st.session_state.play_sel])
+
+        # Override a few key PVT/controls by model
+        if st.session_state.fluid_model == "black_oil":
+            # Black-oil: no solution gas driving early gas rate, 'oil-first' behavior
+            payload.update(
+                dict(
+                    Rs_pb_scf_stb=0.0,
+                    pb_psi=1.0,
+                    Bo_pb_rb_stb=1.00,
+                    mug_pb_cp=0.020,
+                    a_g=0.15,
+                    p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),
+                    pad_ctrl="BHP",
+                    pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0),
+                )
+            )
+        # else: leave unconventional presets as-is
+
         st.session_state.sim = None
         st.session_state.apply_preset_payload = payload
         _safe_rerun()
+
     st.markdown("### Grid (ft)")
     c1,c2,c3 = st.columns(3)
     with c1: st.number_input("nx",10,500,int(st.session_state.nx),1,key="nx")
     with c2: st.number_input("ny",10,500,int(st.session_state.ny),1,key="ny")
     with c3: st.number_input("nz",1,200,int(st.session_state.nz),1,key="nz")
+
     c1,c2,c3 = st.columns(3)
     with c1: st.number_input("dx (ft)",value=float(st.session_state.dx),step=1.0,key="dx")
     with c2: st.number_input("dy (ft)",value=float(st.session_state.dy),step=1.0,key="dy")
     with c3: st.number_input("dz (ft)",value=float(st.session_state.dz),step=1.0,key="dz")
+
     st.markdown("### Heterogeneity & Anisotropy")
-    st.selectbox("Facies style", ["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"], index=["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"].index(st.session_state.facies_style), key="facies_style")
+    st.selectbox("Facies style", ["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"],
+                 index=["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"].index(st.session_state.facies_style),
+                 key="facies_style")
     st.slider("k stdev (mD around 0.02)",0.0,0.20,float(st.session_state.k_stdev),0.01,key="k_stdev")
     st.slider("ϕ stdev",0.0,0.20,float(st.session_state.phi_stdev),0.01,key="phi_stdev")
     st.slider("Anisotropy kx/ky",0.5,3.0,float(st.session_state.anis_kxky),0.05,key="anis_kxky")
+
     st.markdown("### Faults")
     st.checkbox("Enable fault TMULT",value=bool(st.session_state.use_fault),key="use_fault")
     st.selectbox("Fault plane",["i-plane (vertical)","j-plane (vertical)"],index=0,key="fault_plane")
     st.number_input("Plane index",1,max(1,int(st.session_state.nx)-2),int(st.session_state.fault_index),1,key="fault_index")
     st.number_input("Transmissibility multiplier",value=float(st.session_state.fault_tm),step=0.01,key="fault_tm")
+
     st.markdown("### Pad / Wellbore & Frac")
     st.number_input("Laterals",1,6,int(st.session_state.n_laterals),1,key="n_laterals")
     st.number_input("Lateral length (ft)",value=float(st.session_state.L_ft),step=50.0,key="L_ft")
@@ -366,12 +387,14 @@ with st.sidebar:
     st.number_input("Frac half-length xf (ft)",value=float(st.session_state.xf_ft),step=5.0,key="xf_ft")
     st.number_input("Frac height hf (ft)",value=float(st.session_state.hf_ft),step=5.0,key="hf_ft")
     st.slider("Pad interference coeff.",0.00,0.80,float(st.session_state.pad_interf),0.01,key="pad_interf")
+
     st.markdown("### Controls & Boundary")
     st.selectbox("Pad control",["BHP","RATE"],index=0,key="pad_ctrl")
     st.number_input("Pad BHP (psi)",value=float(st.session_state.pad_bhp_psi),step=10.0,key="pad_bhp_psi")
     st.number_input("Pad RATE (Mscf/d)",value=float(st.session_state.pad_rate_mscfd),step=1000.0,key="pad_rate_mscfd")
     st.selectbox("Outer boundary",["Infinite-acting","Constant-p"],index=0,key="outer_bc")
     st.number_input("Boundary pressure (psi)",value=float(st.session_state.p_outer_psi),step=10.0,key="p_outer_psi")
+
     st.markdown("### PVT (Black-Oil) + Compressibilities")
     st.number_input("Bubblepoint pb (psi)",value=float(st.session_state.pb_psi),step=50.0,key="pb_psi")
     st.number_input("Rs at pb (scf/STB)",value=float(st.session_state.Rs_pb_scf_stb),step=10.0,key="Rs_pb_scf_stb")
@@ -384,6 +407,7 @@ with st.sidebar:
     st.number_input("Minimum flowing BHP (psi)",value=float(st.session_state.p_min_bhp_psi),step=25.0,key="p_min_bhp_psi")
     st.number_input("Total compressibility ct (1/psi)",value=float(st.session_state.ct_1_over_psi),step=1e-6,format="%.6f",key="ct_1_over_psi")
     st.checkbox("Include Rs(P) in material balance",value=bool(st.session_state.include_RsP),key="include_RsP")
+
     st.markdown("### Rel-Perm / Pc (Corey)")
     st.number_input("krw end",value=float(st.session_state.krw_end),step=0.05,key="krw_end")
     st.number_input("kro end",value=float(st.session_state.kro_end),step=0.05,key="kro_end")
@@ -392,30 +416,32 @@ with st.sidebar:
     st.number_input("Swc",value=float(st.session_state.Swc),step=0.01,key="Swc")
     st.number_input("Sor",value=float(st.session_state.Sor),step=0.01,key="Sor")
     st.number_input("Pc slope (psi per frac Sw)",value=float(st.session_state.pc_slope_psi),step=0.1,key="pc_slope_psi")
+
     st.markdown("### Phase Compressibilities (1/psi)")
     st.number_input("ct_o",value=float(st.session_state.ct_o_1psi),step=1e-6,format="%.6f",key="ct_o_1psi")
     st.number_input("ct_g",value=float(st.session_state.ct_g_1psi),step=1e-6,format="%.6f",key="ct_g_1psi")
     st.number_input("ct_w",value=float(st.session_state.ct_w_1psi),step=1e-6,format="%.6f",key="ct_w_1psi")
+
     st.markdown("### 3D Viewer Settings")
     st.slider("Downsample factor (3D)",1,6,int(st.session_state.vol_downsample),1,key="vol_downsample")
     st.slider("Isosurface relative value (0-1)",0.0,1.0,float(st.session_state.iso_value_rel),0.01,key="iso_value_rel")
+
     st.markdown("### DFN (Discrete Fracture Network)")
     st.checkbox("Use DFN-driven sink in solver",value=bool(st.session_state.use_dfn_sink),key="use_dfn_sink")
     st.checkbox("Auto-generate DFN from stages when no upload",value=bool(st.session_state.use_auto_dfn),key="use_auto_dfn")
     st.number_input("DFN influence radius (ft)",value=float(st.session_state.dfn_radius_ft),step=5.0,key="dfn_radius_ft")
     st.number_input("DFN sink strength (psi)",value=float(st.session_state.dfn_strength_psi),step=10.0,key="dfn_strength_psi")
+
     dfn_up = st.file_uploader("Upload DFN CSV: x0,y0,z0,x1,y1,z1[,k_mult,aperture_ft]",type=["csv"],key="dfn_csv")
     c1,c2 = st.columns(2)
     with c1:
         if st.button("Load DFN from CSV"):
             try:
-                if dfn_up is None:
-                    st.warning("Please choose a DFN CSV first.")
+                if dfn_up is None: st.warning("Please choose a DFN CSV first.")
                 else:
                     st.session_state.dfn_segments = parse_dfn_csv(dfn_up)
                     st.success(f"Loaded DFN segments: {len(st.session_state.dfn_segments)}")
-            except Exception as e:
-                st.error(f"DFN parse error: {e}")
+            except Exception as e: st.error(f"DFN parse error: {e}")
     with c2:
         if st.button("Generate DFN from stages"):
             segs = gen_auto_dfn_from_stages(int(st.session_state.nx),int(st.session_state.ny),int(st.session_state.nz),
@@ -424,11 +450,13 @@ with st.sidebar:
                                             int(st.session_state.n_laterals),float(st.session_state.hf_ft))
             st.session_state.dfn_segments = segs
             st.success(f"Auto-generated DFN segments: {0 if segs is None else len(segs)}")
+
     st.markdown("### Performance Flags")
     st.checkbox("Use OMP",value=bool(st.session_state.use_omp),key="use_omp")
     st.checkbox("Use MKL",value=bool(st.session_state.use_mkl),key="use_mkl")
     st.checkbox("Use PyAMG",value=bool(st.session_state.use_pyamg),key="use_pyamg")
     st.checkbox("Use cuSPARSE",value=bool(st.session_state.use_cusparse),key="use_cusparse")
+
     st.markdown("### Random Seed")
     st.number_input("seed",value=int(st.session_state.rng_seed),step=1,key="rng_seed")
 
@@ -541,17 +569,14 @@ with tabs[5]:
         sim = st.session_state.sim
         st.info("**Interpretation:** The primary results include Estimated Ultimate Recovery (EUR) gauges, production rate declines over time, cumulative production, and pressure maps. These outputs allow you to assess the well's performance, diagnose production behavior (like GOR changes), and visualize reservoir depletion.")
 
-        # Gauges & other plots remain as you had them...
         g_g,o_g = eur_gauges(sim["EUR_g_BCF"],sim["EUR_o_MMBO"])
         c1,c2 = st.columns(2)
         with c1: st.plotly_chart(g_g, use_container_width=True, key="res_gauge_gas")
         with c2: st.plotly_chart(o_g, use_container_width=True, key="res_gauge_oil")
 
-        # NEW: rate y-axis toggle for results plots
         rate_y_mode_results = st.radio("Rate y-axis (Results)", ["Linear", "Log"], index=0, horizontal=True, key="results_rate_y_mode")
         y_type_results = "log" if rate_y_mode_results == "Log" else "linear"
 
-        # Figure 7. Field Production Rates (Gas + Oil)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=sim["t"], y=sim["qg"], name="Gas (Mscf/d)", line=dict(color="#d62728", width=3)))
         fig.add_trace(go.Scatter(x=sim["t"], y=sim["qo"], name="Oil (STB/d)",  line=dict(color="#2ca02c", width=3)))
@@ -559,14 +584,12 @@ with tabs[5]:
         fig.update_yaxes(type=y_type_results)
         st.plotly_chart(fig, use_container_width=True, key="res_rates_plot")
 
-        # Figure 8. Oil Decline (Oil only)
         fig8 = go.Figure()
         fig8.add_trace(go.Scatter(x=sim["t"], y=sim["qo"], line=dict(color="#2ca02c", width=3), name="Oil"))
         fig8.update_layout(**semi_log_layout("Figure 8. Oil Decline", yaxis="Oil rate (STB/d)"))
         fig8.update_yaxes(type=y_type_results)
         st.plotly_chart(fig8, use_container_width=True, key="res_oil_decline_plot")
 
-        # Cumulative (unchanged)
         cum_g = np.cumsum(sim["qg"]) * np.mean(np.diff(sim["t"]))
         cum_o = np.cumsum(sim["qo"]) * np.mean(np.diff(sim["t"]))
         fig9 = go.Figure()
@@ -575,7 +598,6 @@ with tabs[5]:
         fig9.update_layout(**semi_log_layout("Figure 9. Cumulative Production", yaxis="Cumulative"))
         st.plotly_chart(fig9, use_container_width=True, key="res_cum_plot")
 
-        # BHP & GOR (unchanged except keys)
         bhp_t = sim.get("bhp_t", sim["t"])
         bhp_psi = sim.get("bhp_psi", np.full_like(bhp_t, float(state["pad_bhp_psi"]) if state["pad_ctrl"]=="BHP" else float(state["p_min_bhp_psi"])))
         fig_bhp = go.Figure()
@@ -590,7 +612,6 @@ with tabs[5]:
         fig_gor.update_layout(**semi_log_layout("GOR vs Time", yaxis="GOR (scf/STB)"))
         st.plotly_chart(fig_gor, use_container_width=True, key="res_gor_plot")
 
-        # Mid-layer maps (add keys)
         c1,c2 = st.columns(2)
         with c1:
             st.plotly_chart(px.imshow(sim["press_frac_mid"], origin="lower", color_continuous_scale="Viridis",
@@ -734,15 +755,12 @@ with tabs[9]:
     st.header("Sensitivity: EUR vs Lateral Length")
     st.info("Dual view: the Dual Axis tab gives a compact overview (gas left axis, oil right axis), while Stacked Panels separates the series for maximum readability.")
 
-    # Build the sensitivity table (same logic as before)
     L_grid = np.array([6000,8000,10000,12000,14000],float)
     rows = [dict(L_ft=int(L), **{k:v for k,v in fallback_fast_solver({**state,"L_ft":float(L)},np.random.default_rng(123)).items() if "EUR" in k}) for L in L_grid]
     df = pd.DataFrame(rows)
 
-    # Sub-tabs: Dual Axis + Stacked Panels
     tab_dual, tab_stack = st.tabs(["Dual Axis (overview)","Stacked Panels (clear)"])
 
-    # A) Dual Axis (overview) — draw Oil first so Gas appears on top
     with tab_dual:
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(x=df["L_ft"],y=df["EUR_o_MMBO"],name="Oil EUR (MMBO)",mode="lines+markers",
@@ -756,7 +774,6 @@ with tabs[9]:
                            legend=dict(orientation="h"))
         st.plotly_chart(fig1, use_container_width=True)
 
-    # B) Stacked Panels (clear) — separate axes, shared x (older Plotly: shared_xaxes)
     with tab_stack:
         from plotly.subplots import make_subplots
         fig2 = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.12,
@@ -771,7 +788,6 @@ with tabs[9]:
         fig2.update_layout(template="plotly_white",title="<b>EUR vs Lateral Length (Stacked Panels)</b>",legend=dict(orientation="h"))
         st.plotly_chart(fig2, use_container_width=True)
 
-    # Table + CSV download
     st.dataframe(df, use_container_width=True)
     st.download_button("Download EUR vs Lateral Length CSV", df.to_csv(index=False).encode("utf-8"),
                        "eur_vs_lateral_length.csv", "text/csv")
@@ -786,14 +802,18 @@ with tabs[10]:
     up = st.file_uploader("Upload CSV", type=["csv"], key="field_csv_uploader")
 
     # Demo generator
-    if st.button("Generate synthetic demo"):
+    if st.button("Generate synthetic demo", key="fm_gen_demo_btn"):
         demo = fallback_fast_solver(state, np.random.default_rng(321))
         demo_df = pd.DataFrame(dict(time_days=demo["t"], qg_Mscfd=demo["qg"], qo_STBpd=demo["qo"]))
-        st.download_button("Download demo CSV", demo_df.to_csv(index=False), "demo_field.csv")
+        st.download_button("Download demo CSV", demo_df.to_csv(index=False), "demo_field.csv", key="fm_demo_dl")
 
     if up is not None:
         # ---------- Load & basic prep ----------
-        field = pd.read_csv(up).dropna(subset=["time_days", "qg_Mscfd", "qo_STBpd"]).sort_values("time_days")
+        field = (
+            pd.read_csv(up)
+            .dropna(subset=["time_days", "qg_Mscfd", "qo_STBpd"])
+            .sort_values("time_days")
+        )
         tF = field["time_days"].to_numpy(float)
         qgF = field["qg_Mscfd"].to_numpy(float)
         qoF = field["qo_STBpd"].to_numpy(float)
@@ -814,15 +834,15 @@ with tabs[10]:
         cA, cB, cC, cD, cE = st.columns(5)
 
         with cA:
-            t_shift = st.slider("Time shift (days)", -180, 180, 0, 1, help="Positive shifts simulator to the right.")
+            t_shift = st.slider("Time shift (days)", -180, 180, 0, 1, help="Positive shifts simulator to the right.", key="fm_tshift")
         with cB:
-            gas_scale = st.slider("Gas scale ×", 0.50, 1.50, 1.00, 0.01)
+            gas_scale = st.slider("Gas scale ×", 0.50, 1.50, 1.00, 0.01, key="fm_gscale")
         with cC:
-            oil_scale = st.slider("Oil scale ×", 0.50, 1.50, 1.00, 0.01)
+            oil_scale = st.slider("Oil scale ×", 0.50, 1.50, 1.00, 0.01, key="fm_oscale")
         with cD:
-            time_axis_mode = st.radio("Time axis", ["Linear", "Log (RTA)"], index=0, horizontal=True)
+            time_axis_mode = st.radio("Time axis", ["Linear", "Log (RTA)"], index=0, horizontal=True, key="fm_time_axis")
         with cE:
-            rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True)
+            rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="fm_rate_y")
 
         # Apply shifts/scales and interpolate sim → field time grid
         tS_adj  = tS + float(t_shift)
@@ -893,7 +913,7 @@ with tabs[10]:
         # ---------- Visualizations ----------
         from plotly.subplots import make_subplots
 
-        # A) Rates (stacked panels) — time x-axis: Linear/Log; y-axis: Linear/Log (toggle)
+        # A) Rates (stacked panels)
         fig_rates = make_subplots(
             rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.10,
             subplot_titles=("Gas Rate (Mscf/d)", "Oil Rate (STB/d)")
@@ -902,7 +922,6 @@ with tabs[10]:
         fig_rates.add_trace(go.Scatter(x=tF_plot, y=qgS_i_plot, name="Sim Gas (adj.)", line=dict(color="#c44e52", width=2, dash="dot")), row=1, col=1)
         fig_rates.add_trace(go.Scatter(x=tF_plot, y=qoF_plot,   name="Field Oil",     line=dict(color="#2ca02c", width=3)),            row=2, col=1)
         fig_rates.add_trace(go.Scatter(x=tF_plot, y=qoS_i_plot, name="Sim Oil (adj.)", line=dict(color="#55a868", width=2, dash="dot")), row=2, col=1)
-
         fig_rates.update_xaxes(title_text="Time (days)", type=xaxis_type, row=2, col=1)
         fig_rates.update_yaxes(type=yaxis_type_rates, row=1, col=1)
         fig_rates.update_yaxes(type=yaxis_type_rates, row=2, col=1)
@@ -996,8 +1015,8 @@ with tabs[10]:
 
 with tabs[11]:
     st.header("Uncertainty & Monte Carlo")
-    st.info("**Interpretation:** This tab runs a Monte Carlo simulation by varying key input parameters to generate a distribution of possible EUR outcomes. The **distribution plot** shows the probabilistic range of results (P10, P50, P90). The **Tornado chart** ranks which uncertain parameters have the biggest impact on the outcome. This is crucial for understanding risk and prioritizing data acquisition for high-impact variables.")
-    N = st.slider("Samples", 50, 500, 150, 10)
+    st.info("**Interpretation:** This tab runs a Monte Carlo simulation by varying key input parameters to generate a distribution of possible EUR outcomes. The **distribution plot** shows the probabilistic range of results (P10, P50, P90). The **Tornado chart** ranks which uncertain parameters have the biggest impact on the outcome.")
+    N = st.slider("Samples", 50, 500, 150, 10, key="mc_samples")
     rng = np.random.default_rng(777)
     with st.spinner(f"Running {N} Monte Carlo simulations..."):
         samples = []
@@ -1010,21 +1029,21 @@ with tabs[11]:
             s = fallback_fast_solver(tmp, rng)
             samples.append([s["EUR_g_BCF"], s["EUR_o_MMBO"], tmp["k_stdev"], tmp["hf_ft"], tmp["xf_ft"], tmp["pad_interf"]])
         S = np.array(samples)
-        
-    def plot_dist_and_tornado(data, name, unit, color):
+
+    def plot_dist_and_tornado(data, name, unit, color, key_prefix):
         st.subheader(f"{name} EUR Analysis")
         p10,p50,p90 = np.percentile(data,10),np.percentile(data,50),np.percentile(data,90)
-        
+
         # Distribution Plot
         fig_dist = go.Figure()
         fig_dist.add_trace(go.Histogram(x=data, nbinsx=30, name='Histogram', marker_color=color, histnorm='probability density'))
         kde = stats.gaussian_kde(data)
         x_range = np.linspace(data.min(), data.max(), 200)
         fig_dist.add_trace(go.Scatter(x=x_range, y=kde(x_range), mode='lines', name='Distribution Curve', line=dict(color='black', width=2)))
-        for p, p_val, p_name in [(p10, 'P10', 'blue'), (p50, 'P50', 'green'), (p90, 'P90', 'red')]:
-            fig_dist.add_vline(x=p, line_width=2, line_dash="dash", line_color=p_name, annotation_text=f"{p_name}={p:.1f}", annotation_position="top right")
+        for p, p_name, p_col in [(p10, 'P10', 'blue'), (p50, 'P50', 'green'), (p90, 'P90', 'red')]:
+            fig_dist.add_vline(x=p, line_width=2, line_dash="dash", line_color=p_col, annotation_text=f"{p_name}={p:.1f}", annotation_position="top right")
         fig_dist.update_layout(template="plotly_white", title=f"<b>{name} EUR Distribution</b>", xaxis_title=f"EUR ({unit})", yaxis_title="Density")
-        st.plotly_chart(fig_dist, use_container_width=True)
+        st.plotly_chart(fig_dist, use_container_width=True, key=f"{key_prefix}_dist")
         st.markdown(f"**{name} EUR:** **P10** = {p10:.1f} {unit}, **P50** = {p50:.1f} {unit}, **P90** = {p90:.1f} {unit}")
 
         # Tornado Chart
@@ -1034,58 +1053,59 @@ with tabs[11]:
         dfT["impact"] = np.abs(dfT["corr"]); dfT = dfT.sort_values("impact", ascending=True)
         fig_tor = go.Figure(go.Bar(x=dfT["impact"], y=dfT["param"], orientation="h", marker_color=color, marker_opacity=0.7))
         fig_tor.update_layout(template="plotly_white", title=f"<b>Tornado: Relative Impact on {name} EUR</b>", xaxis_title="Absolute Correlation (Impact)")
-        st.plotly_chart(fig_tor, use_container_width=True)
+        st.plotly_chart(fig_tor, use_container_width=True, key=f"{key_prefix}_tor")
 
     col1, col2 = st.columns(2)
     with col1:
-        plot_dist_and_tornado(S[:,0], "Gas", "BCF", "#d62728")
+        plot_dist_and_tornado(S[:,0], "Gas", "BCF", "#d62728", "mc_gas")
     with col2:
-        plot_dist_and_tornado(S[:,1], "Oil", "MMBO", "#2ca02c")
+        plot_dist_and_tornado(S[:,1], "Oil", "MMBO", "#2ca02c", "mc_oil")
 
 with tabs[12]:
     st.header("User’s Manual")
     st.markdown("""
-        **Overview:** This application supports full 3D arrays for pressure and saturations and is backward-compatible with mid-layer (2D) maps. Discrete Fracture Networks (DFNs) can be uploaded or auto-generated from stages. They are used for both visualization and as a 3D sink driver in the fallback solver.
+**Overview:** This application supports full 3D arrays for pressure and saturations and is backward-compatible with mid-layer (2D) maps. DFNs can be uploaded or auto-generated from stages. They are used for both visualization and as a 3D sink driver in the fallback solver.
 
-        **Engine Schema (3D-aware):** The simulation engine expects or returns data with the following keys and units. 2D arrays are automatically promoted to 3D.
-        - **t**: [days], **qg**: [Mscf/d], **qo**: [STB/d]
-        - **press_matrix**: [nz,ny,nx] (psi) OR **press_matrix_mid**: [ny,nx]
-        - **press_frac**: [nz,ny,nx] (psi) OR **press_frac_mid**: [ny,nx]
-        - **So**: [nz,ny,nx] (fraction) OR **So_mid**: [ny,nx]
-        - **Sw**: [nz,ny,nx] (fraction) OR **Sw_mid**: [ny,nx]
-        - **EUR_g_BCF**: float, **EUR_o_MMBO**: float
-        - **Optional:** **bhp_t**: [days], **bhp_psi**: [psi]
+**Engine Schema (3D-aware):** The simulation engine expects or returns data with the following keys and units. 2D arrays are automatically promoted to 3D.
+- **t**: [days], **qg**: [Mscf/d], **qo**: [STB/d]
+- **press_matrix**: [nz,ny,nx] (psi) OR **press_matrix_mid**: [ny,nx]
+- **press_frac**: [nz,ny,nx] (psi) OR **press_frac_mid**: [ny,nx]
+- **So**: [nz,ny,nx] (fraction) OR **So_mid**: [ny,nx]
+- **Sw**: [nz,ny,nx] (fraction) OR **Sw_mid**: [ny,nx]
+- **EUR_g_BCF**: float, **EUR_o_MMBO**: float
+- **Optional:** **bhp_t**: [days], **bhp_psi**: [psi]
 
-        **DFN CSV format:** The CSV must contain segment endpoints. Optional columns for fracture properties are stored but not used by the fallback solver.
-        - **Required columns:** `x0,y0,z0,x1,y1,z1` (all in feet)
-        - **Optional columns:** `k_mult,aperture_ft`
-    """)
-    st.code("""
-{
-  "t": [days],
-  "qg": [Mscf/d],
-  "qo": [STB/d],
-  "press_matrix": [[[...]]],
-  "press_frac": [[[...]]],
-  "So": [[[...]]],
-  "Sw": [[[...]]],
-  "EUR_g_BCF": 0.0,
-  "EUR_o_MMBO": 0.0,
-  "bhp_t": [optional],
-  "bhp_psi": [optional]
-}
-    """, language="json")
+**DFN CSV format:** The CSV must contain segment endpoints. Optional columns for fracture properties are stored but not used by the fallback solver.
+- **Required columns:** `x0,y0,z0,x1,y1,z1` (all in feet)
+- **Optional columns:** `k_mult,aperture_ft`
+""")
+    st.code(
+        '{\n'
+        '  "t": [days],\n'
+        '  "qg": [Mscf/d],\n'
+        '  "qo": [STB/d],\n'
+        '  "press_matrix": [[[...]]],\n'
+        '  "press_frac": [[[...]]],\n'
+        '  "So": [[[...]]],\n'
+        '  "Sw": [[[...]]],\n'
+        '  "EUR_g_BCF": 0.0,\n'
+        '  "EUR_o_MMBO": 0.0,\n'
+        '  "bhp_t": [optional],\n'
+        '  "bhp_psi": [optional]\n'
+        '}\n',
+        language="json",
+    )
 
 with tabs[13]:
     st.header("Solver & Profiling")
-    st.info("**Interpretation:** These are advanced controls for the numerical solver. Adjusting tolerances can trade off between computation speed and accuracy. The performance flags enable or disable specific high-performance libraries (OMP for multi-threading, MKL/cuSPARSE for linear algebra) if they are available in the execution environment.")
+    st.info("**Interpretation:** Advanced controls for numerical solver tolerances and performance flags.")
     st.markdown(f"""
-    - **Newton Tolerance:** `{state['newton_tol']:.1e}`
-    - **Transport Tolerance:** `{state['trans_tol']:.1e}`
-    - **Max Newton Iterations:** `{int(state['max_newton'])}`
-    - **Max Linear Iterations:** `{int(state['max_lin'])}`
-    - **Threads:** `{int(state['threads'])}`
-    """)
+- **Newton Tolerance:** `{state['newton_tol']:.1e}`
+- **Transport Tolerance:** `{state['trans_tol']:.1e}`
+- **Max Newton Iterations:** `{int(state['max_newton'])}`
+- **Max Linear Iterations:** `{int(state['max_lin'])}`
+- **Threads:** `{int(state['threads'])}`
+""")
 
 with tabs[14]:
     st.header("DFN Viewer — 3D line segments")
@@ -1093,11 +1113,18 @@ with tabs[14]:
     if segs is None or len(segs) == 0:
         st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
     else:
-        st.info("**Interpretation:** This viewer displays the Discrete Fracture Network (DFN) as a collection of 3D line segments. This is useful for quality-checking the imported DFN file or the auto-generated network to ensure it aligns with the well geometry and geological expectations.")
+        st.info("**Interpretation:** Displays the DFN as 3D line segments for QC.")
         figd = go.Figure()
-        for seg in segs:
-            figd.add_trace(go.Scatter3d(x=[seg[0],seg[3]],y=[seg[1],seg[4]],z=[seg[2],seg[5]],mode="lines",line=dict(width=6,color="red")))
-        figd.update_layout(template="plotly_white",scene=dict(xaxis_title="x (ft)",yaxis_title="y (ft)",zaxis_title="z (ft)"),height=640,margin=dict(l=0,r=0,t=40,b=0),showlegend=False)
-        st.plotly_chart(figd,use_container_width=True)
+        for i, seg in enumerate(segs):
+            figd.add_trace(go.Scatter3d(
+                x=[seg[0], seg[3]], y=[seg[1], seg[4]], z=[seg[2], seg[5]],
+                mode="lines", line=dict(width=6, color="red"),
+                name="DFN" if i == 0 else None, showlegend=(i == 0)
+            ))
+        figd.update_layout(
+            template="plotly_white",
+            scene=dict(xaxis_title="x (ft)", yaxis_title="y (ft)", zaxis_title="z (ft)"),
+            height=640, margin=dict(l=0, r=0, t=40, b=0)
+        )
+        st.plotly_chart(figd, use_container_width=True, key="dfn_viewer_3d")
         st.caption(f"**Segments:** {len(segs)}. Optional columns k_mult/aperture_ft are parsed but not used in the fallback physics.")
-
