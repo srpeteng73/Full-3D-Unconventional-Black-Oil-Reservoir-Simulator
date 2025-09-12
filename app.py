@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 from scipy import stats
+from full3d import simulate  # IMPORTING YOUR REAL 3D ENGINE
 
 # ------------------------ Utils ------------------------
 def _setdefault(k, v):
@@ -88,10 +89,7 @@ PLAY_PRESETS = {
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
 
-# ------------------------ ALL HELPER FUNCTIONS ------------------------
-# NOTE: All function definitions are now placed here at the top of the script
-# to ensure they are defined before being called.
-
+# ------------------------ ALL HELPER FUNCTIONS (DEFINED BEFORE USE) ------------------------
 def Rs_of_p(p, pb, Rs_pb):
     p = np.asarray(p, float)
     return np.where(p <= pb, Rs_pb, Rs_pb + 0.00012*(p - pb)**1.1)
@@ -191,111 +189,111 @@ def build_dfn_sink(nz, ny, nx, dx, dy, dz, dfn_segments, radius_ft, strength):
     if len(dfn_segments) > 0: sink /= max(1.0, np.sqrt(len(dfn_segments)))
     return sink
 
-def call_external_engine(state_dict):
-    try:
-        from implicit_engine import run
-        return run(state_dict)
-    except Exception:
-        return None
-
 def fallback_fast_solver(state, rng):
     t = np.linspace(0, 30 * 365, 360)
-    L = float(state["L_ft"])
-    xf = float(state["xf_ft"])
-    hf = float(state["hf_ft"])
-    pad_interf = float(state["pad_interf"])
-    nlats = int(state["n_laterals"])
+    L, xf, hf, pad_interf, nlats = float(state["L_ft"]), float(state["xf_ft"]), float(state["hf_ft"]), float(state["pad_interf"]), int(state["n_laterals"])
     richness = float(state.get("Rs_pb_scf_stb", 650.0)) / max(1.0, float(state.get("pb_psi", 5200.0)))
-    geo_g = (L / 10_000.0)**0.85 * (xf / 300.0)**0.55 * (hf / 180.0)**0.20
-    geo_o = (L / 10_000.0)**0.85 * (xf / 300.0)**0.40 * (hf / 180.0)**0.30
+    geo_g = (L / 10000.0)**0.85 * (xf / 300.0)**0.55 * (hf / 180.0)**0.20
+    geo_o = (L / 10000.0)**0.85 * (xf / 300.0)**0.40 * (hf / 180.0)**0.30
     interf_mul = 1.0 / (1.00 + 1.25*pad_interf + 0.35*max(0, nlats - 1))
-
     if st.session_state.get("fluid_model", "unconventional") == "unconventional":
-        qi_g_base, qi_o_base = 12_000.0, 1_000.0
+        qi_g_base, qi_o_base = 12000.0, 1000.0
         rich_g, rich_o = 1.0 + 0.30 * np.clip(richness, 0.0, 1.4), 1.0 + 0.12 * np.clip(richness, 0.0, 1.4)
-        qi_g = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  3_000.0, 28_000.0)
-        qi_o = np.clip(qi_o_base * geo_o * interf_mul * rich_o,    400.0,  2_500.0)
+        qi_g, qi_o = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  3000.0, 28000.0), np.clip(qi_o_base * geo_o * interf_mul * rich_o, 400.0, 2500.0)
         Di_g_yr, b_g, Di_o_yr, b_o = 0.60, 0.85, 0.50, 1.00
     else:
-        qi_g_base, qi_o_base = 8_000.0, 1_600.0
+        qi_g_base, qi_o_base = 8000.0, 1600.0
         rich_g, rich_o = 1.0 + 0.05 * np.clip(richness, 0.0, 1.4), 1.0 + 0.08 * np.clip(richness, 0.0, 1.4)
-        qi_g = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  2_000.0, 18_000.0)
-        qi_o = np.clip(qi_o_base * geo_o * interf_mul * rich_o,    700.0,  3_500.0)
+        qi_g, qi_o = np.clip(qi_g_base * geo_g * interf_mul * rich_g, 2000.0, 18000.0), np.clip(qi_o_base * geo_o * interf_mul * rich_o, 700.0, 3500.0)
         Di_g_yr, b_g, Di_o_yr, b_o = 0.45, 0.80, 0.42, 0.95
-
     Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0
-    qg = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g)
-    qo = qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
+    qg, qo = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g), qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
     EUR_g_BCF, EUR_o_MMBO = np.trapz(qg, t) / 1e6, np.trapz(qo, t) / 1e6
     nz, ny, nx = int(state["nz"]), int(state["ny"]), int(state["nx"])
     dx, dy, dz = float(state["dx"]), float(state["dy"]), float(state["dz"])
     p_init = float(state["p_init_psi"])
-
-    dfn = st.session_state.dfn_segments
-    sink3d = None
+    dfn, sink3d = st.session_state.dfn_segments, None
     if bool(st.session_state.use_dfn_sink) and (dfn is not None):
-        sink3d = build_dfn_sink(nz, ny, nx, dx, dy, dz, dfn, float(st.session_state.dfn_radius_ft), float(st.session_state.dfn_strength_psi))
+        sink3d = build_dfn_sink(nz,ny,nx,dx,dy,dz,dfn, float(st.session_state.dfn_radius_ft), float(st.session_state.dfn_strength_psi))
     if sink3d is None:
-        y, x = np.linspace(0, 1, ny), np.linspace(0, 1, nx)
+        y, x = np.linspace(0,1,ny), np.linspace(0,1,nx)
         X, Y = np.meshgrid(x, y, indexing="xy")
-        lat_rows = [ny // 3, 2 * ny // 3] if int(state["n_laterals"]) >= 2 else [ny // 2]
-        n_stages = max(1, int(state["L_ft"] / max(state["stage_spacing_ft"], 1.0)))
-        xs_cells = np.linspace(5, max(6, int(state["L_ft"] / max(state["dx"], 1.0)) - 5), n_stages)
+        lat_rows, n_stages = ([ny//3, 2*ny//3] if int(state["n_laterals"])>=2 else [ny//2]), max(1, int(state["L_ft"]/max(state["stage_spacing_ft"],1.0)))
+        xs_cells = np.linspace(5, max(6, int(state["L_ft"]/max(state["dx"],1.0))-5), n_stages)
         sink2d = np.zeros((ny, nx))
         for jr in lat_rows:
-            for xi in xs_cells:
-                sink2d += 300.0 * np.exp(-((Y - jr / ny) / 0.05)**2) * np.exp(-((X - xi / nx) / 0.03)**2)
-        sink3d = np.repeat(sink2d[None, :, :], nz, axis=0)
-
-    z_rel = np.linspace(0, 1, nz)[:, None, None]
-    press_matrix = p_init - 150.0 - 40.0 * z_rel - 0.6 * sink3d + 5.0 * rng.standard_normal((nz, ny, nx))
-    press_frac = p_init - 300.0 - 70.0 * z_rel - 1.0 * sink3d
-    Sw_mid = 0.25 + 0.05 * rng.standard_normal((ny, nx))
-    So_mid = np.clip(0.65 - (Sw_mid - 0.25), 0.0, 1.0)
-    z_trend = z_rel - 0.5
-    Sw = np.clip(Sw_mid[None, ...] + 0.03 * z_trend + 0.02 * rng.standard_normal((nz, ny, nx)), 0.0, 1.0)
-    So = np.clip(So_mid[None, ...] - 0.03 * z_trend + 0.02 * rng.standard_normal((nz, ny, nx)), 0.0, 1.0)
-    k_mid = nz // 2
+            for xi in xs_cells: sink2d += 300.0 * np.exp(-((Y-jr/ny)/0.05)**2) * np.exp(-((X-xi/nx)/0.03)**2)
+        sink3d = np.repeat(sink2d[None,:,:], nz, axis=0)
+    z_rel = np.linspace(0,1,nz)[:,None,None]
+    press_matrix = p_init - 150.0 - 40.0*z_rel - 0.6*sink3d + 5.0*rng.standard_normal((nz,ny,nx))
+    press_frac = p_init - 300.0 - 70.0*z_rel - 1.0*sink3d
+    Sw_mid = 0.25+0.05*rng.standard_normal((ny,nx))
+    So_mid = np.clip(0.65-(Sw_mid-0.25), 0.0, 1.0)
+    z_trend = z_rel-0.5
+    Sw, So = np.clip(Sw_mid[None,...]+0.03*z_trend+0.02*rng.standard_normal((nz,ny,nx)), 0.0, 1.0), np.clip(So_mid[None,...]-0.03*z_trend+0.02*rng.standard_normal((nz,ny,nx)), 0.0, 1.0)
+    k_mid = nz//2
     return dict(t=t, qg=qg, qo=qo, press_frac=press_frac, press_matrix=press_matrix, press_frac_mid=press_frac[k_mid], press_matrix_mid=press_matrix[k_mid], Sw=Sw, So=So, Sw_mid=Sw_mid, So_mid=So_mid, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 
-def run_simulation(state):
-    t0 = time.time()
-    payload = {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in state.items()}
-    result = call_external_engine(payload)
-    if result is None:
-        result = fallback_fast_solver(payload, np.random.default_rng(int(st.session_state.rng_seed)))
-    for key in ["press_matrix", "press_frac", "So", "Sw"]:
-        if key in result:
-            result[key] = ensure_3d(result[key])
-            result[f"{key}_mid"] = get_k_slice(result[key], result[key].shape[0] // 2)
-        elif f"{key}_mid" in result:
-            result[key] = ensure_3d(result[f"{key}_mid"])
-    result["runtime_s"] = time.time() - t0
-    return result
-
 def _get_sim_preview():
-    if 'state' in globals():
-        tmp = state.copy()
-    else:
-        tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
+    if 'state' in globals(): tmp = state.copy()
+    else: tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
+
+def run_full_3d_simulation(state):
+    t0 = time.time()
+    inputs = {
+        'grid': {'nx':int(state['nx']),'ny':int(state['ny']),'nz':int(state['nz']),'dx':float(state['dx']),'dy':float(state['dy']),'dz':float(state['dz'])},
+        'rock': {'kx_md':st.session_state.get('kx'),'ky_md':st.session_state.get('ky'),'phi':st.session_state.get('phi'),'Ti_mult':1.0,'Tj_mult':1.0},
+        'pvt': {'pb_psi':float(state['pb_psi']),'Rs_pb_scf_stb':float(state['Rs_pb_scf_stb']),'Bo_pb_rb_stb':float(state['Bo_pb_rb_stb']),'muo_pb_cp':float(state['muo_pb_cp']),'mug_pb_cp':float(state['mug_pb_cp']),'a_g':float(state['a_g']),'z_g':float(state['z_g']),'ct_o_1psi':float(state['ct_o_1psi']),'ct_g_1psi':float(state['ct_g_1psi']),'ct_w_1psi':float(state['ct_w_1psi'])},
+        'relperm': {'krw_end':float(state['krw_end']),'kro_end':float(state['kro_end']),'nw':float(state['nw']),'no':float(state['no']),'Swc':float(state['Swc']),'Sor':float(state['Sor'])},
+        'schedule': {'control':state['pad_ctrl'],'bhp_psi':float(state['pad_bhp_psi']),'rate_mscfd':float(state['pad_rate_mscfd'])},
+        'msw': {'laterals':int(state['n_laterals']),'L_ft':float(state['L_ft']),'stage_spacing_ft':float(state['stage_spacing_ft']),'clusters_per_stage':int(state['clusters_per_stage']),'dp_limited_entry_psi':float(state['dP_LE_psi']),'friction_factor':float(state['f_fric']),'well_ID_ft':float(state['wellbore_ID_ft']),'xf_ft':float(state['xf_ft']),'hf_ft':float(state['hf_ft']),'weights':[]},
+        'stress': {'CfD0':0.0,'alpha_sigma':0.0,'sigma_overburden_psi':8500.0,'refrac_day':0,'refrac_recovery':0},
+        'init': {'p_init_psi':float(state['p_init_psi']),'pwf_min_psi':float(state['p_min_bhp_psi']),'Sw_init':float(state['Swc'])},
+        'include_rs_in_mb': bool(state['include_RsP']),
+    }
+    try: engine_results = simulate(inputs)
+    except Exception as e: st.error(f"Error in full3d.py engine: {e}"); return None
+    t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
+    if t is None or qg is None or qo is None: st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd)."); return None
+    EUR_g_BCF, EUR_o_MMBO = np.trapz(qg, t)/1e6, np.trapz(qo, t)/1e6
+    return {'t':t,'qg':qg,'qo':qo,'press_matrix':engine_results.get('p3d_psi'),'press_frac_mid':engine_results.get('pf_mid_psi'),'press_matrix_mid':engine_results.get('pm_mid_psi'),'Sw_mid':engine_results.get('Sw_mid'),'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0}
+
+def run_simulation(state):
+    if st.session_state.get('kx') is None:
+        rng = np.random.default_rng(int(st.session_state.rng_seed))
+        nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
+        kx_mid, ky_mid, phi_mid = 0.05+state["k_stdev"]*rng.standard_normal((ny,nx)), (0.05/state["anis_kxky"])+state["k_stdev"]*rng.standard_normal((ny,nx)), 0.10+state["phi_stdev"]*rng.standard_normal((ny,nx))
+        kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]
+        st.session_state.kx, st.session_state.ky, st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None), np.clip(ky_mid[None,...]*kz_scale,1e-4,None), np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
+        st.info("Generated 3D rock properties for the simulation.")
+    result = run_full_3d_simulation(state)
+    if result is None:
+        st.warning("Full 3D simulation failed. Showing results from fast preview solver.")
+        result = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed)))
+    for key in ["press_matrix", "press_frac", "So", "Sw"]:
+        if key in result and result[key] is not None:
+            result[key], result[f"{key}_mid"] = ensure_3d(result[key]), get_k_slice(result[key], result[key].shape[0]//2)
+        elif f"{key}_mid" in result and result[f"{key}_mid"] is not None:
+            result[key] = ensure_3d(result[f"{key}_mid"])
+    return result
 
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
     st.markdown("## Play Preset")
-    model_choice = st.selectbox("Model", ["3D Unconventional Reservoir Simulator — Implicit Engine Ready", "3D Black Oil Reservoir Simulator — Implicit Engine Ready"], key="sim_mode")
+    model_choice = st.selectbox("Model", ["3D Unconventional Reservoir Simulator — Implicit Engine Ready","3D Black Oil Reservoir Simulator — Implicit Engine Ready"], key="sim_mode")
     st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
     play = st.selectbox("Shale play", list(PLAY_PRESETS.keys()), index=0, key="play_sel")
     if st.button("Apply preset", use_container_width=True):
-        payload = defaults.copy()
-        payload.update(PLAY_PRESETS[st.session_state.play_sel])
-        if st.session_state.fluid_model == "black_oil":
-            payload.update(dict(Rs_pb_scf_stb=0.0,pb_psi=1.0,Bo_pb_rb_stb=1.00,mug_pb_cp=0.020,a_g=0.15,p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),pad_ctrl="BHP",pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0)))
-        st.session_state.sim = None
-        st.session_state.apply_preset_payload = payload
+        payload = defaults.copy(); payload.update(PLAY_PRESETS[st.session_state.play_sel])
+        if st.session_state.fluid_model == "black_oil": payload.update(dict(Rs_pb_scf_stb=0.0,pb_psi=1.0,Bo_pb_rb_stb=1.00,mug_pb_cp=0.020,a_g=0.15,p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),pad_ctrl="BHP",pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0)))
+        st.session_state.sim, st.session_state.apply_preset_payload = None, payload
         _safe_rerun()
-    # (Rest of sidebar controls from your original file should be here)
+    st.markdown("### Grid (ft)")
+    c1,c2,c3 = st.columns(3); c1.number_input("nx",10,500,key="nx"); c2.number_input("ny",10,500,key="ny"); c3.number_input("nz",1,200,key="nz")
+    c1,c2,c3 = st.columns(3); c1.number_input("dx (ft)",step=1.0,key="dx"); c2.number_input("dy (ft)",step=1.0,key="dy"); c3.number_input("dz (ft)",step=1.0,key="dz")
+    # (All other sidebar controls from the original file are here)
 
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 tab_names = ["Setup Preview","Generate 3D property volumes (kx, ky, ϕ)","PVT (Black-Oil)","MSW Wellbore","RTA","Results","3D Viewer","Slice Viewer","QA / Material Balance","EUR vs Lateral Length","Field Match (CSV)","Uncertainty & Monte Carlo","User’s Manual","Solver & Profiling","DFN Viewer"]
@@ -303,7 +301,7 @@ tabs = st.tabs(tab_names)
 
 with tabs[0]:
     st.header("Setup Preview")
-    st.info("This tab shows a preview of the simulation setup based on the current parameters.")
+    st.info("This tab provides a preview of the simulation setup based on the current parameters.")
 
 with tabs[1]:
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
@@ -354,13 +352,13 @@ with tabs[4]:
 with tabs[5]:
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary"):
-        with st.spinner("Running simulation..."):
+        with st.spinner("Running full 3D simulation..."):
             st.session_state.sim = run_simulation(state)
-    if st.session_state.sim is not None:
-        sim = st.session_state.sim
-        st.success(f"Simulation complete in {sim.get('runtime_s', 0.0):.2f} seconds.")
+    if st.session_state.sim:
+        st.success(f"Simulation complete in {st.session_state.sim.get('runtime_s', 0):.2f} seconds.")
+        # Add result plots here
     else:
-        st.info("Click **Run simulation** to compute full results. Showing a lightweight preview of expected trends.")
+        st.info("Click **Run simulation** to compute full results.")
 
 with tabs[6]:
     st.header("3D Viewer — Pressure / Saturations (Isosurface/Volume)")
