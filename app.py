@@ -512,7 +512,19 @@ with tabs[6]:
                 nz, ny, nx = data_3d_ds.shape
                 Z, Y, X = np.mgrid[0:nz, 0:ny, 0:nx]
                 
-                fig3d = go.Figure(data=go.Isosurface(x=X.flatten(), y=Y.flatten(), z=Z.flatten(), value=data_3d_ds.flatten(), isomin=isoval, isoma_max=v_max, surface_count=1, caps=dict(x_show=False, y_show=False), colorscale=colorscale, colorbar=dict(title=prop_3d.split('(')[-1].replace(')','').strip())))
+                # --- THIS IS THE CORRECTED LINE ---
+                fig3d = go.Figure(data=go.Isosurface(
+                    x=X.flatten(), 
+                    y=Y.flatten(), 
+                    z=Z.flatten(), 
+                    value=data_3d_ds.flatten(), 
+                    isomin=isoval, 
+                    isomax=v_max,  # CORRECTED: was isoma_max
+                    surface_count=1, 
+                    caps=dict(x_show=False, y_show=False), 
+                    colorscale=colorscale, 
+                    colorbar=dict(title=prop_3d.split('(')[-1].replace(')','').strip())
+                ))
                 fig3d.update_layout(title=f"<b>3D Isosurface for {prop_3d}</b>", scene=dict(xaxis_title='i (x-cell)', yaxis_title='j (y-cell)', zaxis_title='k (z-cell)', aspectratio=dict(x=1, y=ny/nx, z=nz/nx)), margin=dict(l=0, r=0, b=0, t=40))
                 st.plotly_chart(fig3d, use_container_width=True)
         else: st.warning(f"Data for '{prop_3d}' not found.")
