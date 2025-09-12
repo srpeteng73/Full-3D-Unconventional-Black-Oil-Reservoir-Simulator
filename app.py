@@ -476,25 +476,27 @@ with tabs[0]:
     st.header("Figure 1. Mid-Layer Pad Layout")
     st.info(
         "**Interpretation:** This view shows the well laterals (gray), stimulation stages (red), "
-        "and hydraulic fracture geometry (blue). Stage density and frac geometry (xf, hf) control "
-        "the early-time drainage near the fractures. The SRV overlay provides a quick visual of "
-        "the approximate stimulated rock volume."
+        "and hydraulic fracture geometry (blue). Stage density and frac geometry (xf, hf) control the early-time "
+        "drainage near the fractures. The SRV overlay provides a quick visual of the approximate stimulated rock volume."
     )
 
-    # --- Geometry derived from current state (no simulation calls here) ---
+    # --- Geometry-only drawing (no simulation dependency) ---
     nx, ny = int(state["nx"]), int(state["ny"])
-    Lcells = int(state["L_ft"] / max(state["dx"], 1.0))
-    n_stages = max(1, int(state["L_ft"] / max(state["stage_spacing_ft"], 1.0)))
-    lat_rows = [ny // 3, 2 * ny // 3] if int(state["n_laterals"]) >= 2 else [ny // 2]
+    dx, dy = float(state["dx"]), float(state["dy"])
 
+    L_ft = float(state["L_ft"])
+    Lcells = int(L_ft / max(dx, 1.0))
+    n_stages = max(1, int(L_ft / max(float(state["stage_spacing_ft"]), 1.0)))
+
+    lat_rows = [ny // 3, 2 * ny // 3] if int(state["n_laterals"]) >= 2 else [ny // 2]
     show_srv = st.checkbox("Show SRV overlay", value=False, key="show_srv_preview")
 
-    fig_preview = go.Figure()
+    fig = go.Figure()
     stage_xs_all = []
 
-    # Laterals and stage markers
+    # Laterals + stage markers
     for jr in lat_rows:
-        fig_preview.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=[5, max(6, Lcells - 5)],
                 y=[jr, jr],
@@ -505,7 +507,7 @@ with tabs[0]:
         )
         xs = np.linspace(5, max(6, Lcells - 5), n_stages)
         stage_xs_all.append(xs)
-        fig_preview.add_trace(
+        fig.add_trace(
             go.Scatter(
                 x=xs,
                 y=jr * np.ones_like(xs),
@@ -516,8 +518,7 @@ with tabs[0]:
             )
         )
 
-    # Frac rectangles (+ optional SRV)
-    dx, dy = float(state["dx"]), float(state["dy"])
+    # Frac rectangles (blue) + optional SRV
     xf_cells = float(state["xf_ft"]) / max(dx, 1e-6)
     hf_cells = float(state["hf_ft"]) / max(dy, 1e-6)
     half_h = hf_cells / 2.0
@@ -526,33 +527,29 @@ with tabs[0]:
         for xi in xs:
             x0, x1 = max(0, xi - xf_cells), min(Lcells, xi + xf_cells)
             y0, y1 = max(0, jr - half_h), min(ny, jr + half_h)
-            # frac rectangle
-            fig_preview.add_shape(
+            fig.add_shape(
                 type="rect",
                 x0=x0, x1=x1, y0=y0, y1=y1,
                 line=dict(color="rgba(30,144,255,0.6)", width=1),
                 fillcolor="rgba(30,144,255,0.12)",
             )
-            # optional SRV
             if show_srv:
-                fig_preview.add_shape(
+                fig.add_shape(
                     type="rect",
-                    x0=max(0, x0 - 0.2 * xf_cells),
-                    x1=min(Lcells, x1 + 0.2 * xf_cells),
-                    y0=max(0, y0 - 0.2 * hf_cells),
-                    y1=min(ny, y1 + 0.2 * hf_cells),
+                    x0=max(0, x0 - 0.2 * xf_cells), x1=min(Lcells, x1 + 0.2 * xf_cells),
+                    y0=max(0, y0 - 0.2 * hf_cells), y1=min(ny, y1 + 0.2 * hf_cells),
                     line=dict(color="rgba(0,0,255,0.3)", width=1, dash="dot"),
                     fillcolor="rgba(0,0,255,0.06)",
                 )
 
-    fig_preview.update_layout(
+    fig.update_layout(
         template="plotly_white",
         height=480,
         xaxis_title="i (cells)",
         yaxis_title="j (cells)",
         title="<b>Mid-layer pad layout (grey=laterals, red=stages, blue=frac rectangles)</b>",
     )
-    st.plotly_chart(fig_preview, use_container_width=True, key="setup_preview_fig")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 with tabs[1]:
@@ -591,12 +588,13 @@ with tabs[3]:
         "This chart shows pseudo-frictional pressure drop from heel to toe. "
         "Stage markers (vertical dotted lines) indicate limited-entry points."
     )
+
 with tabs[4]:
     st.header("RTA — Quick Diagnostics")
     st.info(
-        "**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes. "
-        "The **log-log derivative** plot is key: a slope of ~0.5 can indicate linear flow (common in early unconventional well life), "
-        "while a slope of ~0 can indicate boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior."
+        "**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes. The **log-log derivative** plot is key: "
+        "a slope of ~0.5 can indicate linear flow (common in early unconventional well life), while a slope of ~0 can indicate "
+        "boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior."
     )
 
     # --- Local helper to build a preview sim if no full sim has been run yet ---
@@ -606,7 +604,6 @@ with tabs[4]:
         Uses the fallback solver with a fixed RNG so the preview is stable across reruns.
         """
         tmp = state.copy()
-        # You can further lighten the preview here if needed; leaving geometry as-is is fine.
         rng_preview = np.random.default_rng(int(st.session_state.rng_seed) + 999)
         return fallback_fast_solver(tmp, rng_preview)
 
@@ -614,36 +611,26 @@ with tabs[4]:
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
     t, qg = sim_data["t"], sim_data["qg"]
 
-    # --- Y-axis toggle for rates (Linear / Log) ---
-    rate_y_mode_rta = st.radio(
-        "Rate y-axis",
-        ["Linear", "Log"],
-        index=0,
-        horizontal=True,
-        key="rta_rate_y_mode",
-    )
+    # Y-axis toggle for rates (Linear / Log)
+    rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
 
-    # R1. Gas rate (q) vs time (x uses log scale in helper layout; here we only toggle y)
-    fig_rta_rate = go.Figure()
-    fig_rta_rate.add_trace(
-        go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas")
-    )
-    fig_rta_rate.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
-    fig_rta_rate.update_yaxes(type=y_type_rta)
-    st.plotly_chart(fig_rta_rate, use_container_width=True, key="rta_rate_plot")
+    # R1. Gas rate (q) vs time (x is already log in the layout helper)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
+    fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
+    fig.update_yaxes(type=y_type_rta)
+    st.plotly_chart(fig, use_container_width=True, key="rta_rate_plot")
 
     # R2. Log-log derivative (keep linear y for slope clarity)
-    logt = np.log10(np.where(t <= 0.0, 1e-3, t))
+    logt = np.log10(np.maximum(t, 1e-9))
     logq = np.log10(np.maximum(qg, 1e-9))
     slope = np.gradient(logq, logt)
 
-    fig_rta_deriv = go.Figure()
-    fig_rta_deriv.add_trace(
-        go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt")
-    )
-    fig_rta_deriv.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
-    st.plotly_chart(fig_rta_deriv, use_container_width=True, key="rta_deriv_plot")
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt"))
+    fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
+    st.plotly_chart(fig2, use_container_width=True, key="rta_deriv_plot")
 
 
 with tabs[5]:
