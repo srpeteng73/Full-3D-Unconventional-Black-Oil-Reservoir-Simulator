@@ -531,41 +531,30 @@ with tabs[2]:
 
 with tabs[3]:
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
-    st.info("**Interpretation:** This chart illustrates the pseudo-frictional pressure drop from the heel (start) to the toe (end) of the lateral. This pressure drop can cause uneven production, with stages near the heel producing more than those at the toe. The **Limited-Entry Δp** is the pressure drop across perforations, designed to help mitigate this effect and ensure more uniform stimulation and production from all stages.")
-    L_ft = state["L_ft"]; n_stages = max(1,int(L_ft/max(state["stage_spacing_ft"],1.0)))
-    s_positions = np.linspace(0,L_ft,n_stages)
-    x = np.linspace(0,L_ft,200)
-    dpf = state["f_fric"]*(x/max(L_ft,1))*800.0
-    fig = go.Figure(); fig.add_trace(go.Scatter(x=x,y=dpf,name="Along-lateral friction Δp (psi)",line=dict(color="royalblue",width=3)))
-    for xs in s_positions: fig.add_vline(x=xs,line_dash="dot",line_width=1,opacity=0.4,annotation_text="Stage")
-    fig.update_layout(template="plotly_white",xaxis_title="Measured depth (ft)",yaxis_title="Δp (psi)",title="<b>Friction profile with stage markers</b>")
-    st.plotly_chart(fig,use_container_width=True)
-    st.markdown(f"**Cluster limited-entry Δp = {state['dP_LE_psi']:.0f} psi.**")
+    st.info(
+        "This chart shows pseudo-frictional pressure drop from heel to toe. "
+        "Stage markers (vertical dotted lines) indicate limited-entry points."
+    )
+# --- inside with tabs[4]: RTA — Quick Diagnostics ---
+def _get_sim_preview():
+    """Return a safe preview result for RTA."""
+    try:
+        if st.session_state.get("sim") is not None:
+            return st.session_state.sim
+        seed = int(st.session_state.get("rng_seed", 1234))
+        return fallback_fast_solver(state, np.random.default_rng(seed))
+    except Exception as e:
+        # Guard against any session-state/name errors
+        st.warning(f"Preview run failed; using safe defaults ({type(e).__name__}).")
+        tmp = dict(state)
+        return fallback_fast_solver(tmp, np.random.default_rng(1234))
 
-with tabs[4]:
-    st.header("RTA — Quick Diagnostics")
-    st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes. The **log-log derivative** plot is key: a slope of ~0.5 can indicate linear flow (common in early unconventional well life), while a slope of ~0 can indicate boundary-dominated flow. These trends help validate the simulation physics and understand the drainage behavior.")
-    sim_data = st.session_state.sim if st.session_state.sim is not None else fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed)))
-    t,qg = sim_data["t"], sim_data["qg"]
+sim_data = _get_sim_preview()
+t = np.asarray(sim_data.get("t", np.geomspace(1.0, 5500.0, 280)))
+qg = np.asarray(sim_data.get("qg", np.zeros_like(t)))
 
-    # NEW: y-axis toggle for rates (Linear / Log)
-    rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode")
-    y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
 
-    # R1. Gas rate (q) vs time (x is already log scale in the layout helper)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
-    fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
-    fig.update_yaxes(type=y_type_rta)
-    st.plotly_chart(fig, use_container_width=True, key="rta_rate_plot")
 
-    # R2. Log-log derivative (keep linear y for slope clarity)
-    logt,logq = np.log10(t), np.log10(np.maximum(qg,1e-9))
-    slope = np.gradient(logq, logt)
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt"))
-    fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
-    st.plotly_chart(fig2, use_container_width=True, key="rta_deriv_plot")
 with tabs[5]:
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary"):
