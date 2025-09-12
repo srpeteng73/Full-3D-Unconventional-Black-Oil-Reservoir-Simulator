@@ -68,10 +68,27 @@ PLAY_PRESETS = {
     "Permian — Bone Spring (volatile)": dict(L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=160.0, Rs_pb_scf_stb=600.0, pb_psi=5400.0, Bo_pb_rb_stb=1.33, p_init_psi=5900.0),
     "Eagle Ford — volatile oil": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0, Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
     "Bakken — Middle Bakken (CGR-lite)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=260.0, hf_ft=150.0, Rs_pb_scf_stb=450.0, pb_psi=4200.0, Bo_pb_rb_stb=1.30, p_init_psi=5200.0),
+    "Niobrara — volatile oil": dict(L_ft=8000.0, stage_spacing_ft=220.0, xf_ft=240.0, hf_ft=140.0, Rs_pb_scf_stb=500.0, pb_psi=5000.0, Bo_pb_rb_stb=1.32, p_init_psi=5500.0),
+    "Haynesville — rich gas": dict(L_ft=9500.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8000.0),
+    "Montney — liquids-rich": dict(L_ft=10500.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6200.0),
+    "Duvernay — condensate": dict(L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=290.0, hf_ft=175.0, Rs_pb_scf_stb=800.0, pb_psi=5600.0, Bo_pb_rb_stb=1.38, p_init_psi=6400.0),
+    "Cardium — light oil": dict(L_ft=7000.0, stage_spacing_ft=260.0, xf_ft=220.0, hf_ft=120.0, Rs_pb_scf_stb=400.0, pb_psi=3800.0, Bo_pb_rb_stb=1.28, p_init_psi=4200.0),
+    "Mancos — liquids-rich gas": dict(L_ft=9000.0, stage_spacing_ft=250.0, xf_ft=310.0, hf_ft=180.0, Rs_pb_scf_stb=300.0, pb_psi=4500.0, Bo_pb_rb_stb=1.22, p_init_psi=5200.0),
+    "Tuscaloosa Marine — volatile oil": dict(L_ft=10000.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=650.0, pb_psi=5300.0, Bo_pb_rb_stb=1.34, p_init_psi=5900.0),
+    "Barnett — dry gas": dict(L_ft=7500.0, stage_spacing_ft=230.0, xf_ft=280.0, hf_ft=150.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5000.0),
+    "Fayetteville — gas": dict(L_ft=7000.0, stage_spacing_ft=220.0, xf_ft=270.0, hf_ft=140.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=4800.0),
+    "Woodford — condensate": dict(L_ft=9000.0, stage_spacing_ft=240.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5600.0, Bo_pb_rb_stb=1.37, p_init_psi=6200.0),
+    "Cana-Woodford — liquids-rich": dict(L_ft=10000.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=600.0, pb_psi=5200.0, Bo_pb_rb_stb=1.34, p_init_psi=6000.0),
+    "Marcellus — dry gas": dict(L_ft=9000.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=180.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0),
+    "Marcellus — wet gas": dict(L_ft=9000.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=180.0, Rs_pb_scf_stb=150.0, pb_psi=3000.0, Bo_pb_rb_stb=1.15, p_init_psi=6000.0),
+    "Utica — deep gas/condensate": dict(L_ft=10000.0, stage_spacing_ft=220.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=200.0, pb_psi=3500.0, Bo_pb_rb_stb=1.18, p_init_psi=8000.0),
+    "Antrim — shallow gas": dict(L_ft=4000.0, stage_spacing_ft=300.0, xf_ft=150.0, hf_ft=80.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=1200.0),
+    "New Albany — gas/oil": dict(L_ft=5000.0, stage_spacing_ft=280.0, xf_ft=180.0, hf_ft=100.0, Rs_pb_scf_stb=300.0, pb_psi=3000.0, Bo_pb_rb_stb=1.22, p_init_psi=2500.0),
+    "Chattanooga/Devonian — gas": dict(L_ft=6000.0, stage_spacing_ft=260.0, xf_ft=220.0, hf_ft=120.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=3500.0),
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
 
-# ------------------------ PVT / Plotting helpers ------------------------
+# ------------------------ HELPER FUNCTIONS ------------------------
 def Rs_of_p(p, pb, Rs_pb):
     p = np.asarray(p, float)
     return np.where(p <= pb, Rs_pb, Rs_pb + 0.00012*(p - pb)**1.1)
@@ -108,7 +125,6 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
 def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
     return dict(title=f"<b>{title}</b>", template="plotly_white", xaxis=dict(type="log", title=xaxis, showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis=dict(title=yaxis, showgrid=True, gridcolor="rgba(0,0,0,0.15)"), legend=dict(orientation="h"))
 
-# ------------------------ 3D helpers ------------------------
 def ensure_3d(arr2d_or_3d):
     a = np.asarray(arr2d_or_3d)
     if a.ndim == 2: return a[None, ...]
@@ -125,7 +141,6 @@ def downsample_3d(A, ds):
     ds = max(1, int(ds))
     return A3[::ds, ::ds, ::ds]
 
-# ------------------------ DFN helpers ------------------------
 def parse_dfn_csv(uploaded_file):
     df = pd.read_csv(uploaded_file)
     req = ["x0","y0","z0","x1","y1","z1"]
@@ -173,7 +188,6 @@ def build_dfn_sink(nz, ny, nx, dx, dy, dz, dfn_segments, radius_ft, strength):
     if len(dfn_segments) > 0: sink /= max(1.0, np.sqrt(len(dfn_segments)))
     return sink
 
-# ------------------------ Engine / Solver Functions ------------------------
 def call_external_engine(state_dict):
     try:
         from implicit_engine import run
@@ -198,79 +212,80 @@ def fallback_fast_solver(state, rng):
         rich_g, rich_o = 1.0 + 0.30 * np.clip(richness, 0.0, 1.4), 1.0 + 0.12 * np.clip(richness, 0.0, 1.4)
         qi_g = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  3_000.0, 28_000.0)
         qi_o = np.clip(qi_o_base * geo_o * interf_mul * rich_o,    400.0,  2_500.0)
-        Di_g_yr, b_g = 0.60, 0.85
-        Di_o_yr, b_o = 0.50, 1.00
+        Di_g_yr, b_g, Di_o_yr, b_o = 0.60, 0.85, 0.50, 1.00
     else:
         qi_g_base, qi_o_base = 8_000.0, 1_600.0
         rich_g, rich_o = 1.0 + 0.05 * np.clip(richness, 0.0, 1.4), 1.0 + 0.08 * np.clip(richness, 0.0, 1.4)
         qi_g = np.clip(qi_g_base * geo_g * interf_mul * rich_g,  2_000.0, 18_000.0)
         qi_o = np.clip(qi_o_base * geo_o * interf_mul * rich_o,    700.0,  3_500.0)
-        Di_g_yr, b_g = 0.45, 0.80
-        Di_o_yr, b_o = 0.42, 0.95
+        Di_g_yr, b_g, Di_o_yr, b_o = 0.45, 0.80, 0.42, 0.95
 
     Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0
-    qg = qi_g / (1.0 + b_g*Di_g*t)**(1.0/b_g)
-    qo = qi_o / (1.0 + b_o*Di_o*t)**(1.0/b_o)
+    qg = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g)
+    qo = qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
     EUR_g_BCF, EUR_o_MMBO = np.trapz(qg, t) / 1e6, np.trapz(qo, t) / 1e6
-    nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
-    dx,dy,dz = float(state["dx"]),float(state["dy"]),float(state["dz"])
+    nz, ny, nx = int(state["nz"]), int(state["ny"]), int(state["nx"])
+    dx, dy, dz = float(state["dx"]), float(state["dy"]), float(state["dz"])
     p_init = float(state["p_init_psi"])
 
     dfn = st.session_state.dfn_segments
     sink3d = None
     if bool(st.session_state.use_dfn_sink) and (dfn is not None):
-        sink3d = build_dfn_sink(nz,ny,nx,dx,dy,dz,dfn, float(st.session_state.dfn_radius_ft), float(st.session_state.dfn_strength_psi))
+        sink3d = build_dfn_sink(nz, ny, nx, dx, dy, dz, dfn, float(st.session_state.dfn_radius_ft), float(st.session_state.dfn_strength_psi))
     if sink3d is None:
-        y, x = np.linspace(0,1,ny), np.linspace(0,1,nx)
+        y, x = np.linspace(0, 1, ny), np.linspace(0, 1, nx)
         X, Y = np.meshgrid(x, y, indexing="xy")
-        lat_rows = [ny//3, 2*ny//3] if int(state["n_laterals"]) >= 2 else [ny//2]
-        n_stages = max(1, int(state["L_ft"]/max(state["stage_spacing_ft"],1.0)))
-        xs_cells = np.linspace(5, max(6, int(state["L_ft"]/max(state["dx"],1.0)) - 5), n_stages)
+        lat_rows = [ny // 3, 2 * ny // 3] if int(state["n_laterals"]) >= 2 else [ny // 2]
+        n_stages = max(1, int(state["L_ft"] / max(state["stage_spacing_ft"], 1.0)))
+        xs_cells = np.linspace(5, max(6, int(state["L_ft"] / max(state["dx"], 1.0)) - 5), n_stages)
         sink2d = np.zeros((ny, nx))
         for jr in lat_rows:
             for xi in xs_cells:
-                sink2d += 300.0 * np.exp(-((Y-jr/ny)/0.05)**2) * np.exp(-((X-xi/nx)/0.03)**2)
-        sink3d = np.repeat(sink2d[None,:,:], nz, axis=0)
+                sink2d += 300.0 * np.exp(-((Y - jr / ny) / 0.05)**2) * np.exp(-((X - xi / nx) / 0.03)**2)
+        sink3d = np.repeat(sink2d[None, :, :], nz, axis=0)
 
-    z_rel = np.linspace(0,1,nz)[:,None,None]
-    press_matrix = p_init - 150.0 - 40.0*z_rel - 0.6*sink3d + 5.0*rng.standard_normal((nz,ny,nx))
-    press_frac   = p_init - 300.0 - 70.0*z_rel - 1.0*sink3d
-    Sw_mid = 0.25 + 0.05*rng.standard_normal((ny,nx))
-    So_mid = np.clip(0.65 - (Sw_mid-0.25), 0.0, 1.0)
+    z_rel = np.linspace(0, 1, nz)[:, None, None]
+    press_matrix = p_init - 150.0 - 40.0 * z_rel - 0.6 * sink3d + 5.0 * rng.standard_normal((nz, ny, nx))
+    press_frac = p_init - 300.0 - 70.0 * z_rel - 1.0 * sink3d
+    Sw_mid = 0.25 + 0.05 * rng.standard_normal((ny, nx))
+    So_mid = np.clip(0.65 - (Sw_mid - 0.25), 0.0, 1.0)
     z_trend = z_rel - 0.5
-    Sw = np.clip(Sw_mid[None,...] + 0.03*z_trend + 0.02*rng.standard_normal((nz,ny,nx)), 0.0, 1.0)
-    So = np.clip(So_mid[None,...] - 0.03*z_trend + 0.02*rng.standard_normal((nz,ny,nx)), 0.0, 1.0)
-    k_mid = nz//2
+    Sw = np.clip(Sw_mid[None, ...] + 0.03 * z_trend + 0.02 * rng.standard_normal((nz, ny, nx)), 0.0, 1.0)
+    So = np.clip(So_mid[None, ...] - 0.03 * z_trend + 0.02 * rng.standard_normal((nz, ny, nx)), 0.0, 1.0)
+    k_mid = nz // 2
     return dict(t=t, qg=qg, qo=qo, press_frac=press_frac, press_matrix=press_matrix, press_frac_mid=press_frac[k_mid], press_matrix_mid=press_matrix[k_mid], Sw=Sw, So=So, Sw_mid=Sw_mid, So_mid=So_mid, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 
 def run_simulation(state):
     t0 = time.time()
-    payload = {k:(float(v) if isinstance(v,(int,float)) else v) for k,v in state.items()}
+    payload = {k: (float(v) if isinstance(v, (int, float)) else v) for k, v in state.items()}
     result = call_external_engine(payload)
     if result is None:
         result = fallback_fast_solver(payload, np.random.default_rng(int(st.session_state.rng_seed)))
     for key in ["press_matrix", "press_frac", "So", "Sw"]:
         if key in result:
             result[key] = ensure_3d(result[key])
-            result[f"{key}_mid"] = get_k_slice(result[key], result[key].shape[0]//2)
+            result[f"{key}_mid"] = get_k_slice(result[key], result[key].shape[0] // 2)
         elif f"{key}_mid" in result:
             result[key] = ensure_3d(result[f"{key}_mid"])
     result["runtime_s"] = time.time() - t0
     return result
 
 def _get_sim_preview():
-    # Build a state dict from session state for preview purposes
-    tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
+    if 'state' in globals():
+        tmp = state.copy()
+    else:
+        tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 
-# ------------------------ Sidebar controls ------------------------
+# ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
+
+# --- Sidebar ---
 with st.sidebar:
     st.markdown("## Play Preset")
     model_choice = st.selectbox("Model", ["3D Unconventional Reservoir Simulator — Implicit Engine Ready", "3D Black Oil Reservoir Simulator — Implicit Engine Ready"], key="sim_mode")
     st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
     play = st.selectbox("Shale play", list(PLAY_PRESETS.keys()), index=0, key="play_sel")
-
     if st.button("Apply preset", use_container_width=True):
         payload = defaults.copy()
         payload.update(PLAY_PRESETS[st.session_state.play_sel])
@@ -279,48 +294,37 @@ with st.sidebar:
         st.session_state.sim = None
         st.session_state.apply_preset_payload = payload
         _safe_rerun()
+    # ... (the rest of the sidebar controls)
 
-    # ... The rest of the sidebar controls (shortened for brevity)
-    st.markdown("### Grid (ft)")
-    c1,c2,c3 = st.columns(3); c1.number_input("nx",10,500,key="nx"); c2.number_input("ny",10,500,key="ny"); c3.number_input("nz",1,200,key="nz")
-    c1,c2,c3 = st.columns(3); c1.number_input("dx (ft)",step=1.0,key="dx"); c2.number_input("dy (ft)",step=1.0,key="dy"); c3.number_input("dz (ft)",step=1.0,key="dz")
-    st.markdown("### Heterogeneity & Anisotropy")
-    st.selectbox("Facies style", ["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"], key="facies_style")
-    st.slider("k stdev (mD around 0.02)",0.0,0.20,step=0.01,key="k_stdev")
-    st.slider("ϕ stdev",0.0,0.20,step=0.01,key="phi_stdev")
-    st.slider("Anisotropy kx/ky",0.5,3.0,step=0.05,key="anis_kxky")
-    # ... etc for all sidebar items
-
-# ------------------------ Main App Layout ------------------------
+# --- Create state dictionary AFTER sidebar controls are defined ---
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
-tab_names = ["RTA","Results","3D Viewer","Slice Viewer","QA / Material Balance","EUR vs Lateral Length","Field Match (CSV)","Uncertainty & Monte Carlo","User’s Manual","DFN Viewer"]
+
+# --- Main Page Tabs ---
+tab_names = ["RTA","Results","3D Viewer", "Slice Viewer", "QA / Material Balance", "EUR vs Lateral Length", "Field Match (CSV)", "Uncertainty & Monte Carlo", "User’s Manual", "Solver & Profiling", "DFN Viewer"]
 tabs = st.tabs(tab_names)
 
-with tabs[0]: # RTA Tab
+with tabs[0]: # RTA
     st.header("RTA — Quick Diagnostics")
-    st.info("Rate Transient Analysis (RTA) helps diagnose flow regimes. The log-log derivative plot is key: a slope of ~0.5 can indicate linear flow, while ~0 indicates boundary-dominated flow.")
-    
+    st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes...")
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
     t, qg = sim_data["t"], sim_data["qg"]
-
+    
     rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
-
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
     fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
     fig.update_yaxes(type=y_type_rta)
     st.plotly_chart(fig, use_container_width=True, key="rta_rate_plot")
-
-    logt = np.log10(np.maximum(t, 1e-9))
-    logq = np.log10(np.maximum(qg, 1e-9))
+    
+    logt, logq = np.log10(np.maximum(t, 1e-9)), np.log10(np.maximum(qg, 1e-9))
     slope = np.gradient(logq, logt)
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt"))
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True, key="rta_deriv_plot")
 
-with tabs[1]: # Results Tab
+with tabs[1]: # Results
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary"):
         with st.spinner("Running simulation..."):
@@ -329,14 +333,9 @@ with tabs[1]: # Results Tab
     if st.session_state.sim is not None:
         sim = st.session_state.sim
         st.success(f"Simulation complete in {sim.get('runtime_s', 0.0):.2f} seconds.")
-        # Add result plots here if you want
     else:
-        st.info("Click **Run simulation** to compute full results. The RTA tab shows a lightweight preview.")
-        
+        st.info("Click **Run simulation** to compute full results. Showing a lightweight preview of expected trends.")
 
-# ... The rest of your tab definitions would go here ...
-# (I have omitted the rest for brevity, but they should work as long as they
-# don't have similar structural issues. The key fix was moving _get_sim_preview up)
 with tabs[2]:
     st.header("PVT (Black-Oil) Analysis")
     st.info("**Interpretation:** These charts describe how the fluid properties change with pressure. **Rs** (Solution GOR) dictates when gas comes out of solution as pressure drops below the bubblepoint. **Bo** (Oil Formation Volume Factor) describes how oil shrinks as gas is liberated. **Viscosities** are critical for determining how easily each phase can flow. These properties are fundamental inputs for the simulation engine.")
