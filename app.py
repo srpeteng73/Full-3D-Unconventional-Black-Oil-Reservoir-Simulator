@@ -469,13 +469,12 @@ with tabs[5]:
         fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], name="Gas Rate", line=dict(color="#d62728"), yaxis="y1"))
         fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], name="Oil Rate", line=dict(color="#2ca02c"), yaxis="y2"))
         
-        # --- THIS IS THE CORRECTED SECTION ---
         # 1. Get the base layout from the helper function
         layout_config = semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)")
         
         # 2. Update the layout with specific settings for the dual-axis chart
         layout_config.update(
-            yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728"),
+            yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728", showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
             yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False)
         )
         
@@ -485,9 +484,15 @@ with tabs[5]:
 
         c1_res, c2_res = st.columns(2)
         with c1_res:
+            # GOR plot does not have this issue, no change needed here.
             gor = np.divide(sim_data['qg'] * 1000, sim_data['qo'], out=np.full_like(sim_data['qg'], np.nan), where=sim_data['qo']>1e-3)
             fig_gor = go.Figure(go.Scatter(x=sim_data['t'], y=gor, name="GOR", line=dict(color="orange")))
-            fig_gor.update_layout(**semi_log_layout("Gas-Oil Ratio (GOR)", yaxis="GOR (scf/STB)"), xaxis_type="linear", yaxis_type="linear")
+            # This one is slightly different - it's a linear axis, so we update the xaxis dict from the helper
+            gor_layout = semi_log_layout("Gas-Oil Ratio (GOR)", yaxis="GOR (scf/STB)")
+            gor_layout['xaxis']['type'] = 'linear'
+            gor_layout['xaxis']['title'] = 'Day'
+            gor_layout['yaxis']['type'] = 'linear'
+            fig_gor.update_layout(gor_layout)
             st.plotly_chart(fig_gor, use_container_width=True)
         with c2_res:
             cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6 # BCF
@@ -495,7 +500,21 @@ with tabs[5]:
             fig_cum = go.Figure()
             fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_g, name="Cumulative Gas", line=dict(color="#d62728"), yaxis="y1"))
             fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_o, name="Cumulative Oil", line=dict(color="#2ca02c"), yaxis="y2"))
-            fig_cum.update_layout(**semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)"), xaxis_type="linear", yaxis=dict(title="Cumulative Gas (BCF)"), yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False))
+            
+            # --- THIS IS THE CORRECTED SECTION FOR THE CUMULATIVE PLOT ---
+            # 1. Get the base layout
+            cum_layout = semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)")
+            
+            # 2. Update with specific settings for this dual-axis plot
+            cum_layout['xaxis']['type'] = 'linear' # Cumulative plots are usually linear time
+            cum_layout['xaxis']['title'] = 'Day'
+            cum_layout.update(
+                yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
+                yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False)
+            )
+
+            # 3. Apply the final, consolidated layout
+            fig_cum.update_layout(cum_layout)
             st.plotly_chart(fig_cum, use_container_width=True)
     else: st.info("Click **Run simulation** to compute and display the full 3D results.")
 with tabs[6]:
