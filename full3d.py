@@ -30,7 +30,6 @@ class Rock:
         self.poro = rock_params.get('phi', np.full(grid.num_cells, 0.1)).flatten()
         self.kx = rock_params.get('kx_md', np.full(grid.num_cells, 0.05)).flatten()
         self.ky = rock_params.get('ky_md', np.full(grid.num_cells, 0.05)).flatten()
-        # For simplicity, we assume kz = 0.1 * kx
         self.kz = self.kx * 0.1
 
 # --- The Fluid Class (from Step 2) ---
@@ -41,66 +40,105 @@ class Fluid:
         self.Rs_pb = pvt_params.get('Rs_pb_scf_stb')
         self.Bo_pb = pvt_params.get('Bo_pb_rb_stb')
         self.muo_pb = pvt_params.get('muo_pb_cp')
-        self.mug_pb = pvt_params.get('mug_pb_cp')
 
     def Bo(self, P):
         p = np.asarray(P, float)
         slope = -1.0e-5
         return np.where(p <= self.pb_psi, self.Bo_pb, self.Bo_pb + slope*(p - self.pb_psi))
+    
+    def mu_oil(self, P):
+        # For simplicity, assume constant oil viscosity for now
+        return np.full_like(P, self.muo_pb)
 
-    def Rs(self, P):
-        p = np.asarray(P, float)
-        return np.where(p <= self.pb_psi, self.Rs_pb, self.Rs_pb + 0.00012*(p - self.pb_psi)**1.1)
-
-# --- NEW: The Transmissibility Class ---
+# --- The Transmissibility Class (from Step 3) ---
 class Transmissibility:
     def __init__(self, grid, rock):
-        """
-        Pre-calculates the geometric part of transmissibility between all cells.
-        This is a performance optimization. The formula is T = (kA / L), where
-        L is the distance between cell centers. We use a harmonic average for k.
-        """
         self.T_x = np.zeros(grid.num_cells)
         self.T_y = np.zeros(grid.num_cells)
         self.T_z = np.zeros(grid.num_cells)
-        
-        conversion_factor = 0.001127 # Darcy units conversion for oilfield units
-        
-        # Loop through all interior cells
+        conversion_factor = 0.001127
         for k in range(grid.nz):
             for j in range(grid.ny):
                 for i in range(grid.nx):
                     m = grid.get_idx(i, j, k)
-                    
-                    # Transmissibility in X-direction (connection i to i+1)
                     if i < grid.nx - 1:
                         m_plus_1 = grid.get_idx(i + 1, j, k)
-                        k_harmonic_avg = 2 * rock.kx[m] * rock.kx[m_plus_1] / (rock.kx[m] + rock.kx[m_plus_1])
-                        area = grid.dy * grid.dz
-                        self.T_x[m] = conversion_factor * k_harmonic_avg * area / grid.dx
-                    
-                    # Transmissibility in Y-direction (connection j to j+1)
+                        k_h = 2 * rock.kx[m] * rock.kx[m_plus_1] / (rock.kx[m] + rock.kx[m_plus_1])
+                        self.T_x[m] = conversion_factor * k_h * grid.dy * grid.dz / grid.dx
                     if j < grid.ny - 1:
                         m_plus_1 = grid.get_idx(i, j + 1, k)
-                        k_harmonic_avg = 2 * rock.ky[m] * rock.ky[m_plus_1] / (rock.ky[m] + rock.ky[m_plus_1])
-                        area = grid.dx * grid.dz
-                        self.T_y[m] = conversion_factor * k_harmonic_avg * area / grid.dy
-                        
-                    # Transmissibility in Z-direction (connection k to k+1)
+                        k_h = 2 * rock.ky[m] * rock.ky[m_plus_1] / (rock.ky[m] + rock.ky[m_plus_1])
+                        self.T_y[m] = conversion_factor * k_h * grid.dx * grid.dz / grid.dy
                     if k < grid.nz - 1:
                         m_plus_1 = grid.get_idx(i, j, k + 1)
-                        k_harmonic_avg = 2 * rock.kz[m] * rock.kz[m_plus_1] / (rock.kz[m] + rock.kz[m_plus_1])
-                        area = grid.dx * grid.dy
-                        self.T_z[m] = conversion_factor * k_harmonic_avg * area / grid.dz
+                        k_h = 2 * rock.kz[m] * rock.kz[m_plus_1] / (rock.kz[m] + rock.kz[m_plus_1])
+                        self.T_z[m] = conversion_factor * k_h * grid.dx * grid.dy / grid.dz
+
+# --- NEW: The State Class ---
+class State:
+    def __init__(self, inputs, grid, fluid):
+        self.grid = grid
+        self.fluid = fluid
+        init_params = inputs.get('init', {})
+        self.pressure = np.full(grid.num_cells, init_params.get('p_init_psi'))
+        self.Sw = np.full(grid.num_cells, init_params.get('Sw_init'))
+        self.Sg = np.zeros(grid.num_cells)
+    
+    def update_properties(self):
+        """Calculates all pressure-dependent fluid properties for the current state."""
+        self.Bo = self.fluid.Bo(self.pressure)
+        self.mu_oil = self.fluid.mu_oil(self.pressure)
+        # For single phase oil, relative permeability is 1 and mobility is simple
+        self.oil_mobility = (1.0 / self.mu_oil) / self.Bo
+
+# --- NEW: The Residual Calculation Function ---
+def calculate_residuals(state_new, state_old, grid, rock, fluid, trans, dt_days):
+    """
+    Calculates the mass balance error (residual) for each cell for the oil phase.
+    Residual = Accumulation - Flow_In + Flow_Out - Well_Term
+    """
+    residuals = np.zeros(grid.num_cells)
+    
+    # Calculate Accumulation term for all cells at once (vectorized)
+    # Accumulation = (Vp/dt) * d(So/Bo)
+    Vp = grid.cell_volume_ft3() * rock.poro / 5.615 # Pore volume in bbls
+    accumulation = (Vp / dt_days) * ( (1-state_new.Sw)/state_new.Bo - (1-state_old.Sw)/state_old.Bo )
+    residuals += accumulation
+
+    # Loop through cells to calculate flow terms (this is where the work is)
+    for k in range(grid.nz):
+        for j in range(grid.ny):
+            for i in range(grid.nx):
+                m = grid.get_idx(i, j, k)
+                
+                # Flow in X-direction
+                if i > 0:
+                    m_minus_1 = grid.get_idx(i-1, j, k)
+                    # Upstream mobility weighting
+                    mob = state_new.oil_mobility[m_minus_1] if state_new.pressure[m_minus_1] > state_new.pressure[m] else state_new.oil_mobility[m]
+                    flow = trans.T_x[m_minus_1] * mob * (state_new.pressure[m_minus_1] - state_new.pressure[m])
+                    residuals[m] -= flow
+                if i < grid.nx - 1:
+                    m_plus_1 = grid.get_idx(i+1, j, k)
+                    mob = state_new.oil_mobility[m] if state_new.pressure[m] > state_new.pressure[m_plus_1] else state_new.oil_mobility[m_plus_1]
+                    flow = trans.T_x[m] * mob * (state_new.pressure[m+1] - state_new.pressure[m])
+                    residuals[m] -= flow
+                
+                # TODO: Add flow terms for Y and Z directions similarly...
+    
+    # TODO: Add well terms for perforated cells...
+    
+    return residuals
+
 
 def simulate(inputs):
     return simulate_3D_implicit(inputs)
 
 def simulate_3D_implicit(inputs):
     """
-    PHASE 1b BLUEPRINT: 3D, THREE-PHASE IMPLICIT SIMULATOR
+    PHASE 1b BLUEPRINT: 3D, SINGLE-PHASE IMPLICIT SIMULATOR
     """
-    print("--- Running Phase 1b: 3D Three-Phase Implicit Engine Blueprint ---")
+    print("--- Running Phase 1b: 3D Implicit Engine Blueprint ---")
     start_time = time.time()
 
     # --- 1. Initialize Core Components ---
@@ -111,7 +149,8 @@ def simulate_3D_implicit(inputs):
     print("Grid, Rock, Fluid, and Transmissibility components initialized.")
 
     # --- 2. Initialize State Variables ---
-    unknowns = np.zeros(grid.num_cells * 3) 
+    state_current = State(inputs, grid, fluid)
+    state_current.update_properties()
     
     # --- 3. Setup Timesteps ---
     total_time_days = 30 * 365
@@ -121,20 +160,13 @@ def simulate_3D_implicit(inputs):
     
     # --- 4. Main Time-Stepping Loop ---
     for step in range(num_timesteps):
+        state_old = state_current
         
         # --- 5. Newton-Raphson Iteration Loop ---
-        # PSEUDOCODE:
         # for newton_iter in range(max_newton_iter):
-        #     # You would now use the pre-calculated transmissibilities inside
-        #     # the residual and jacobian calculations. For example, the flow
-        #     # between cell m and m+1 in the x-direction would be:
-        #     # flow = trans.T_x[m] * mobility * (P[m] - P[m+1])
-        #
-        #     R = calculate_residuals(unknowns, old_unknowns, grid, rock, fluid, trans, dt_days)
-        #     J = assemble_jacobian(unknowns, grid, rock, fluid, trans, dt_days)
-        #     dx = solve_linear_system(J, -R)
-        #     unknowns += dx
-        #     if converged: break
+        #     # Calculate residuals based on the current guess for the new state
+        #     residuals = calculate_residuals(state_new_guess, state_old, grid, rock, fluid, trans, dt_days)
+        #     # ... (rest of the solver) ...
         pass
 
     # --- 6. Post-Process and Return Results (Placeholder) ---
