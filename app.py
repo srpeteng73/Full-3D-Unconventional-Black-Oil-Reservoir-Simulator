@@ -570,34 +570,88 @@ elif selected_tab == "Slice Viewer":
 
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
-    st.info("**Interpretation:** A plot of average reservoir pressure vs. cumulative production is a classic diagnostic tool to assess the physical consistency of the simulation. A smooth, monotonically decreasing pressure trend is expected.")
+    st.info("**Interpretation:** These plots use the Material Balance Equation (MBE) as an independent 'tank' model to verify the simulation's physical consistency and estimate the original fluid in place.")
+    
     sim_data = st.session_state.get("sim")
     if sim_data is None: 
         st.warning("Run a simulation on the 'Results' tab to view QA plots.")
-    # --- CORRECTED LINE 1 ---
-    # Was checking for the wrong key: 'press_matrix_mid'
     elif sim_data.get('pm_mid_psi') is None: 
         st.info("The selected solver did not return the necessary pressure evolution data for this tab.")
     else:
         cum_g_mmscf = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0)
-        
-        # --- CORRECTED LINE 2 ---
-        # Was getting data from the wrong key: 'press_matrix_mid'
-        p_avg_series = [np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])]
+        p_avg_series = np.array([np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])])
         
         if len(p_avg_series) == len(sim_data['t']):
-            fig_pz = go.Figure(go.Scatter(x=cum_g_mmscf, y=p_avg_series, mode='lines', line=dict(color='purple')))
-            fig_pz.update_layout(
-                title="<b>Average Reservoir Pressure vs. Cumulative Gas Production</b>",
-                xaxis_title="Cumulative Gas Production (MMscf)",
-                yaxis_title="Average Pressure (psi)",
-                template="plotly_white"
-            )
-            st.plotly_chart(fig_pz, use_container_width=True)
+            # --- Part 1: Gas Material Balance (P/Z vs Gp) ---
+            st.markdown("### Gas Material Balance")
+            z_factors = z_factor_approx(p_avg_series, p_init_psi=state['p_init_psi'])
+            p_over_z = p_avg_series / z_factors
+            fit_start_index = len(cum_g_mmscf) // 4
+            slope, intercept, _, _, _ = stats.linregress(cum_g_mmscf[fit_start_index:], p_over_z[fit_start_index:])
+            giip_bcf = (-intercept / slope) / 1000.0 if slope != 0 else 0
+            sim_eur_g_bcf = sim_data['EUR_g_BCF']
+            c1, c2 = st.columns(2)
+            c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF")
+            c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=f"{(giip_bcf-sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim")
+            fig_pz_gas = go.Figure()
+            fig_pz_gas.add_trace(go.Scatter(x=cum_g_mmscf, y=p_over_z, mode='markers', name='P/Z Data Points'))
+            x_fit = np.array([0, giip_bcf * 1000]); y_fit = slope * x_fit + intercept
+            fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode='lines', name='Linear Extrapolation', line=dict(dash='dash')))
+            fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white", xaxis_range=[0, giip_bcf * 1100])
+            st.plotly_chart(fig_pz_gas, use_container_width=True)
+
+            # --- Part 2: Oil Material Balance (Havlena-Odeh Plot) ---
+            st.markdown("---")
+            st.markdown("### Oil Material Balance")
+            st.info("**Analysis:** For an oil reservoir, a plot of underground withdrawal (F) vs. total fluid expansion (Et) should form a straight line. The slope of this line is an estimate of the Original Oil In Place (OOIP).")
+
+            # Calculate cumulative production and Rp
+            Np = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0)
+            Gp = cumulative_trapezoid(sim_data['qg'] * 1000, sim_data['t'], initial=0) # Gp in scf
+            Rp = np.divide(Gp, Np, out=np.zeros_like(Gp), where=Np!=0)
+
+            # Get PVT properties at each pressure step
+            Bo = Bo_of_p(p_avg_series, state['pb_psi'], state['Bo_pb_rb_stb'])
+            Rs = Rs_of_p(p_avg_series, state['pb_psi'], state['Rs_pb_scf_stb'])
+            Bg = Bg_of_p(p_avg_series)
+
+            # Get initial PVT properties
+            p_init = state['p_init_psi']
+            Boi = Bo_of_p(p_init, state['pb_psi'], state['Bo_pb_rb_stb'])
+            Rsi = Rs_of_p(p_init, state['pb_psi'], state['Rs_pb_scf_stb'])
+
+            # Calculate F (Underground Withdrawal) and Et (Total Expansion) terms
+            # F = Np * [Bo + (Rp - Rs) * Bg]
+            # Et = (Bo - Boi) + (Rsi - Rs) * Bg  (for a solution-gas drive reservoir)
+            F = Np * (Bo + (Rp - Rs) * Bg)
+            Et = (Bo - Boi) + (Rsi - Rs) * Bg
+            
+            # Perform linear regression on F vs Et
+            # The slope of this line should be N (OOIP in STB)
+            fit_start_index_oil = len(F) // 4
+            slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_index_oil:], F[fit_start_index_oil:])
+            ooip_mmstb = slope_oil / 1e6 if slope_oil > 0 else 0
+            sim_eur_o_mmstb = sim_data['EUR_o_MMBO']
+            
+            # Calculate Recovery Factor
+            rec_factor = (sim_eur_o_mmstb / ooip_mmstb) * 100 if ooip_mmstb > 0 else 0
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB")
+            c2.metric("Material Balance OOIP (from F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
+            c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
+
+            # Create the F vs Et plot
+            fig_mbe_oil = go.Figure()
+            fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode='markers', name='F vs Et Data Points'))
+            x_fit_oil = np.array([0, np.max(Et)])
+            y_fit_oil = slope_oil * x_fit_oil
+            fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode='lines', name=f'Slope (OOIP) = {ooip_mmstb:.2f} MMSTB', line=dict(dash='dash')))
+            fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena-Odeh Plot)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
+            st.plotly_chart(fig_mbe_oil, use_container_width=True)
+
         else:
-            # This warning should no longer appear after the fix
-            st.warning("Could not create P vs Gp plot. Pressure and time data have mismatched lengths.")
-elif selected_tab == "EUR vs Lateral Length":
+            st.warning("Could not create plots. Pressure and time data have mismatched lengths.")elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
     st.info("**Interpretation:** Analyze how Estimated Ultimate Recovery (EUR) changes with well lateral length. This analysis uses the fast analytical solver for speed.")
     c1, c2, c3 = st.columns(3)
