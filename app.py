@@ -569,12 +569,9 @@ elif selected_tab == "RTA":
 elif selected_tab == "Results":
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary", use_container_width=True):
-        with st.spinner("Running full 3D simulation..."):
-            # inject engine_type into state for run_full_3d_simulation
-            state_with_engine = dict(state)
-            state_with_engine['engine_type'] = st.session_state.get('engine_type')
-            st.session_state.sim = run_simulation(state_with_engine)
-
+        with st.spinner("Running full 3D simulation... This may take a few minutes."):
+            st.session_state.sim = run_simulation(state)
+            
     if st.session_state.sim:
         sim_data = st.session_state.sim
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
@@ -582,10 +579,17 @@ elif selected_tab == "Results":
         g1, g2 = st.columns(2)
         with g1:
             eur_g_fig, eur_o_fig = eur_gauges(sim_data.get('EUR_g_BCF', 0), sim_data.get('EUR_o_MMBO', 0))
-            st.plotly_chart(eur_g_fig, use_container_width=True, theme="streamlit")
+            st.plotly_chart(eur_g_fig, use_container_width=True)
         with g2:
-            st.plotly_chart(eur_o_fig, use_container_width=True, theme="streamlit")
-
+            st.plotly_chart(eur_o_fig, use_container_width=True)
+        with st.expander("Click for details"):
+            st.markdown("""
+            **Estimated Ultimate Recovery (EUR)** is the total volume of hydrocarbons expected to be recovered over the well's entire life (in this case, a 30-year forecast).
+            - **BCF**: Billion Cubic Feet (for gas).
+            - **MMBO**: Million Stock-Tank Barrels of Oil.
+            These gauges provide a quick, high-level summary of the well's projected performance.
+            """)
+            
         st.markdown("### Production Profiles")
         rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="res_rate_y_mode")
         y_type = "log" if rate_y_mode == "Log" else "linear"
@@ -596,11 +600,44 @@ elif selected_tab == "Results":
         layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728", showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False))
         fig_rate.update_layout(layout_config)
         st.plotly_chart(fig_rate, use_container_width=True, theme="streamlit")
-
+        with st.expander("Click for details"):
+            st.markdown("""
+            This plot shows the simulated **production rates** for gas (red) and oil (green) over time. This is the primary output of the simulation. The dual-axis chart allows for direct comparison of both fluid phases. The characteristic steep initial decline is clearly visible.
+            """)
+            
         c1_res, c2_res = st.columns(2)
         with c1_res:
-            gor = np.divide(sim_data['qg'] * 1000, sim_data['qo'], out=np.full_like(sim_data['qg'], np.nan), where=sim_data['qo']>1*_
-elif selected_tab == "3D Viewer":
+            # --- THIS IS THE CORRECTED LINE ---
+            gor = np.divide(sim_data['qg'] * 1000, sim_data['qo'], out=np.full_like(sim_data['qg'], np.nan), where=sim_data['qo']>1e-3)
+            fig_gor = go.Figure(go.Scatter(x=sim_data['t'], y=gor, name="GOR", line=dict(color="orange")))
+            gor_layout = semi_log_layout("Gas-Oil Ratio (GOR)", yaxis="GOR (scf/STB)")
+            gor_layout['xaxis']['type'] = 'linear'; gor_layout['xaxis']['title'] = 'Day'; gor_layout['yaxis']['type'] = 'linear'
+            fig_gor.update_layout(gor_layout)
+            st.plotly_chart(fig_gor, use_container_width=True, theme="streamlit")
+            with st.expander("Click for details"):
+                st.markdown("""
+                The **Gas-Oil Ratio (GOR)** is the ratio of produced gas (in standard cubic feet) to produced oil (in stock-tank barrels). Its trend is a powerful diagnostic tool:
+                - **Rising GOR**: Typically seen in black oil reservoirs as pressure drops below the bubble point, liberating gas that flows more easily than oil.
+                - **Falling GOR**: A classic signature of retrograde condensate reservoirs, where liquid drops out in the reservoir, leaving a leaner gas to be produced.
+                """)
+                
+        with c2_res:
+            cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6
+            cum_o = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0) / 1e6
+            fig_cum = go.Figure()
+            fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_g, name="Cumulative Gas", line=dict(color="#d62728"), yaxis="y1"))
+            fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_o, name="Cumulative Oil", line=dict(color="#2ca02c"), yaxis="y2"))
+            cum_layout = semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)")
+            cum_layout['xaxis']['type'] = 'linear'; cum_layout['xaxis']['title'] = 'Day'
+            cum_layout.update(yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False))
+            fig_cum.update_layout(cum_layout)
+            st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
+            with st.expander("Click for details"):
+                st.markdown("""
+                This plot shows the **cumulative production**, which is the total volume of oil and gas produced up to a given point in time. The curves are the integral of the rate curves. The final point on each curve at the end of the simulation represents the well's EUR.
+                """)
+    else:
+        st.info("Click **Run simulation** to compute and display the full 3D results.")elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
