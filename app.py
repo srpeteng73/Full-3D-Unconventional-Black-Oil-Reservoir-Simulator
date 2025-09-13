@@ -200,6 +200,10 @@ def run_full_3d_simulation(state):
         'grid':{'nx':int(state['nx']),'ny':int(state['ny']),'nz':int(state['nz']),'dx':float(state['dx']),'dy':float(state['dy']),'dz':float(state['dz'])},
         'rock':{'kx_md':st.session_state.get('kx'),'ky_md':st.session_state.get('ky'),'phi':st.session_state.get('phi')},
         'pvt':{'pb_psi':float(state['pb_psi']),'Rs_pb_scf_stb':float(state['Rs_pb_scf_stb']),'Bo_pb_rb_stb':float(state['Bo_pb_rb_stb']),'muo_pb_cp':float(state['muo_pb_cp']),'mug_pb_cp':float(state['mug_pb_cp']),'ct_o_1psi':float(state['ct_o_1psi'])},
+        
+        # --- THIS LINE IS NOW CRITICAL ---
+        'relperm':{'krw_end':float(state['krw_end']),'kro_end':float(state['kro_end']),'nw':float(state['nw']),'no':float(state['no']),'Swc':float(state['Swc']),'Sor':float(state['Sor'])},
+        
         'init':{'p_init_psi':float(state['p_init_psi']), 'Sw_init':float(state['Swc'])},
         'schedule':{'bhp_psi':float(state['pad_bhp_psi'])},
         'msw':{'laterals':int(state['n_laterals']),'L_ft':float(state['L_ft']), 'ss_ft':float(state['stage_spacing_ft']),'hf_ft':float(state['hf_ft'])}
@@ -224,7 +228,6 @@ def run_full_3d_simulation(state):
         'Sw_mid':engine_results.get('Sw_mid'),
         'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0
     }
-
 def run_simulation(state):
     if st.session_state.get('kx') is None:
         rng = np.random.default_rng(int(st.session_state.rng_seed))
