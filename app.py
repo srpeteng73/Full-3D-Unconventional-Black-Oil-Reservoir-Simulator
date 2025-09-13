@@ -1014,6 +1014,7 @@ elif selected_tab == "Well Placement Optimization":
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
+
     st.markdown("""
     ### 1. Introduction
     Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is an interactive tool designed for petroleum engineers, geoscientists, and students to model and forecast hydrocarbon production. It combines a user-friendly interface with powerful backend models to simulate complex reservoir behaviors, from multi-stage fractured horizontal wells in shale plays to conventional black-oil assets.
@@ -1077,14 +1078,19 @@ elif selected_tab == "User’s Manual":
     *   **Fast Analytical Solver**: Used for previews, sensitivities, and Monte Carlo runs, this model is based on the Arps decline curve equation, with parameters intelligently estimated from the reservoir and completion inputs to ensure speed.
     """)
     st.markdown("---")
+
+    # --- FINAL REVISED SECTION ---
     st.markdown("""
     ### 6. Credits and Disclaimer
     *   **Author**: Omar Nur, Petroleum Engineer
     *   **Developed By**: Omar Nur
     
-    This software is provided "as is" and is intended for educational, demonstrational, and professional screening purposes. While it is built on fundamental reservoir engineering principles, it should not be used as the sole basis for making financial or operational decisions without validation against commercial-grade simulators and expert review. The author and developer assume no liability for its use. This software will be for commercialization when the modules are completed.
+    This software is a professional, cloud-based tool designed for rapid reservoir analysis, scenario screening, and forecasting. It is optimized for deployment on major platforms including **Google Cloud** and **AWS**.
+    
+    While it is built on fundamental reservoir engineering principles, it should not be used as the sole basis for making financial or operational decisions without validation against commercial-grade simulators and expert review.
+    
+    This software is on a path to commercialization as modules are completed.
     """)
-
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("**Interpretation:** This tab provides details about the numerical solver settings and performance. Advanced users can tweak these settings in the sidebar.")
