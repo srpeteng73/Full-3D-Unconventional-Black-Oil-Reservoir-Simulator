@@ -221,16 +221,25 @@ def run_simulation(state):
         kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]
         st.session_state.kx, st.session_state.ky, st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None), np.clip(ky_mid[None,...]*kz_scale,1e-4,None), np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
         st.info("Generated 3D rock properties for the simulation.")
+    
     result = run_full_3d_simulation(state)
+    
     if result is None:
         st.warning("Full 3D simulation failed. Showing results from fast preview solver.")
         result = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed)))
-    for key in ["press_matrix", "press_frac", "So", "Sw"]:
+        return result # Return early for the fallback case
+
+    # Start with all results from the engine
+    final_sim_data = result.copy() 
+    
+    # Post-process to ensure arrays are 3D for viewers (optional but good practice)
+    for key in ["press_matrix", "press_frac", "So", "Sw", "p_init_3d", "ooip_3d"]:
         if key in result and result.get(key) is not None:
-            result[key], result[f"{key}_mid"] = ensure_3d(result[key]), get_k_slice(result[key], result[key].shape[0]//2)
-        elif f"{key}_mid" in result and result.get(f"{key}_mid") is not None:
-            result[key] = ensure_3d(result[f"{key}_mid"])
-    return result
+            final_sim_data[key] = ensure_3d(result[key])
+            if f"{key}_mid" not in final_sim_data: # Create a mid-slice if it doesn't exist
+                final_sim_data[f"{key}_mid"] = get_k_slice(final_sim_data[key], final_sim_data[key].shape[0]//2)
+
+    return final_sim_data
 
 def is_location_valid(x_pos, y_pos, state):
     """Checks if a given well location is valid based on constraints."""
