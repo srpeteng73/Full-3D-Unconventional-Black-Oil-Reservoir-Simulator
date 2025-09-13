@@ -435,7 +435,7 @@ elif selected_tab == "Generate 3D property volumes (kx, ky, ϕ)":
     kx_display, ky_display, phi_display = get_k_slice(st.session_state.kx, state['nz']//2), get_k_slice(st.session_state.ky, state['nz']//2), get_k_slice(st.session_state.phi, state['nz']//2)
     c1,c2=st.columns(2)
     with c1:
-        st.plotly_chart(px.imshow(kx_display,origin="lower",color_continuous_scale="Viridis",labels=dict(color="mD"),title="<b>Figure 2. kx — mid-layer (mD)</b>"),use_container_width=True,theme=None)
+        st.plotly_chart(px.imshow(kx_display,origin="lower",color_continuous_scale="Viridis",labels=dict(color="mD"),title="<b>Figure 2. kx — mid-layer (mD)</b>"),use_container_width=True)
         with st.expander("Click for details"):
             st.markdown("""
             **Permeability (k)** is a measure of a rock's ability to transmit fluids. This map shows the permeability in the x-direction (kx) for the middle layer of the reservoir.
@@ -444,14 +444,14 @@ elif selected_tab == "Generate 3D property volumes (kx, ky, ϕ)":
             - The spatial variation is controlled by the **'k stdev'** slider in the sidebar. A higher value creates more heterogeneity.
             """)
     with c2:
-        st.plotly_chart(px.imshow(ky_display,origin="lower",color_continuous_scale="Cividis",labels=dict(color="mD"),title="<b>Figure 3. ky — mid-layer (mD)</b>"),use_container_width=True,theme=None)
+        st.plotly_chart(px.imshow(ky_display,origin="lower",color_continuous_scale="Cividis",labels=dict(color="mD"),title="<b>Figure 3. ky — mid-layer (mD)</b>"),use_container_width=True)
         with st.expander("Click for details"):
             st.markdown("""
             This map shows the permeability in the y-direction (ky). Comparing this map to the kx map allows you to visually assess **anisotropy**.
             - If this map looks different from the kx map, it means the rock's permeability is direction-dependent.
             - The **'Anisotropy kx/ky'** slider in the sidebar directly controls the ratio between the two.
             """)
-    st.plotly_chart(px.imshow(phi_display,origin="lower",color_continuous_scale="Magma",labels=dict(color="ϕ"),title="<b>Figure 4. Porosity ϕ — mid-layer (fraction)</b>"),use_container_width=True,theme=None)
+    st.plotly_chart(px.imshow(phi_display,origin="lower",color_continuous_scale="Magma",labels=dict(color="ϕ"),title="<b>Figure 4. Porosity ϕ — mid-layer (fraction)</b>"),use_container_width=True)
     with st.expander("Click for details"):
         st.markdown("""
         **Porosity (ϕ)** is the fraction of void space in the rock where fluids (oil, gas, water) are stored.
@@ -1014,7 +1014,6 @@ elif selected_tab == "Well Placement Optimization":
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
-
     st.markdown("""
     ### 1. Introduction
     Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is an interactive tool designed for petroleum engineers, geoscientists, and students to model and forecast hydrocarbon production. It combines a user-friendly interface with powerful backend models to simulate complex reservoir behaviors, from multi-stage fractured horizontal wells in shale plays to conventional black-oil assets.
