@@ -671,11 +671,29 @@ elif selected_tab == "Well Placement Optimization":
         num_wells = st.number_input("Number of wells to place", 1, 1, 1, disabled=True, help="Currently supports optimizing a single well location.")
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
+    
     if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
         opt_results = []
         base_state = state.copy()
         rng_opt = np.random.default_rng(st.session_state.rng_seed)
-        x_max = base_state['nx'] * base_state['dx'] - base_state['L_ft']
+        
+        # Calculate maximum placement coordinates
+        reservoir_x_dim = base_state['nx'] * base_state['dx']
+        x_max = reservoir_x_dim - base_state['L_ft']
+
+        # --- NEW & CRITICAL ERROR CHECKING BLOCK ---
+        if x_max < 0:
+            st.error(
+                f"Optimization Cannot Run: The well is too long for the reservoir.\n\n"
+                f"- Reservoir X-Dimension (nx * dx): **{reservoir_x_dim:.0f} ft**\n"
+                f"- Well Lateral Length (L_ft): **{base_state['L_ft']:.0f} ft**\n\n"
+                "Please decrease 'Lateral length (ft)' or increase 'nx'/'dx' in the sidebar.",
+                icon="⚠️"
+            )
+            # Stop execution to prevent the crash
+            st.stop()
+        # --- END OF NEW BLOCK ---
+
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
         for i in range(iterations):
@@ -693,6 +711,7 @@ elif selected_tab == "Well Placement Optimization":
             progress_bar.progress((i + 1) / iterations, text=f"Step {i+1}/{iterations} | Score: {score:.3f}")
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
+        
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
         df_results = st.session_state.opt_results
         best_run = df_results.loc[df_results['Score'].idxmax()]
@@ -718,7 +737,6 @@ elif selected_tab == "Well Placement Optimization":
             fig_opt.add_trace(go.Scatter(x=fault_x, y=fault_y, mode='lines', line=dict(color='white', width=4, dash='dash'), name='Fault'))
         fig_opt.update_layout(title="<b>Well Placement Optimization Map</b>", xaxis_title="X position (ft)", yaxis_title="Y position (ft)", template="plotly_white", height=600)
         st.plotly_chart(fig_opt, use_container_width=True)
-
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("""
