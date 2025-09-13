@@ -190,13 +190,33 @@ def _get_sim_preview():
 def run_full_3d_simulation(state):
     t0 = time.time()
     inputs = {'grid':{'nx':int(state['nx']),'ny':int(state['ny']),'nz':int(state['nz']),'dx':float(state['dx']),'dy':float(state['dy']),'dz':float(state['dz'])},'rock':{'kx_md':st.session_state.get('kx'),'ky_md':st.session_state.get('ky'),'phi':st.session_state.get('phi'),'Ti_mult':1.0,'Tj_mult':1.0},'pvt':{'pb_psi':float(state['pb_psi']),'Rs_pb_scf_stb':float(state['Rs_pb_scf_stb']),'Bo_pb_rb_stb':float(state['Bo_pb_rb_stb']),'muo_pb_cp':float(state['muo_pb_cp']),'mug_pb_cp':float(state['mug_pb_cp']),'a_g':float(state['a_g']),'z_g':float(state['z_g']),'ct_o_1psi':float(state['ct_o_1psi']),'ct_g_1psi':float(state['ct_g_1psi']),'ct_w_1psi':float(state['ct_w_1psi'])},'relperm':{'krw_end':float(state['krw_end']),'kro_end':float(state['kro_end']),'nw':float(state['nw']),'no':float(state['no']),'Swc':float(state['Swc']),'Sor':float(state['Sor'])},'schedule':{'control':state['pad_ctrl'],'bhp_psi':float(state['pad_bhp_psi']),'rate_mscfd':float(state['pad_rate_mscfd'])},'msw':{'laterals':int(state['n_laterals']),'L_ft':float(state['L_ft']),'stage_spacing_ft':float(state['stage_spacing_ft']),'clusters_per_stage':int(state['clusters_per_stage']),'dp_limited_entry_psi':float(state['dP_LE_psi']),'friction_factor':float(state['f_fric']),'well_ID_ft':float(state['wellbore_ID_ft']),'xf_ft':float(state['xf_ft']),'hf_ft':float(state['hf_ft']),'weights':[]},'stress':{'CfD0':0.0,'alpha_sigma':0.0,'sigma_overburden_psi':8500.0,'refrac_day':0,'refrac_recovery':0},'init':{'p_init_psi':float(state['p_init_psi']),'pwf_min_psi':float(state['p_min_bhp_psi']),'Sw_init':float(state['Swc'])},'include_rs_in_mb': bool(state['include_RsP'])}
-    try: engine_results = simulate(inputs)
-    except Exception as e: st.error(f"Error in full3d.py engine: {e}"); return None
+    try: 
+        engine_results = simulate(inputs)
+    except Exception as e: 
+        st.error(f"Error in full3d.py engine: {e}")
+        return None
+    
     t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
-    if t is None or qg is None or qo is None: st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd)."); return None
+    if t is None or qg is None or qo is None: 
+        st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd).")
+        return None
+        
     EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6
-    return {'t':t,'qg':qg,'qo':qo,'press_matrix':engine_results.get('p3d_psi'),'press_frac_mid':engine_results.get('pf_mid_psi'),'press_matrix_mid':engine_results.get('pm_mid_psi'),'Sw_mid':engine_results.get('Sw_mid'),'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0}
-
+    
+    # Assemble the final dictionary for the UI
+    return {
+        't':t,
+        'qg':qg,
+        'qo':qo,
+        'press_matrix':engine_results.get('p3d_psi'),
+        'press_frac_mid':engine_results.get('pf_mid_psi'),
+        # --- THIS IS THE CORRECTED LINE ---
+        'pm_mid_psi':engine_results.get('pm_mid_psi'), # Was 'press_matrix_mid'
+        'Sw_mid':engine_results.get('Sw_mid'),
+        'EUR_g_BCF':EUR_g_BCF,
+        'EUR_o_MMBO':EUR_o_MMBO,
+        'runtime_s':time.time()-t0
+    }
 def run_simulation(state):
     if st.session_state.get('kx') is None:
         rng = np.random.default_rng(int(st.session_state.rng_seed))
