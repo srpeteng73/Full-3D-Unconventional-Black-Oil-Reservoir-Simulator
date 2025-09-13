@@ -284,12 +284,12 @@ with st.sidebar:
         st.session_state.sim, st.session_state.apply_preset_payload = None, payload
         _safe_rerun()
         
-    st.markdown("### Grid (ft)")
+        st.markdown("### Grid (ft)")
     c1,c2,c3 = st.columns(3)
-    st.number_input("nx", 10, 500, key="nx")
-    st.number_input("ny", 10, 500, key="ny")
+    # --- CORRECTED LINES: Changed min_value from 10 to 1 ---
+    st.number_input("nx", 1, 500, key="nx")
+    st.number_input("ny", 1, 500, key="ny")
     st.number_input("nz", 1, 200, key="nz")
-
     c1,c2,c3 = st.columns(3)
     st.number_input("dx (ft)", step=1.0, key="dx")
     st.number_input("dy (ft)", step=1.0, key="dy")
