@@ -207,6 +207,8 @@ def run_full_3d_simulation(state):
     return {
         't':t,'qg':qg,'qo':qo,
         'press_matrix':engine_results.get('p3d_psi'),
+        'p_init_3d':engine_results.get('p_init_3d'),
+        'ooip_3d':engine_results.get('ooip_3d'),
         'press_frac_mid':engine_results.get('pf_mid_psi'),
         'pm_mid_psi':engine_results.get('pm_mid_psi'),
         'Sw_mid':engine_results.get('Sw_mid'),
@@ -221,28 +223,20 @@ def run_simulation(state):
         kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]
         st.session_state.kx, st.session_state.ky, st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None), np.clip(ky_mid[None,...]*kz_scale,1e-4,None), np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
         st.info("Generated 3D rock properties for the simulation.")
-    
     result = run_full_3d_simulation(state)
-    
     if result is None:
         st.warning("Full 3D simulation failed. Showing results from fast preview solver.")
         result = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed)))
-        return result # Return early for the fallback case
-
-    # Start with all results from the engine
-    final_sim_data = result.copy() 
-    
-    # Post-process to ensure arrays are 3D for viewers (optional but good practice)
+        return result
+    final_sim_data = result.copy()
     for key in ["press_matrix", "press_frac", "So", "Sw", "p_init_3d", "ooip_3d"]:
         if key in result and result.get(key) is not None:
             final_sim_data[key] = ensure_3d(result[key])
-            if f"{key}_mid" not in final_sim_data: # Create a mid-slice if it doesn't exist
+            if f"{key}_mid" not in final_sim_data:
                 final_sim_data[f"{key}_mid"] = get_k_slice(final_sim_data[key], final_sim_data[key].shape[0]//2)
-
     return final_sim_data
 
 def is_location_valid(x_pos, y_pos, state):
-    """Checks if a given well location is valid based on constraints."""
     if state.get('use_fault', False):
         fault_plane = state.get('fault_plane', 'i-plane (vertical)')
         fault_index = int(state.get('fault_index', 0))
@@ -331,18 +325,14 @@ with st.sidebar:
 
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 
-# Define the full list of tab names for our custom navigation
 tab_names = [
     "Setup Preview", "Generate 3D property volumes (kx, ky, ϕ)", "PVT (Black-Oil)", "MSW Wellbore", "RTA", "Results", 
     "3D Viewer", "Slice Viewer", "QA / Material Balance", "EUR vs Lateral Length", "Field Match (CSV)", 
     "Uncertainty & Monte Carlo", "Well Placement Optimization", "User’s Manual", "Solver & Profiling", "DFN Viewer"
 ]
 
-# Create a custom navigation menu that looks and feels like tabs
 st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center;} .stRadio > label {display:none;} div.row-widget.stRadio > div > div {border: 1px solid #ccc; padding: 6px 12px; border-radius: 4px; margin: 2px; background-color: #f0f2f6;} div.row-widget.stRadio > div > div[aria-checked="true"] {background-color: #e57373; color: white; border-color: #d32f2f;}</style>', unsafe_allow_html=True)
 selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
-
-# ------------------------ TAB CONTENT DEFINITIONS ------------------------
 
 if selected_tab == "Setup Preview":
     st.header("Setup Preview")
@@ -520,7 +510,6 @@ elif selected_tab == "Results":
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     st.info("**Interpretation:** Visualize reservoir properties and simulation results in 3D. Use the options below to select the data and adjust the view. High-resolution volumes can be slow to render.")
-    
     sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
@@ -528,31 +517,24 @@ elif selected_tab == "3D Viewer":
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
         if sim_data:
             prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
-
         prop_3d = st.selectbox("Select property to view:", prop_list)
-        
         c1_3d, c2_3d = st.columns(2)
         with c1_3d: st.session_state.vol_downsample = st.slider("Downsample factor", 1, 10, st.session_state.vol_downsample, 1, key="vol_ds")
         with c2_3d: st.session_state.iso_value_rel = st.slider("Isosurface value (relative)", 0.05, 0.95, st.session_state.iso_value_rel, 0.05, key="iso_val_rel")
-
         data_3d, colorscale, colorbar_title = (None, None, None)
         if 'kx' in prop_3d:
             data_3d, colorscale, colorbar_title = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
         elif 'ϕ' in prop_3d:
             data_3d, colorscale, colorbar_title = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
         elif 'Pressure (psi)' in prop_3d:
-            # --- IMPROVED VISUALIZATION ---
             data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
         elif 'Pressure Change' in prop_3d:
             p_final = sim_data.get('press_matrix')
             p_init = sim_data.get('p_init_3d')
             if p_final is not None and p_init is not None:
-                # --- IMPROVED VISUALIZATION ---
                 data_3d, colorscale, colorbar_title = p_init - p_final, 'inferno', 'ΔP (psi)'
         elif 'OOIP' in prop_3d:
-             # --- IMPROVED VISUALIZATION ---
             data_3d, colorscale, colorbar_title = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
-
         if data_3d is not None:
             with st.spinner("Generating 3D plot..."):
                 data_3d_ds = downsample_3d(data_3d, st.session_state.vol_downsample)
@@ -560,7 +542,6 @@ elif selected_tab == "3D Viewer":
                 isoval = v_min + (v_max - v_min) * st.session_state.iso_value_rel if v_max > v_min else v_min
                 nz, ny, nx = data_3d_ds.shape
                 Z, Y, X = np.mgrid[0:nz*state['dz']:nz, 0:ny*state['dy']:ny, 0:nx*state['dx']:nx]
-                
                 fig3d = go.Figure()
                 fig3d.add_trace(go.Isosurface(
                     x=X.flatten(), y=Y.flatten(), z=Z.flatten(), 
@@ -570,7 +551,6 @@ elif selected_tab == "3D Viewer":
                     colorscale=colorscale, 
                     colorbar=dict(title=colorbar_title)
                 ))
-
                 if sim_data:
                     n_lats = int(state.get('n_laterals', 1))
                     L_ft = float(state.get('L_ft', 10000.))
@@ -584,7 +564,6 @@ elif selected_tab == "3D Viewer":
                             name='Well Lateral' if i == 0 else '',
                             showlegend=(i==0)
                         ))
-
                 fig3d.update_layout(
                     title=f"<b>3D Isosurface for {prop_3d}</b>", 
                     scene=dict(xaxis_title='X (ft)', yaxis_title='Y (ft)', zaxis_title='Z (ft)',
@@ -593,7 +572,9 @@ elif selected_tab == "3D Viewer":
                 )
                 st.plotly_chart(fig3d, use_container_width=True)
         else:
-            st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")elif selected_tab == "Slice Viewer":
+            st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
+
+elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     st.info("**Interpretation:** Inspect 2D cross-sections of the 3D reservoir model. This is useful for detailed quality control of properties and results.")
     sim_data = st.session_state.get("sim")
@@ -720,10 +701,7 @@ elif selected_tab == "EUR vs Lateral Length":
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     st.info("**Interpretation:** Compare simulation results against historical field data by uploading a CSV file. The CSV should contain columns named 'Day', 'Gas_Rate_Mscfd', and/or 'Oil_Rate_STBpd'.")
-
-    # --- NEW: Create a two-column layout for the uploader and demo button ---
-    c1, c2 = st.columns([3, 1]) # Give the uploader more space
-    
+    c1, c2 = st.columns([3, 1])
     with c1:
         uploaded_file = st.file_uploader("Upload field production data (CSV)", type="csv")
         if uploaded_file:
@@ -731,64 +709,38 @@ elif selected_tab == "Field Match (CSV)":
                 st.session_state.field_data_match = pd.read_csv(uploaded_file)
             except Exception as e:
                 st.error(f"Error reading CSV file: {e}")
-
     with c2:
-        st.write("") # Add some vertical space
-        st.write("") # Add some vertical space
+        st.write(""); st.write("")
         if st.button("Load Demo Data", use_container_width=True):
-            # Generate a realistic-looking synthetic production history
-            rng = np.random.default_rng(123) # Use a fixed seed for reproducibility
-            days = np.arange(0, 731, 15) # ~2 years of data every 15 days
-            
-            # Create declining rates with some noise
+            rng = np.random.default_rng(123)
+            days = np.arange(0, 731, 15)
             oil_rate = 950 * np.exp(-days / 400) + rng.uniform(-25, 25, size=days.shape)
             gas_rate = 8000 * np.exp(-days / 500) + rng.uniform(-200, 200, size=days.shape)
-            
-            # Ensure rates are non-negative
             oil_rate = np.clip(oil_rate, 0, None)
             gas_rate = np.clip(gas_rate, 0, None)
-            
-            # Create a Pandas DataFrame
-            demo_df = pd.DataFrame({
-                "Day": days,
-                "Gas_Rate_Mscfd": gas_rate,
-                "Oil_Rate_STBpd": oil_rate
-            })
-            
-            # Store it in the session state, same as a real upload
+            demo_df = pd.DataFrame({"Day": days, "Gas_Rate_Mscfd": gas_rate, "Oil_Rate_STBpd": oil_rate})
             st.session_state.field_data_match = demo_df
             st.success("Demo production data loaded successfully!")
-
-    # --- The rest of the logic remains the same ---
-    # It will now work with either uploaded data or demo data.
-    
     if 'field_data_match' in st.session_state:
         st.markdown("---")
         st.markdown("#### Loaded Production Data (first 5 rows)")
         st.dataframe(st.session_state.field_data_match.head(), use_container_width=True)
-
     if st.session_state.get("sim") and st.session_state.get("field_data_match") is not None:
         sim_data, field_data = st.session_state.sim, st.session_state.field_data_match
-        
         fig_match = go.Figure()
-        
-        # Plot Simulated Data
         fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], mode='lines', name='Simulated Gas', line=dict(color="#d62728")))
         fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], mode='lines', name='Simulated Oil', line=dict(color="#2ca02c"), yaxis="y2"))
-        
-        # Plot Field Data (from CSV or Demo)
         if 'Day' in field_data.columns and 'Gas_Rate_Mscfd' in field_data.columns:
             fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color="#d62728", symbol='cross')))
         if 'Day' in field_data.columns and 'Oil_Rate_STBpd' in field_data.columns:
             fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color="#2ca02c", symbol='cross'), yaxis="y2"))
-        
         layout_config = semi_log_layout("Field Match: Simulation vs. Actual", yaxis="Gas Rate (Mscf/d)")
         layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)"), yaxis2=dict(title="Oil Rate (STB/d)", overlaying="y", side="right", showgrid=False))
         fig_match.update_layout(layout_config)
         st.plotly_chart(fig_match, use_container_width=True)
-        
     elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
         st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
     st.info("**Interpretation:** Quantify uncertainty by running many simulations with varying inputs to generate probabilistic forecasts (P10, P50, P90). This analysis uses the fast analytical solver.")
