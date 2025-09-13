@@ -178,7 +178,7 @@ def fallback_fast_solver(state, rng):
         Di_g_yr, b_g, Di_o_yr, b_o = 0.45, 0.80, 0.42, 0.95
     Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0
     qg, qo = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g), qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
-    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6 # FIXED: trapz -> trapezoid
+    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6
     return dict(t=t, qg=qg, qo=qo, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 
 def _get_sim_preview():
@@ -194,7 +194,7 @@ def run_full_3d_simulation(state):
     except Exception as e: st.error(f"Error in full3d.py engine: {e}"); return None
     t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
     if t is None or qg is None or qo is None: st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd)."); return None
-    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6 # FIXED: trapz -> trapezoid
+    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6
     return {'t':t,'qg':qg,'qo':qo,'press_matrix':engine_results.get('p3d_psi'),'press_frac_mid':engine_results.get('pf_mid_psi'),'press_matrix_mid':engine_results.get('pm_mid_psi'),'Sw_mid':engine_results.get('Sw_mid'),'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0}
 
 def run_simulation(state):
@@ -215,6 +215,25 @@ def run_simulation(state):
         elif f"{key}_mid" in result and result.get(f"{key}_mid") is not None:
             result[key] = ensure_3d(result[f"{key}_mid"])
     return result
+
+def is_location_valid(x_pos, y_pos, state):
+    """Checks if a given well location is valid based on constraints."""
+    if state.get('use_fault', False):
+        fault_plane = state.get('fault_plane', 'i-plane (vertical)')
+        fault_index = int(state.get('fault_index', 0))
+        dx = float(state.get('dx', 40.0))
+        dy = float(state.get('dy', 40.0))
+        min_dist_ft = 150.0 # Define a minimum distance from the fault
+
+        if 'i-plane' in fault_plane:
+            fault_x_pos = fault_index * dx
+            if abs(x_pos - fault_x_pos) < min_dist_ft:
+                return False # Too close to the fault
+        elif 'j-plane' in fault_plane:
+            fault_y_pos = fault_index * dy
+            if abs(y_pos - fault_y_pos) < min_dist_ft:
+                return False # Too close to the fault
+    return True # Location is valid
 
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
@@ -278,7 +297,6 @@ with st.sidebar:
             st.session_state.dfn_segments = segs
             st.success(f"Auto-generated DFN segments: {0 if segs is None else len(segs)}")
     
-    # RESTORED: Solver section in sidebar
     st.markdown("### Solver & Profiling")
     st.number_input("Newton tolerance", value=float(st.session_state.newton_tol), format="%.1e", key="newton_tol")
     st.number_input("Transmissibility tolerance", value=float(st.session_state.trans_tol), format="%.1e", key="trans_tol")
@@ -290,17 +308,32 @@ with st.sidebar:
     st.checkbox("Use PyAMG algebraic multigrid solver", value=bool(st.session_state.use_pyamg), key="use_pyamg")
     st.checkbox("Use NVIDIA cuSPARSE (if GPU available)", value=bool(st.session_state.use_cusparse), key="use_cusparse")
 
-
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
-tab_names = ["Setup Preview","Generate 3D property volumes (kx, ky, ϕ)","PVT (Black-Oil)","MSW Wellbore","RTA","Results","3D Viewer","Slice Viewer","QA / Material Balance","EUR vs Lateral Length","Field Match (CSV)","Uncertainty & Monte Carlo","User’s Manual","Solver & Profiling","DFN Viewer"]
-tabs = st.tabs(tab_names)
+
+# Define the full list of tab names
+tab_names = [
+    "Setup Preview", "Generate 3D property volumes (kx, ky, ϕ)", "PVT (Black-Oil)", "MSW Wellbore", "RTA", "Results", 
+    "3D Viewer", "Slice Viewer", "QA / Material Balance", "EUR vs Lateral Length", "Field Match (CSV)", 
+    "Uncertainty & Monte Carlo", "Well Placement Optimization", "User’s Manual", "Solver & Profiling", "DFN Viewer"
+]
+
+# Split the list into two parts for two rows of tabs
+split_point = 8
+tab_names_row1 = tab_names[:split_point]
+tab_names_row2 = tab_names[split_point:]
+
+# Create two separate rows of tabs
+tabs_row1 = st.tabs(tab_names_row1)
+tabs_row2 = st.tabs(tab_names_row2)
+
+# Combine the tab objects into a single list
+tabs = tabs_row1 + tabs_row2
 
 # ------------------------ TAB DEFINITIONS ------------------------
 
 with tabs[0]:
     st.header("Setup Preview")
     st.info("**Interpretation:** This tab provides a quick summary of your current simulation setup and a fast production forecast preview using an analytical model. This preview is useful for rapid iteration before running the full 3D simulation.")
-
     c1, c2 = st.columns([1, 1])
     with c1:
         st.markdown("#### Grid & Rock Summary")
@@ -309,36 +342,29 @@ with tabs[0]:
             "Value": [f"{state['nx']} x {state['ny']} x {state['nz']}", f"{state['dx']} x {state['dy']} x {state['dz']}", f"{state['nx']*state['ny']*state['nz']*state['dx']*state['dy']*state['dz']/1e6:.1f}", state['facies_style'], f"{state['anis_kxky']:.2f}"]
         }
         st.table(pd.DataFrame(grid_data))
-        
         st.markdown("#### Well & Frac Summary")
         well_data = {
             "Parameter": ["Laterals", "Lateral Length (ft)", "Frac Half-length (ft)", "Frac Height (ft)", "Stages", "Clusters/Stage"],
             "Value": [state['n_laterals'], state['L_ft'], state['xf_ft'], state['hf_ft'], int(state['L_ft'] / state['stage_spacing_ft']), state['clusters_per_stage']]
         }
         st.table(pd.DataFrame(well_data))
-
     with c2:
         st.markdown("#### Top-Down Schematic")
         fig = go.Figure()
         nx, ny, dx, dy = state['nx'], state['ny'], state['dx'], state['dy']
         L_ft, xf_ft, ss_ft, n_lats = state['L_ft'], state['xf_ft'], state['stage_spacing_ft'], state['n_laterals']
-        
         fig.add_shape(type="rect", x0=0, y0=0, x1=nx*dx, y1=ny*dy, line=dict(color="RoyalBlue"), fillcolor="lightskyblue", opacity=0.3)
-        
         lat_rows_y = [ny*dy/3, 2*ny*dy/3] if n_lats >= 2 else [ny*dy/2]
         n_stages = max(1, int(L_ft / max(ss_ft, 1.0)))
-        
         for i, y_lat in enumerate(lat_rows_y):
             fig.add_trace(go.Scatter(x=[0, L_ft], y=[y_lat, y_lat], mode='lines', line=dict(color='black', width=3), name='Lateral', showlegend=(i==0)))
             for j in range(n_stages):
                 x_stage = (j + 0.5) * ss_ft
                 if x_stage > L_ft: continue
                 fig.add_trace(go.Scatter(x=[x_stage, x_stage], y=[y_lat - xf_ft, y_lat + xf_ft], mode='lines', line=dict(color='red', width=2), name='Frac', showlegend=(i==0 and j==0)))
-
         fig.update_layout(title="<b>Well and Fracture Geometry</b>", xaxis_title="X (ft)", yaxis_title="Y (ft)", yaxis_range=[-0.1*ny*dy, 1.1*ny*dy])
         fig.update_yaxes(scaleanchor = "x", scaleratio = 1)
         st.plotly_chart(fig, use_container_width=True)
-
     st.markdown("---")
     st.markdown("### Production Forecast Preview (Analytical Model)")
     preview = _get_sim_preview()
@@ -360,14 +386,12 @@ with tabs[1]:
     if st.button("Re-generate rock property volumes"):
         st.session_state.kx, st.session_state.ky, st.session_state.phi = None, None, None
         _safe_rerun()
-
     if st.session_state.get('kx') is None:
         rng = np.random.default_rng(int(st.session_state.rng_seed))
         nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
         kx_mid,ky_mid,phi_mid = 0.05+state["k_stdev"]*rng.standard_normal((ny,nx)),(0.05/state["anis_kxky"])+state["k_stdev"]*rng.standard_normal((ny,nx)),0.10+state["phi_stdev"]*rng.standard_normal((ny,nx))
         kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]
         st.session_state.kx,st.session_state.ky,st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None),np.clip(ky_mid[None,...]*kz_scale,1e-4,None),np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
-    
     kx_display, ky_display, phi_display = get_k_slice(st.session_state.kx, state['nz']//2), get_k_slice(st.session_state.ky, state['nz']//2), get_k_slice(st.session_state.phi, state['nz']//2)
     c1,c2=st.columns(2)
     with c1: st.plotly_chart(px.imshow(kx_display,origin="lower",color_continuous_scale="Viridis",labels=dict(color="mD"),title="<b>Figure 2. kx — mid-layer (mD)</b>"),use_container_width=True,theme=None)
@@ -393,11 +417,9 @@ with tabs[3]:
         well_id_ft, f_fric, dP_le, p_bhp, p_res = float(state['wellbore_ID_ft']), float(state['f_fric']), float(state['dP_LE_psi']), float(state['pad_bhp_psi']), float(state['p_init_psi'])
         preview = _get_sim_preview()
         q_oil_total_stbd = preview['qo'][0]
-        rho_o_lb_ft3 = 50.0  # Simplified fluid density assumption for oil
-        
-        q_dist = np.ones(n_stages) / n_stages  # Start with uniform distribution
-
-        for _ in range(5):  # Iterate to converge
+        rho_o_lb_ft3 = 50.0
+        q_dist = np.ones(n_stages) / n_stages
+        for _ in range(5):
             q_per_stage_bpd = q_dist * q_oil_total_stbd
             p_wellbore_at_stage = np.zeros(n_stages)
             p_current = p_bhp
@@ -410,11 +432,9 @@ with tabs[3]:
                 dp_psi_segment = (2 * f_fric * rho_o_lb_ft3 * v_fps**2 * ss_ft / well_id_ft) / 144.0
                 p_current += dp_psi_segment
                 flow_rate_bpd -= q_per_stage_bpd[i]
-
             drawdown = p_res - p_wellbore_at_stage - dP_le
             q_new_dist_unnorm = np.sqrt(np.maximum(0, drawdown))
             if np.sum(q_new_dist_unnorm) > 1e-9: q_dist = q_new_dist_unnorm / np.sum(q_new_dist_unnorm)
-
         c1_msw, c2_msw = st.columns(2)
         with c1_msw:
             fig_p = go.Figure(go.Scatter(x=np.arange(n_stages)*ss_ft, y=p_wellbore_at_stage, mode='lines+markers', name='Wellbore Pressure'))
@@ -431,15 +451,10 @@ with tabs[4]:
     st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes (e.g., linear flow, boundary-dominated flow) by examining the production rate and its derivative on a log-log plot.")
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
     t, qg = sim_data["t"], sim_data["qg"]
-    
     rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode_unique")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
-    
     fig = go.Figure(); fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas")); fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)")); fig.update_yaxes(type=y_type_rta); st.plotly_chart(fig, use_container_width=True)
-    
-    # Calculate log-log derivative safely
-    t_safe = np.maximum(t, 1e-9)
-    qg_safe = np.maximum(qg, 1e-9)
+    t_safe = np.maximum(t, 1e-9); qg_safe = np.maximum(qg, 1e-9)
     logt, logq = np.log(t_safe), np.log(qg_safe)
     slope = np.gradient(logq, logt)
     fig2 = go.Figure(); fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt")); fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope")); st.plotly_chart(fig2, use_container_width=True)
@@ -449,74 +464,46 @@ with tabs[5]:
     if st.button("Run simulation", type="primary", use_container_width=True):
         with st.spinner("Running full 3D simulation... This may take a few minutes."):
             st.session_state.sim = run_simulation(state)
-    
     if st.session_state.sim:
         sim_data = st.session_state.sim
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
-        
         st.markdown("### EUR (30-year forecast)")
         g1, g2 = st.columns(2)
         with g1:
             eur_g_fig, eur_o_fig = eur_gauges(sim_data.get('EUR_g_BCF', 0), sim_data.get('EUR_o_MMBO', 0))
             st.plotly_chart(eur_g_fig, use_container_width=True)
         with g2: st.plotly_chart(eur_o_fig, use_container_width=True)
-
         st.markdown("### Production Profiles")
         rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="res_rate_y_mode")
         y_type = "log" if rate_y_mode == "Log" else "linear"
-
         fig_rate = go.Figure()
         fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], name="Gas Rate", line=dict(color="#d62728"), yaxis="y1"))
         fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], name="Oil Rate", line=dict(color="#2ca02c"), yaxis="y2"))
-        
-        # 1. Get the base layout from the helper function
         layout_config = semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)")
-        
-        # 2. Update the layout with specific settings for the dual-axis chart
-        layout_config.update(
-            yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728", showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
-            yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False)
-        )
-        
-        # 3. Apply the final, consolidated layout
+        layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728", showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False))
         fig_rate.update_layout(layout_config)
         st.plotly_chart(fig_rate, use_container_width=True)
-
         c1_res, c2_res = st.columns(2)
         with c1_res:
-            # GOR plot does not have this issue, no change needed here.
             gor = np.divide(sim_data['qg'] * 1000, sim_data['qo'], out=np.full_like(sim_data['qg'], np.nan), where=sim_data['qo']>1e-3)
             fig_gor = go.Figure(go.Scatter(x=sim_data['t'], y=gor, name="GOR", line=dict(color="orange")))
-            # This one is slightly different - it's a linear axis, so we update the xaxis dict from the helper
             gor_layout = semi_log_layout("Gas-Oil Ratio (GOR)", yaxis="GOR (scf/STB)")
-            gor_layout['xaxis']['type'] = 'linear'
-            gor_layout['xaxis']['title'] = 'Day'
-            gor_layout['yaxis']['type'] = 'linear'
+            gor_layout['xaxis']['type'] = 'linear'; gor_layout['xaxis']['title'] = 'Day'; gor_layout['yaxis']['type'] = 'linear'
             fig_gor.update_layout(gor_layout)
             st.plotly_chart(fig_gor, use_container_width=True)
         with c2_res:
-            cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6 # BCF
-            cum_o = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0) / 1e6 # MMSTB
+            cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6
+            cum_o = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0) / 1e6
             fig_cum = go.Figure()
             fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_g, name="Cumulative Gas", line=dict(color="#d62728"), yaxis="y1"))
             fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_o, name="Cumulative Oil", line=dict(color="#2ca02c"), yaxis="y2"))
-            
-            # --- THIS IS THE CORRECTED SECTION FOR THE CUMULATIVE PLOT ---
-            # 1. Get the base layout
             cum_layout = semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)")
-            
-            # 2. Update with specific settings for this dual-axis plot
-            cum_layout['xaxis']['type'] = 'linear' # Cumulative plots are usually linear time
-            cum_layout['xaxis']['title'] = 'Day'
-            cum_layout.update(
-                yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
-                yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False)
-            )
-
-            # 3. Apply the final, consolidated layout
+            cum_layout['xaxis']['type'] = 'linear'; cum_layout['xaxis']['title'] = 'Day'
+            cum_layout.update(yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False))
             fig_cum.update_layout(cum_layout)
             st.plotly_chart(fig_cum, use_container_width=True)
     else: st.info("Click **Run simulation** to compute and display the full 3D results.")
+
 with tabs[6]:
     st.header("3D Viewer")
     st.info("**Interpretation:** Visualize reservoir properties and simulation results in 3D. Use the options below to select the data and adjust the view. High-resolution volumes can be slow to render.")
@@ -526,14 +513,11 @@ with tabs[6]:
     else:
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
         if sim_data and sim_data.get('press_matrix') is not None: prop_list.append('Pressure (psi)')
-
         prop_3d = st.selectbox("Select property to view:", prop_list)
         c1_3d, c2_3d = st.columns(2)
         with c1_3d: st.session_state.vol_downsample = st.slider("Downsample factor", 1, 10, st.session_state.vol_downsample, 1, key="vol_ds")
         with c2_3d: st.session_state.iso_value_rel = st.slider("Isosurface value (relative)", 0.05, 0.95, st.session_state.iso_value_rel, 0.05, key="iso_val_rel")
-
         data_3d, colorscale = (st.session_state.get('kx'), 'Viridis') if 'kx' in prop_3d else (st.session_state.get('phi'), 'Magma') if 'ϕ' in prop_3d else (sim_data.get('press_matrix'), 'Plasma')
-        
         if data_3d is not None:
             with st.spinner("Generating 3D plot..."):
                 data_3d_ds = downsample_3d(data_3d, st.session_state.vol_downsample)
@@ -541,20 +525,7 @@ with tabs[6]:
                 isoval = v_min + (v_max - v_min) * st.session_state.iso_value_rel
                 nz, ny, nx = data_3d_ds.shape
                 Z, Y, X = np.mgrid[0:nz, 0:ny, 0:nx]
-                
-                # --- THIS IS THE CORRECTED LINE ---
-                fig3d = go.Figure(data=go.Isosurface(
-                    x=X.flatten(), 
-                    y=Y.flatten(), 
-                    z=Z.flatten(), 
-                    value=data_3d_ds.flatten(), 
-                    isomin=isoval, 
-                    isomax=v_max,  # CORRECTED: was isoma_max
-                    surface_count=1, 
-                    caps=dict(x_show=False, y_show=False), 
-                    colorscale=colorscale, 
-                    colorbar=dict(title=prop_3d.split('(')[-1].replace(')','').strip())
-                ))
+                fig3d = go.Figure(data=go.Isosurface(x=X.flatten(), y=Y.flatten(), z=Z.flatten(), value=data_3d_ds.flatten(), isomin=isoval, isomax=v_max, surface_count=1, caps=dict(x_show=False, y_show=False), colorscale=colorscale, colorbar=dict(title=prop_3d.split('(')[-1].replace(')','').strip())))
                 fig3d.update_layout(title=f"<b>3D Isosurface for {prop_3d}</b>", scene=dict(xaxis_title='i (x-cell)', yaxis_title='j (y-cell)', zaxis_title='k (z-cell)', aspectratio=dict(x=1, y=ny/nx, z=nz/nx)), margin=dict(l=0, r=0, b=0, t=40))
                 st.plotly_chart(fig3d, use_container_width=True)
         else: st.warning(f"Data for '{prop_3d}' not found.")
@@ -568,13 +539,10 @@ with tabs[7]:
     else:
         slice_prop_list = ['Permeability (kx)', 'Permeability (ky)', 'Porosity (ϕ)']
         if sim_data and sim_data.get('press_matrix') is not None: slice_prop_list.append('Pressure (psi)')
-        
         c1_sl, c2_sl = st.columns(2)
         with c1_sl: prop_slice = st.selectbox("Select property to view:", slice_prop_list, key="slice_prop_select")
         with c2_sl: plane_slice = st.selectbox("Select plane:", ["k-plane (z, top-down)", "j-plane (y, side-view)", "i-plane (x, end-view)"], key="slice_plane_select")
-
         data_slice_3d = (st.session_state.get('kx') if 'kx' in prop_slice else st.session_state.get('ky') if 'ky' in prop_slice else st.session_state.get('phi') if 'ϕ' in prop_slice else sim_data.get('press_matrix'))
-        
         if data_slice_3d is not None:
             nz, ny, nx = data_slice_3d.shape
             if "k-plane" in plane_slice:
@@ -586,7 +554,6 @@ with tabs[7]:
             else: # i-plane
                 idx_max, labels, slice_idx = nx - 1, dict(x="j-index", y="k-index"), st.slider("i-index (x-layer)", 0, nx - 1, nx // 2)
                 data_2d = data_slice_3d[:, :, slice_idx]
-
             fig_slice = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
             fig_slice.update_layout(title=f"<b>{prop_slice} @ {plane_slice.split(' ')[0]} = {slice_idx}</b>")
             st.plotly_chart(fig_slice, use_container_width=True)
@@ -614,7 +581,6 @@ with tabs[9]:
     with c1: L_min = st.number_input("Min Lateral Length (ft)", 1000, 20000, 5000, 500)
     with c2: L_max = st.number_input("Max Lateral Length (ft)", 1000, 20000, 15000, 500)
     with c3: L_steps = st.number_input("Number of steps", 2, 20, 11, 1)
-
     if st.button("Run Sensitivity Analysis", key="run_sens_L"):
         lengths = np.linspace(L_min, L_max, L_steps)
         eur_g_list, eur_o_list = [], []
@@ -628,7 +594,6 @@ with tabs[9]:
             bar.progress((i + 1) / L_steps, text=f"Running for L = {int(length)} ft...")
         st.session_state.sensitivity_results = {'L_ft': lengths, 'EUR_g': eur_g_list, 'EUR_o': eur_o_list}
         bar.empty()
-
     if 'sensitivity_results' in st.session_state:
         res = st.session_state.sensitivity_results
         c1_eur, c2_eur = st.columns(2)
@@ -646,7 +611,6 @@ with tabs[10]:
     st.info("**Interpretation:** Compare simulation results against historical field data by uploading a CSV file. The CSV should contain columns named 'Day', 'Gas_Rate_Mscfd', and/or 'Oil_Rate_STBpd'.")
     uploaded_file = st.file_uploader("Upload field production data (CSV)", type="csv")
     if uploaded_file: st.session_state.field_data_match = pd.read_csv(uploaded_file)
-
     if st.session_state.get("sim") and st.session_state.get("field_data_match") is not None:
         sim_data, field_data = st.session_state.sim, st.session_state.field_data_match
         fig_match = go.Figure()
@@ -656,7 +620,9 @@ with tabs[10]:
             fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color="#d62728", symbol='cross')))
         if 'Day' in field_data.columns and 'Oil_Rate_STBpd' in field_data.columns:
             fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color="#2ca02c", symbol='cross'), yaxis="y2"))
-        fig_match.update_layout(**semi_log_layout("Field Match: Simulation vs. Actual", yaxis="Gas Rate (Mscf/d)"), yaxis=dict(title="Gas Rate (Mscf/d)"), yaxis2=dict(title="Oil Rate (STB/d)", overlaying="y", side="right", showgrid=False))
+        layout_config = semi_log_layout("Field Match: Simulation vs. Actual", yaxis="Gas Rate (Mscf/d)")
+        layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)"), yaxis2=dict(title="Oil Rate (STB/d)", overlaying="y", side="right", showgrid=False))
+        fig_match.update_layout(layout_config)
         st.plotly_chart(fig_match, use_container_width=True)
     elif st.session_state.get("sim") is None: st.warning("Run a simulation to view the comparison plot.")
 
@@ -670,7 +636,6 @@ with tabs[11]:
         uc_xf, xf_mean, xf_std = st.checkbox("xf_ft", True), st.slider("xf_ft Mean (ft)", 100.0, 500.0, state['xf_ft'], 10.0), st.slider("xf_ft Stdev (ft)", 0.0, 100.0, 30.0, 5.0)
     with p3:
         uc_int, int_min, int_max = st.checkbox("pad_interf", False), st.slider("Interference Min", 0.0, 0.8, state['pad_interf'], 0.01), st.slider("Interference Max", 0.0, 0.8, 0.5, 0.01)
-
     num_runs = st.number_input("Number of Monte Carlo runs", 10, 500, 50, 10)
     if st.button("Run Monte Carlo Simulation", key="run_mc"):
         qg_runs, qo_runs, eur_g, eur_o = [], [], [], []
@@ -686,7 +651,6 @@ with tabs[11]:
             bar_mc.progress((i + 1) / num_runs, f"Run {i+1}/{num_runs}")
         st.session_state.mc_results = {'t':res['t'], 'qg_runs':np.array(qg_runs), 'qo_runs':np.array(qo_runs), 'eur_g':np.array(eur_g), 'eur_o':np.array(eur_o)}
         bar_mc.empty()
-    
     if 'mc_results' in st.session_state:
         mc = st.session_state.mc_results
         p10_g, p50_g, p90_g = np.percentile(mc['qg_runs'], [90, 50, 10], axis=0)
@@ -702,21 +666,83 @@ with tabs[11]:
             st.plotly_chart(px.histogram(x=mc['eur_o'], nbins=30, labels={'x':'Oil EUR (MMSTB)'}, color_discrete_sequence=['green']).update_layout(title="<b>Distribution of Oil EUR</b>", template="plotly_white"), use_container_width=True)
 
 with tabs[12]:
+    st.header("Well Placement Optimization")
+    st.info("""**Interpretation:** This tool runs a series of rapid simulations to find the optimal well placement that maximizes a chosen objective. It uses a random search algorithm to test different well locations while respecting constraints, such as avoiding faults.""")
+    st.markdown("#### 1. General Parameters")
+    c1_opt, c2_opt, c3_opt = st.columns(3)
+    with c1_opt:
+        objective = st.selectbox("Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective")
+    with c2_opt:
+        iterations = st.number_input("Number of optimization steps", 5, 1000, 100, 10)
+    with c3_opt:
+        st.selectbox("Forbidden Zone", ["Numerical Faults"], help="The optimizer will avoid placing wells near the fault defined in the sidebar.")
+    st.markdown("#### 2. Well Parameters")
+    c1_well, c2_well = st.columns(2)
+    with c1_well:
+        num_wells = st.number_input("Number of wells to place", 1, 1, 1, disabled=True, help="Currently supports optimizing a single well location.")
+    with c2_well:
+        st.text_input("Well name prefix", "OptiWell", disabled=True)
+    if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
+        opt_results = []
+        base_state = state.copy()
+        rng_opt = np.random.default_rng(st.session_state.rng_seed)
+        x_max = base_state['nx'] * base_state['dx'] - base_state['L_ft']
+        y_max = base_state['ny'] * base_state['dy']
+        progress_bar = st.progress(0, text="Starting optimization...")
+        for i in range(iterations):
+            is_valid = False
+            while not is_valid:
+                x_heel_ft = rng_opt.uniform(0, x_max)
+                y_heel_ft = rng_opt.uniform(50, y_max - 50)
+                is_valid = is_location_valid(x_heel_ft, y_heel_ft, base_state)
+            temp_state = base_state.copy()
+            x_norm = x_heel_ft / (base_state['nx'] * base_state['dx'])
+            temp_state['pad_interf'] = 0.4 * x_norm
+            result = fallback_fast_solver(temp_state, rng_opt)
+            score = result['EUR_o_MMBO'] if "Oil" in objective else result['EUR_g_BCF']
+            opt_results.append({"Step": i + 1, "x_ft": x_heel_ft, "y_ft": y_heel_ft, "Score": score})
+            progress_bar.progress((i + 1) / iterations, text=f"Step {i+1}/{iterations} | Score: {score:.3f}")
+        st.session_state.opt_results = pd.DataFrame(opt_results)
+        progress_bar.empty()
+    if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
+        df_results = st.session_state.opt_results
+        best_run = df_results.loc[df_results['Score'].idxmax()]
+        st.markdown("---"); st.markdown("### Optimization Results")
+        c1_res, c2_res = st.columns(2)
+        with c1_res:
+            st.markdown("##### Best Placement Found")
+            score_unit = "MMBO" if "Oil" in objective else "BCF"
+            st.metric(label=f"Best Score ({score_unit})", value=f"{best_run['Score']:.3f}")
+            st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})")
+            st.write(f"Found at Step: {best_run['Step']}")
+        with c2_res:
+            st.markdown("##### Optimization Steps Log")
+            st.dataframe(df_results.sort_values("Score", ascending=False).head(10), height=210)
+        fig_opt = go.Figure()
+        phi_map = get_k_slice(st.session_state.get('phi', np.zeros((state['nz'], state['ny'], state['nx']))), state['nz'] // 2)
+        fig_opt.add_trace(go.Heatmap(z=phi_map, dx=state['dx'], dy=state['dy'], colorscale='viridis', colorbar=dict(title='Porosity')))
+        fig_opt.add_trace(go.Scatter(x=df_results['x_ft'], y=df_results['y_ft'], mode='markers', marker=dict(color=df_results['Score'], colorscale='Reds', showscale=True, colorbar=dict(title='Score'), size=8, opacity=0.7), name='Tested Locations'))
+        fig_opt.add_trace(go.Scatter(x=[best_run['x_ft']], y=[best_run['y_ft']], mode='markers', marker=dict(color='cyan', size=16, symbol='star', line=dict(width=2, color='black')), name='Best Location'))
+        if state.get('use_fault'):
+            fault_x = [state['fault_index'] * state['dx'], state['fault_index'] * state['dx']]
+            fault_y = [0, state['ny'] * state['dy']]
+            fig_opt.add_trace(go.Scatter(x=fault_x, y=fault_y, mode='lines', line=dict(color='white', width=4, dash='dash'), name='Fault'))
+        fig_opt.update_layout(title="<b>Well Placement Optimization Map</b>", xaxis_title="X position (ft)", yaxis_title="Y position (ft)", template="plotly_white", height=600)
+        st.plotly_chart(fig_opt, use_container_width=True)
+
+with tabs[13]:
     st.header("User’s Manual")
     st.markdown("""
     Welcome to the Full 3D Reservoir Simulator! This tool models production from hydraulically fractured wells.
-    
     ### Quick Start
     1.  **Select a Preset**: Choose a shale play from the sidebar and click "Apply preset".
     2.  **Customize Inputs**: Adjust grid, rock, well, and fluid properties in the sidebar.
     3.  **Run Simulation**: Go to the **Results** tab and click "Run simulation".
-    
     ### Tab Guide
     - **Setup Preview**: A summary of your inputs and a fast analytical forecast.
     - **Generate 3D...**: Visualize the 3D permeability and porosity fields.
     - **PVT (Black-Oil)**: View fluid property charts.
-    - **MSW Wellbore**: Analyze pressure drop and flow distribution along the wellbore.
-    - **RTA**: Perform Rate Transient Analysis to identify flow regimes.
+    - **Well Placement Optimization**: Run a routine to find the best drilling locations.
     - **Results**: The main tab to run the full 3D simulation and see detailed results.
     - **3D/Slice Viewer**: Inspect 3D data volumes (like pressure) after a run.
     - **Sensitivity/Uncertainty**: Run automated analyses to see how EUR changes with key parameters or to quantify uncertainty.
@@ -724,20 +750,19 @@ with tabs[12]:
     - **Solver & Profiling**: View advanced numerical solver settings and performance metrics.
     """)
 
-with tabs[13]:
+with tabs[14]:
     st.header("Solver & Profiling")
     st.info("**Interpretation:** This tab provides details about the numerical solver settings and performance. Advanced users can tweak these settings in the sidebar.")
     st.markdown("### Current Numerical Solver Settings")
     solver_settings = {"Parameter": ["Newton Tolerance", "Max Newton Iterations", "Threads", "Use OpenMP", "Use MKL", "Use PyAMG", "Use cuSPARSE"], "Value": [f"{state['newton_tol']:.1e}", state['max_newton'], "Auto" if state['threads']==0 else state['threads'], "✅" if state['use_omp'] else "❌", "✅" if state['use_mkl'] else "❌", "✅" if state['use_pyamg'] else "❌", "✅" if state['use_cusparse'] else "❌"]}
     st.table(pd.DataFrame(solver_settings))
-    
     st.markdown("### Profiling")
     if st.session_state.get("sim") and 'runtime_s' in st.session_state.sim:
         st.metric(label="Last Simulation Runtime", value=f"{st.session_state.sim['runtime_s']:.2f} seconds")
         st.markdown("*Deeper profiling data (e.g., Jacobian assembly, linear solve time) is not returned by the current engine.*")
     else: st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-with tabs[14]:
+with tabs[15]:
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.dfn_segments
     if segs is None or len(segs) == 0:
