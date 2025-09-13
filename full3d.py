@@ -26,16 +26,24 @@ class Rock:
         self.ky = rock_params.get('ky_md', np.full(grid.num_cells, 0.05)).flatten()
         self.kz = self.kx * 0.1
 
-# --- The Fluid Class ---
+# --- The Fluid Class (CORRECTED) ---
 class Fluid:
     def __init__(self, inputs):
         pvt_params = inputs.get('pvt', {})
         self.pb_psi = pvt_params.get('pb_psi')
+        self.Rs_pb_scf_stb = pvt_params.get('Rs_pb_scf_stb') # Added for Rs function
         self.Bo_pb = pvt_params.get('Bo_pb_rb_stb')
         self.muo_pb = pvt_params.get('muo_pb_cp')
         self.ct_oil = pvt_params.get('ct_o_1psi', 8e-6)
+
     def Bo(self, P):
         return self.Bo_pb * (1.0 - self.ct_oil * (P - self.pb_psi))
+    
+    # --- THIS IS THE NEWLY ADDED FUNCTION ---
+    def Rs(self, P):
+        p = np.asarray(P, float)
+        return np.where(p <= self.pb_psi, self.Rs_pb_scf_stb, self.Rs_pb_scf_stb + 0.00012*(p - self.pb_psi)**1.1)
+    
     def mu_oil(self, P):
         return np.full_like(P, self.muo_pb)
 
@@ -113,11 +121,11 @@ def simulate(inputs):
     if engine_type == "3D Three-Phase Implicit (Phase 1b)":
         return simulate_3D_implicit(inputs)
     else:
-        # For any other selection, use the fast proxy model
         from app import fallback_fast_solver
         rng = np.random.default_rng(1234)
-        state_dict = {**inputs['grid'], **inputs['msw']}
-        state_dict.update(inputs['pvt'])
+        # Reconstruct state dict for fallback solver
+        state_dict = {**inputs.get('grid',{}), **inputs.get('msw',{})}
+        state_dict.update(inputs.get('pvt',{}))
         return fallback_fast_solver(state_dict, rng)
 
 def simulate_3D_implicit(inputs):
@@ -144,7 +152,6 @@ def simulate_3D_implicit(inputs):
         state_old = state_current
         state_new_guess = state_current 
         
-        # --- 5. Newton-Raphson Iteration Loop ---
         for newton_iter in range(10):
             state_new_guess.update_properties()
             J, R = assemble_jacobian_and_residuals(state_new_guess, state_old, grid, rock, fluid, trans, well, dt_days)
