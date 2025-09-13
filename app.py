@@ -224,16 +224,13 @@ def is_location_valid(x_pos, y_pos, state):
         dx = float(state.get('dx', 40.0))
         dy = float(state.get('dy', 40.0))
         min_dist_ft = 150.0 # Define a minimum distance from the fault
-
         if 'i-plane' in fault_plane:
             fault_x_pos = fault_index * dx
-            if abs(x_pos - fault_x_pos) < min_dist_ft:
-                return False # Too close to the fault
+            if abs(x_pos - fault_x_pos) < min_dist_ft: return False
         elif 'j-plane' in fault_plane:
             fault_y_pos = fault_index * dy
-            if abs(y_pos - fault_y_pos) < min_dist_ft:
-                return False # Too close to the fault
-    return True # Location is valid
+            if abs(y_pos - fault_y_pos) < min_dist_ft: return False
+    return True
 
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
@@ -296,7 +293,6 @@ with st.sidebar:
             segs = gen_auto_dfn_from_stages(int(st.session_state.nx),int(st.session_state.ny),int(st.session_state.nz), float(st.session_state.dx),float(st.session_state.dy),float(st.session_state.dz), float(st.session_state.L_ft),float(st.session_state.stage_spacing_ft), int(st.session_state.n_laterals),float(st.session_state.hf_ft))
             st.session_state.dfn_segments = segs
             st.success(f"Auto-generated DFN segments: {0 if segs is None else len(segs)}")
-    
     st.markdown("### Solver & Profiling")
     st.number_input("Newton tolerance", value=float(st.session_state.newton_tol), format="%.1e", key="newton_tol")
     st.number_input("Transmissibility tolerance", value=float(st.session_state.trans_tol), format="%.1e", key="trans_tol")
@@ -310,28 +306,21 @@ with st.sidebar:
 
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 
-# Define the full list of tab names
+# Define the full list of tab names for our custom navigation
 tab_names = [
     "Setup Preview", "Generate 3D property volumes (kx, ky, ϕ)", "PVT (Black-Oil)", "MSW Wellbore", "RTA", "Results", 
     "3D Viewer", "Slice Viewer", "QA / Material Balance", "EUR vs Lateral Length", "Field Match (CSV)", 
     "Uncertainty & Monte Carlo", "Well Placement Optimization", "User’s Manual", "Solver & Profiling", "DFN Viewer"
 ]
 
-# Split the list into two parts for two rows of tabs
-split_point = 8
-tab_names_row1 = tab_names[:split_point]
-tab_names_row2 = tab_names[split_point:]
+# Create a custom navigation menu that looks and feels like tabs
+# This CSS makes the radio buttons look like a tab bar
+st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center;} .stRadio > label {display:none;} div.row-widget.stRadio > div > div {border: 1px solid #ccc; padding: 6px 12px; border-radius: 4px; margin: 2px; background-color: #f0f2f6;} div.row-widget.stRadio > div > div[aria-checked="true"] {background-color: #e57373; color: white; border-color: #d32f2f;}</style>', unsafe_allow_html=True)
+selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
-# Create two separate rows of tabs
-tabs_row1 = st.tabs(tab_names_row1)
-tabs_row2 = st.tabs(tab_names_row2)
+# ------------------------ TAB CONTENT DEFINITIONS ------------------------
 
-# Combine the tab objects into a single list
-tabs = tabs_row1 + tabs_row2
-
-# ------------------------ TAB DEFINITIONS ------------------------
-
-with tabs[0]:
+if selected_tab == "Setup Preview":
     st.header("Setup Preview")
     st.info("**Interpretation:** This tab provides a quick summary of your current simulation setup and a fast production forecast preview using an analytical model. This preview is useful for rapid iteration before running the full 3D simulation.")
     c1, c2 = st.columns([1, 1])
@@ -380,7 +369,7 @@ with tabs[0]:
         fig_o.update_layout(**semi_log_layout("Oil Production Preview", yaxis="Oil Rate (STB/d)"))
         st.plotly_chart(fig_o, use_container_width=True)
 
-with tabs[1]:
+elif selected_tab == "Generate 3D property volumes (kx, ky, ϕ)":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("**Interpretation:** These maps represent the spatial distribution of key reservoir properties. The simulator uses these 3D volumes to calculate fluid flow. Click the button to generate new random fields based on the sidebar settings.")
     if st.button("Re-generate rock property volumes"):
@@ -398,7 +387,7 @@ with tabs[1]:
     with c2: st.plotly_chart(px.imshow(ky_display,origin="lower",color_continuous_scale="Cividis",labels=dict(color="mD"),title="<b>Figure 3. ky — mid-layer (mD)</b>"),use_container_width=True,theme=None)
     st.plotly_chart(px.imshow(phi_display,origin="lower",color_continuous_scale="Magma",labels=dict(color="ϕ"),title="<b>Figure 4. Porosity ϕ — mid-layer (fraction)</b>"),use_container_width=True,theme=None)
 
-with tabs[2]:
+elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     st.info("**Interpretation:** These charts describe how the fluid properties change with pressure. This is fundamental to accurately modeling fluid expansion, liberation, and flow in the reservoir.")
     P = np.linspace(max(1000,state["p_min_bhp_psi"]),max(2000,state["p_init_psi"]+1000),120)
@@ -408,7 +397,7 @@ with tabs[2]:
     f3=go.Figure();f3.add_trace(go.Scatter(x=P,y=Bg,line=dict(color="steelblue",width=3)));f3.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f3.update_layout(template="plotly_white",title="<b>P3. Gas FVF Bg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Bg (rb/scf)");st.plotly_chart(f3,use_container_width=True)
     f4=go.Figure();f4.add_trace(go.Scatter(x=P,y=mug,line=dict(color="mediumpurple",width=3)));f4.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f4.update_layout(template="plotly_white",title="<b>P4. Gas viscosity μg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="μg (cP)");st.plotly_chart(f4,use_container_width=True)
 
-with tabs[3]:
+elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
     st.info("**Interpretation:** This tab models the pressure drop along the wellbore from heel to toe and the resulting distribution of flow into each fracture stage. Uneven distribution (the 'heel-toe effect') can impact well performance.")
     try:
@@ -446,7 +435,7 @@ with tabs[3]:
             st.plotly_chart(fig_q, use_container_width=True)
     except Exception as e: st.warning(f"Could not compute wellbore hydraulics. Error: {e}")
 
-with tabs[4]:
+elif selected_tab == "RTA":
     st.header("RTA — Quick Diagnostics")
     st.info("**Interpretation:** Rate Transient Analysis (RTA) helps diagnose flow regimes (e.g., linear flow, boundary-dominated flow) by examining the production rate and its derivative on a log-log plot.")
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
@@ -459,7 +448,7 @@ with tabs[4]:
     slope = np.gradient(logq, logt)
     fig2 = go.Figure(); fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt")); fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope")); st.plotly_chart(fig2, use_container_width=True)
 
-with tabs[5]:
+elif selected_tab == "Results":
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary", use_container_width=True):
         with st.spinner("Running full 3D simulation... This may take a few minutes."):
@@ -504,7 +493,7 @@ with tabs[5]:
             st.plotly_chart(fig_cum, use_container_width=True)
     else: st.info("Click **Run simulation** to compute and display the full 3D results.")
 
-with tabs[6]:
+elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     st.info("**Interpretation:** Visualize reservoir properties and simulation results in 3D. Use the options below to select the data and adjust the view. High-resolution volumes can be slow to render.")
     sim_data = st.session_state.get("sim")
@@ -530,7 +519,7 @@ with tabs[6]:
                 st.plotly_chart(fig3d, use_container_width=True)
         else: st.warning(f"Data for '{prop_3d}' not found.")
 
-with tabs[7]:
+elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     st.info("**Interpretation:** Inspect 2D cross-sections of the 3D reservoir model. This is useful for detailed quality control of properties and results.")
     sim_data = st.session_state.get("sim")
@@ -559,7 +548,7 @@ with tabs[7]:
             st.plotly_chart(fig_slice, use_container_width=True)
         else: st.warning(f"Data for '{prop_slice}' not found.")
 
-with tabs[8]:
+elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     st.info("**Interpretation:** A plot of average reservoir pressure vs. cumulative production is a classic diagnostic tool to assess the physical consistency of the simulation. A smooth, monotonically decreasing pressure trend is expected.")
     sim_data = st.session_state.get("sim")
@@ -567,14 +556,14 @@ with tabs[8]:
     elif sim_data.get('press_matrix_mid') is None: st.info("The selected solver did not return the necessary pressure evolution data for this tab.")
     else:
         cum_g_mmscf = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0)
-        p_avg_series = [np.mean(p_slice) for p_slice in sim_data.get('press_matrix_mid', [])]
+        p_avg_series = [np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])]
         if len(p_avg_series) == len(sim_data['t']):
             fig_pz = go.Figure(go.Scatter(x=cum_g_mmscf, y=p_avg_series, mode='lines'))
             fig_pz.update_layout(title="<b>Average Reservoir Pressure vs. Cumulative Gas Production</b>", xaxis_title="Cumulative Gas Production (MMscf)", yaxis_title="Average Pressure (psi)", template="plotly_white")
             st.plotly_chart(fig_pz, use_container_width=True)
         else: st.warning("Could not create P vs Gp plot. Pressure and time data have mismatched lengths.")
 
-with tabs[9]:
+elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
     st.info("**Interpretation:** Analyze how Estimated Ultimate Recovery (EUR) changes with well lateral length. This analysis uses the fast analytical solver for speed.")
     c1, c2, c3 = st.columns(3)
@@ -606,7 +595,7 @@ with tabs[9]:
             fig_o_eur.update_layout(title="<b>Oil EUR vs. Lateral Length</b>", xaxis_title="Lateral Length (ft)", yaxis_title="EUR (MMSTB)", template="plotly_white")
             st.plotly_chart(fig_o_eur, use_container_width=True)
 
-with tabs[10]:
+elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     st.info("**Interpretation:** Compare simulation results against historical field data by uploading a CSV file. The CSV should contain columns named 'Day', 'Gas_Rate_Mscfd', and/or 'Oil_Rate_STBpd'.")
     uploaded_file = st.file_uploader("Upload field production data (CSV)", type="csv")
@@ -626,7 +615,7 @@ with tabs[10]:
         st.plotly_chart(fig_match, use_container_width=True)
     elif st.session_state.get("sim") is None: st.warning("Run a simulation to view the comparison plot.")
 
-with tabs[11]:
+elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
     st.info("**Interpretation:** Quantify uncertainty by running many simulations with varying inputs to generate probabilistic forecasts (P10, P50, P90). This analysis uses the fast analytical solver.")
     p1, p2, p3 = st.columns(3)
@@ -665,7 +654,7 @@ with tabs[11]:
             st.plotly_chart(fig.update_layout(**semi_log_layout("Oil Rate Probabilistic Forecast", yaxis="Oil Rate (STB/d)")), use_container_width=True)
             st.plotly_chart(px.histogram(x=mc['eur_o'], nbins=30, labels={'x':'Oil EUR (MMSTB)'}, color_discrete_sequence=['green']).update_layout(title="<b>Distribution of Oil EUR</b>", template="plotly_white"), use_container_width=True)
 
-with tabs[12]:
+elif selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
     st.info("""**Interpretation:** This tool runs a series of rapid simulations to find the optimal well placement that maximizes a chosen objective. It uses a random search algorithm to test different well locations while respecting constraints, such as avoiding faults.""")
     st.markdown("#### 1. General Parameters")
@@ -730,7 +719,7 @@ with tabs[12]:
         fig_opt.update_layout(title="<b>Well Placement Optimization Map</b>", xaxis_title="X position (ft)", yaxis_title="Y position (ft)", template="plotly_white", height=600)
         st.plotly_chart(fig_opt, use_container_width=True)
 
-with tabs[13]:
+elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("""
     Welcome to the Full 3D Reservoir Simulator! This tool models production from hydraulically fractured wells.
@@ -750,7 +739,7 @@ with tabs[13]:
     - **Solver & Profiling**: View advanced numerical solver settings and performance metrics.
     """)
 
-with tabs[14]:
+elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("**Interpretation:** This tab provides details about the numerical solver settings and performance. Advanced users can tweak these settings in the sidebar.")
     st.markdown("### Current Numerical Solver Settings")
@@ -762,7 +751,7 @@ with tabs[14]:
         st.markdown("*Deeper profiling data (e.g., Jacobian assembly, linear solve time) is not returned by the current engine.*")
     else: st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-with tabs[15]:
+elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.dfn_segments
     if segs is None or len(segs) == 0:
