@@ -525,7 +525,6 @@ elif selected_tab == "3D Viewer":
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
     else:
-        # --- NEW: Expanded list of properties to view ---
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
         if sim_data:
             prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
@@ -536,21 +535,23 @@ elif selected_tab == "3D Viewer":
         with c1_3d: st.session_state.vol_downsample = st.slider("Downsample factor", 1, 10, st.session_state.vol_downsample, 1, key="vol_ds")
         with c2_3d: st.session_state.iso_value_rel = st.slider("Isosurface value (relative)", 0.05, 0.95, st.session_state.iso_value_rel, 0.05, key="iso_val_rel")
 
-        # --- NEW: Logic to select the correct data volume based on user choice ---
         data_3d, colorscale, colorbar_title = (None, None, None)
         if 'kx' in prop_3d:
             data_3d, colorscale, colorbar_title = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
         elif 'ϕ' in prop_3d:
             data_3d, colorscale, colorbar_title = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
         elif 'Pressure (psi)' in prop_3d:
-            data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'Plasma', 'Pressure (psi)'
+            # --- IMPROVED VISUALIZATION ---
+            data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
         elif 'Pressure Change' in prop_3d:
             p_final = sim_data.get('press_matrix')
             p_init = sim_data.get('p_init_3d')
             if p_final is not None and p_init is not None:
-                data_3d, colorscale, colorbar_title = p_init - p_final, 'Inferno', 'ΔP (psi)'
+                # --- IMPROVED VISUALIZATION ---
+                data_3d, colorscale, colorbar_title = p_init - p_final, 'inferno', 'ΔP (psi)'
         elif 'OOIP' in prop_3d:
-            data_3d, colorscale, colorbar_title = sim_data.get('ooip_3d'), 'Cividis', 'OOIP (STB/cell)'
+             # --- IMPROVED VISUALIZATION ---
+            data_3d, colorscale, colorbar_title = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
 
         if data_3d is not None:
             with st.spinner("Generating 3D plot..."):
@@ -558,11 +559,9 @@ elif selected_tab == "3D Viewer":
                 v_min, v_max = np.min(data_3d_ds), np.max(data_3d_ds)
                 isoval = v_min + (v_max - v_min) * st.session_state.iso_value_rel if v_max > v_min else v_min
                 nz, ny, nx = data_3d_ds.shape
-                Z, Y, X = np.mgrid[0:nz*state['dz']:nz, 0:ny*state['dy']:ny, 0:nx*state['dx']:nx] # Use physical dimensions
+                Z, Y, X = np.mgrid[0:nz*state['dz']:nz, 0:ny*state['dy']:ny, 0:nx*state['dx']:nx]
                 
                 fig3d = go.Figure()
-
-                # Add Isosurface plot for the selected property
                 fig3d.add_trace(go.Isosurface(
                     x=X.flatten(), y=Y.flatten(), z=Z.flatten(), 
                     value=data_3d_ds.flatten(), 
@@ -572,13 +571,11 @@ elif selected_tab == "3D Viewer":
                     colorbar=dict(title=colorbar_title)
                 ))
 
-                # --- NEW: Add Well Trajectories to the plot ---
                 if sim_data:
                     n_lats = int(state.get('n_laterals', 1))
                     L_ft = float(state.get('L_ft', 10000.))
                     lat_rows_y = [ny*state['dy']/3, 2*ny*state['dy']/3] if n_lats >= 2 else [ny*state['dy']/2]
                     lat_z = nz * state['dz'] / 2
-                    
                     for i, lat_y in enumerate(lat_rows_y):
                         fig3d.add_trace(go.Scatter3d(
                             x=[0, L_ft], y=[lat_y, lat_y], z=[lat_z, lat_z],
@@ -591,13 +588,12 @@ elif selected_tab == "3D Viewer":
                 fig3d.update_layout(
                     title=f"<b>3D Isosurface for {prop_3d}</b>", 
                     scene=dict(xaxis_title='X (ft)', yaxis_title='Y (ft)', zaxis_title='Z (ft)',
-                               aspectmode='data'), # Use 'data' for true aspect ratio
+                               aspectmode='data'),
                     margin=dict(l=0, r=0, b=0, t=40)
                 )
                 st.plotly_chart(fig3d, use_container_width=True)
         else:
-            st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
-elif selected_tab == "Slice Viewer":
+            st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     st.info("**Interpretation:** Inspect 2D cross-sections of the 3D reservoir model. This is useful for detailed quality control of properties and results.")
     sim_data = st.session_state.get("sim")
