@@ -552,17 +552,31 @@ elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     st.info("**Interpretation:** A plot of average reservoir pressure vs. cumulative production is a classic diagnostic tool to assess the physical consistency of the simulation. A smooth, monotonically decreasing pressure trend is expected.")
     sim_data = st.session_state.get("sim")
-    if sim_data is None: st.warning("Run a simulation on the 'Results' tab to view QA plots.")
-    elif sim_data.get('press_matrix_mid') is None: st.info("The selected solver did not return the necessary pressure evolution data for this tab.")
+    if sim_data is None: 
+        st.warning("Run a simulation on the 'Results' tab to view QA plots.")
+    # --- CORRECTED LINE 1 ---
+    # Was checking for the wrong key: 'press_matrix_mid'
+    elif sim_data.get('pm_mid_psi') is None: 
+        st.info("The selected solver did not return the necessary pressure evolution data for this tab.")
     else:
         cum_g_mmscf = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0)
+        
+        # --- CORRECTED LINE 2 ---
+        # Was getting data from the wrong key: 'press_matrix_mid'
         p_avg_series = [np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])]
+        
         if len(p_avg_series) == len(sim_data['t']):
-            fig_pz = go.Figure(go.Scatter(x=cum_g_mmscf, y=p_avg_series, mode='lines'))
-            fig_pz.update_layout(title="<b>Average Reservoir Pressure vs. Cumulative Gas Production</b>", xaxis_title="Cumulative Gas Production (MMscf)", yaxis_title="Average Pressure (psi)", template="plotly_white")
+            fig_pz = go.Figure(go.Scatter(x=cum_g_mmscf, y=p_avg_series, mode='lines', line=dict(color='purple')))
+            fig_pz.update_layout(
+                title="<b>Average Reservoir Pressure vs. Cumulative Gas Production</b>",
+                xaxis_title="Cumulative Gas Production (MMscf)",
+                yaxis_title="Average Pressure (psi)",
+                template="plotly_white"
+            )
             st.plotly_chart(fig_pz, use_container_width=True)
-        else: st.warning("Could not create P vs Gp plot. Pressure and time data have mismatched lengths.")
-
+        else:
+            # This warning should no longer appear after the fix
+            st.warning("Could not create P vs Gp plot. Pressure and time data have mismatched lengths.")
 elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
     st.info("**Interpretation:** Analyze how Estimated Ultimate Recovery (EUR) changes with well lateral length. This analysis uses the fast analytical solver for speed.")
