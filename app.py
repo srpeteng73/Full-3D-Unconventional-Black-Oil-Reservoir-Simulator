@@ -661,23 +661,75 @@ elif selected_tab == "EUR vs Lateral Length":
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     st.info("**Interpretation:** Compare simulation results against historical field data by uploading a CSV file. The CSV should contain columns named 'Day', 'Gas_Rate_Mscfd', and/or 'Oil_Rate_STBpd'.")
-    uploaded_file = st.file_uploader("Upload field production data (CSV)", type="csv")
-    if uploaded_file: st.session_state.field_data_match = pd.read_csv(uploaded_file)
+
+    # --- NEW: Create a two-column layout for the uploader and demo button ---
+    c1, c2 = st.columns([3, 1]) # Give the uploader more space
+    
+    with c1:
+        uploaded_file = st.file_uploader("Upload field production data (CSV)", type="csv")
+        if uploaded_file:
+            try:
+                st.session_state.field_data_match = pd.read_csv(uploaded_file)
+            except Exception as e:
+                st.error(f"Error reading CSV file: {e}")
+
+    with c2:
+        st.write("") # Add some vertical space
+        st.write("") # Add some vertical space
+        if st.button("Load Demo Data", use_container_width=True):
+            # Generate a realistic-looking synthetic production history
+            rng = np.random.default_rng(123) # Use a fixed seed for reproducibility
+            days = np.arange(0, 731, 15) # ~2 years of data every 15 days
+            
+            # Create declining rates with some noise
+            oil_rate = 950 * np.exp(-days / 400) + rng.uniform(-25, 25, size=days.shape)
+            gas_rate = 8000 * np.exp(-days / 500) + rng.uniform(-200, 200, size=days.shape)
+            
+            # Ensure rates are non-negative
+            oil_rate = np.clip(oil_rate, 0, None)
+            gas_rate = np.clip(gas_rate, 0, None)
+            
+            # Create a Pandas DataFrame
+            demo_df = pd.DataFrame({
+                "Day": days,
+                "Gas_Rate_Mscfd": gas_rate,
+                "Oil_Rate_STBpd": oil_rate
+            })
+            
+            # Store it in the session state, same as a real upload
+            st.session_state.field_data_match = demo_df
+            st.success("Demo production data loaded successfully!")
+
+    # --- The rest of the logic remains the same ---
+    # It will now work with either uploaded data or demo data.
+    
+    if 'field_data_match' in st.session_state:
+        st.markdown("---")
+        st.markdown("#### Loaded Production Data (first 5 rows)")
+        st.dataframe(st.session_state.field_data_match.head(), use_container_width=True)
+
     if st.session_state.get("sim") and st.session_state.get("field_data_match") is not None:
         sim_data, field_data = st.session_state.sim, st.session_state.field_data_match
+        
         fig_match = go.Figure()
+        
+        # Plot Simulated Data
         fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], mode='lines', name='Simulated Gas', line=dict(color="#d62728")))
         fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], mode='lines', name='Simulated Oil', line=dict(color="#2ca02c"), yaxis="y2"))
+        
+        # Plot Field Data (from CSV or Demo)
         if 'Day' in field_data.columns and 'Gas_Rate_Mscfd' in field_data.columns:
             fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color="#d62728", symbol='cross')))
         if 'Day' in field_data.columns and 'Oil_Rate_STBpd' in field_data.columns:
             fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color="#2ca02c", symbol='cross'), yaxis="y2"))
+        
         layout_config = semi_log_layout("Field Match: Simulation vs. Actual", yaxis="Gas Rate (Mscf/d)")
         layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)"), yaxis2=dict(title="Oil Rate (STB/d)", overlaying="y", side="right", showgrid=False))
         fig_match.update_layout(layout_config)
         st.plotly_chart(fig_match, use_container_width=True)
-    elif st.session_state.get("sim") is None: st.warning("Run a simulation to view the comparison plot.")
-
+        
+    elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
+        st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
     st.info("**Interpretation:** Quantify uncertainty by running many simulations with varying inputs to generate probabilistic forecasts (P10, P50, P90). This analysis uses the fast analytical solver.")
