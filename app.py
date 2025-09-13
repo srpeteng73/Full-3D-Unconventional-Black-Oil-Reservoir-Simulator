@@ -186,6 +186,13 @@ def fallback_fast_solver(state, rng):
     EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6
     return dict(t=t, qg=qg, qo=qo, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 
+# --- THIS IS THE RESTORED FUNCTION ---
+def _get_sim_preview():
+    if 'state' in globals(): tmp = state.copy()
+    else: tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
+    rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
+    return fallback_fast_solver(tmp, rng_preview)
+
 def run_full_3d_simulation(state):
     t0 = time.time()
     inputs = {
@@ -253,7 +260,6 @@ def is_location_valid(x_pos, y_pos, state):
             fault_y_pos = fault_index * dy
             if abs(y_pos - fault_y_pos) < min_dist_ft: return False
     return True
-
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
