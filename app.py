@@ -34,7 +34,7 @@ _setdefault("vol_downsample", 2)
 _setdefault("iso_value_rel", 0.5)
 
 defaults = dict(
-    nx=120, ny=60, nz=12,
+    nx=300, ny=60, nz=12,
     dx=40.0, dy=40.0, dz=15.0,
     k_stdev=0.02, phi_stdev=0.02, anis_kxky=1.0,
     facies_style="Continuous (Gaussian)",
@@ -103,6 +103,10 @@ def mu_g_of_p(p, pb, mug_pb):
     peak = mug_pb*1.03; left = mug_pb - 0.0006; right = mug_pb - 0.0008
     mu = np.where(p < pb, left + (peak-left)*(p-p.min())/(pb-p.min()+1e-9), peak + (right-peak)*(p-pb)/(p.max()-pb+1e-9))
     return np.clip(mu, 0.001, None)
+
+def z_factor_approx(p_psi, p_init_psi=5800.0):
+    p_norm = p_psi / p_init_psi
+    return 0.95 - 0.2 * (1 - p_norm) + 0.4 * (1 - p_norm)**2
 
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     def g(val, label, suffix, color, vmax):
@@ -195,28 +199,20 @@ def run_full_3d_simulation(state):
     except Exception as e: 
         st.error(f"Error in full3d.py engine: {e}")
         return None
-    
     t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
     if t is None or qg is None or qo is None: 
         st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd).")
         return None
-        
     EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6
-    
-    # Assemble the final dictionary for the UI
     return {
-        't':t,
-        'qg':qg,
-        'qo':qo,
+        't':t,'qg':qg,'qo':qo,
         'press_matrix':engine_results.get('p3d_psi'),
         'press_frac_mid':engine_results.get('pf_mid_psi'),
-        # --- THIS IS THE CORRECTED LINE ---
-        'pm_mid_psi':engine_results.get('pm_mid_psi'), # Was 'press_matrix_mid'
+        'pm_mid_psi':engine_results.get('pm_mid_psi'),
         'Sw_mid':engine_results.get('Sw_mid'),
-        'EUR_g_BCF':EUR_g_BCF,
-        'EUR_o_MMBO':EUR_o_MMBO,
-        'runtime_s':time.time()-t0
+        'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0
     }
+
 def run_simulation(state):
     if st.session_state.get('kx') is None:
         rng = np.random.default_rng(int(st.session_state.rng_seed))
@@ -243,7 +239,7 @@ def is_location_valid(x_pos, y_pos, state):
         fault_index = int(state.get('fault_index', 0))
         dx = float(state.get('dx', 40.0))
         dy = float(state.get('dy', 40.0))
-        min_dist_ft = 150.0 # Define a minimum distance from the fault
+        min_dist_ft = 150.0
         if 'i-plane' in fault_plane:
             fault_x_pos = fault_index * dx
             if abs(x_pos - fault_x_pos) < min_dist_ft: return False
@@ -334,7 +330,6 @@ tab_names = [
 ]
 
 # Create a custom navigation menu that looks and feels like tabs
-# This CSS makes the radio buttons look like a tab bar
 st.write('<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center;} .stRadio > label {display:none;} div.row-widget.stRadio > div > div {border: 1px solid #ccc; padding: 6px 12px; border-radius: 4px; margin: 2px; background-color: #f0f2f6;} div.row-widget.stRadio > div > div[aria-checked="true"] {background-color: #e57373; color: white; border-color: #d32f2f;}</style>', unsafe_allow_html=True)
 selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
@@ -571,7 +566,6 @@ elif selected_tab == "Slice Viewer":
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     st.info("**Interpretation:** These plots use the Material Balance Equation (MBE) as an independent 'tank' model to verify the simulation's physical consistency and estimate the original fluid in place.")
-    
     sim_data = st.session_state.get("sim")
     if sim_data is None: 
         st.warning("Run a simulation on the 'Results' tab to view QA plots.")
@@ -580,9 +574,7 @@ elif selected_tab == "QA / Material Balance":
     else:
         cum_g_mmscf = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0)
         p_avg_series = np.array([np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])])
-        
         if len(p_avg_series) == len(sim_data['t']):
-            # --- Part 1: Gas Material Balance (P/Z vs Gp) ---
             st.markdown("### Gas Material Balance")
             z_factors = z_factor_approx(p_avg_series, p_init_psi=state['p_init_psi'])
             p_over_z = p_avg_series / z_factors
@@ -600,48 +592,29 @@ elif selected_tab == "QA / Material Balance":
             fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white", xaxis_range=[0, giip_bcf * 1100])
             st.plotly_chart(fig_pz_gas, use_container_width=True)
 
-            # --- Part 2: Oil Material Balance (Havlena-Odeh Plot) ---
             st.markdown("---")
             st.markdown("### Oil Material Balance")
             st.info("**Analysis:** For an oil reservoir, a plot of underground withdrawal (F) vs. total fluid expansion (Et) should form a straight line. The slope of this line is an estimate of the Original Oil In Place (OOIP).")
-
-            # Calculate cumulative production and Rp
             Np = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0)
-            Gp = cumulative_trapezoid(sim_data['qg'] * 1000, sim_data['t'], initial=0) # Gp in scf
+            Gp = cumulative_trapezoid(sim_data['qg'] * 1000, sim_data['t'], initial=0)
             Rp = np.divide(Gp, Np, out=np.zeros_like(Gp), where=Np!=0)
-
-            # Get PVT properties at each pressure step
             Bo = Bo_of_p(p_avg_series, state['pb_psi'], state['Bo_pb_rb_stb'])
             Rs = Rs_of_p(p_avg_series, state['pb_psi'], state['Rs_pb_scf_stb'])
             Bg = Bg_of_p(p_avg_series)
-
-            # Get initial PVT properties
             p_init = state['p_init_psi']
             Boi = Bo_of_p(p_init, state['pb_psi'], state['Bo_pb_rb_stb'])
             Rsi = Rs_of_p(p_init, state['pb_psi'], state['Rs_pb_scf_stb'])
-
-            # Calculate F (Underground Withdrawal) and Et (Total Expansion) terms
-            # F = Np * [Bo + (Rp - Rs) * Bg]
-            # Et = (Bo - Boi) + (Rsi - Rs) * Bg  (for a solution-gas drive reservoir)
             F = Np * (Bo + (Rp - Rs) * Bg)
             Et = (Bo - Boi) + (Rsi - Rs) * Bg
-            
-            # Perform linear regression on F vs Et
-            # The slope of this line should be N (OOIP in STB)
             fit_start_index_oil = len(F) // 4
             slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_index_oil:], F[fit_start_index_oil:])
             ooip_mmstb = slope_oil / 1e6 if slope_oil > 0 else 0
             sim_eur_o_mmstb = sim_data['EUR_o_MMBO']
-            
-            # Calculate Recovery Factor
             rec_factor = (sim_eur_o_mmstb / ooip_mmstb) * 100 if ooip_mmstb > 0 else 0
-
             c1, c2, c3 = st.columns(3)
             c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB")
             c2.metric("Material Balance OOIP (from F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
             c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
-
-            # Create the F vs Et plot
             fig_mbe_oil = go.Figure()
             fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode='markers', name='F vs Et Data Points'))
             x_fit_oil = np.array([0, np.max(Et)])
@@ -651,8 +624,9 @@ elif selected_tab == "QA / Material Balance":
             st.plotly_chart(fig_mbe_oil, use_container_width=True)
 
         else:
-            st.warning("Could not create plots. Pressure and time data have mismatched lengths.")elif selected_tab == "EUR vs Lateral Length":
-            
+            st.warning("Could not create plots. Pressure and time data have mismatched lengths.")
+
+elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
     st.info("**Interpretation:** Analyze how Estimated Ultimate Recovery (EUR) changes with well lateral length. This analysis uses the fast analytical solver for speed.")
     c1, c2, c3 = st.columns(3)
@@ -760,29 +734,15 @@ elif selected_tab == "Well Placement Optimization":
         num_wells = st.number_input("Number of wells to place", 1, 1, 1, disabled=True, help="Currently supports optimizing a single well location.")
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
-    
     if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
         opt_results = []
         base_state = state.copy()
         rng_opt = np.random.default_rng(st.session_state.rng_seed)
-        
-        # Calculate maximum placement coordinates
         reservoir_x_dim = base_state['nx'] * base_state['dx']
         x_max = reservoir_x_dim - base_state['L_ft']
-
-        # --- NEW & CRITICAL ERROR CHECKING BLOCK ---
         if x_max < 0:
-            st.error(
-                f"Optimization Cannot Run: The well is too long for the reservoir.\n\n"
-                f"- Reservoir X-Dimension (nx * dx): **{reservoir_x_dim:.0f} ft**\n"
-                f"- Well Lateral Length (L_ft): **{base_state['L_ft']:.0f} ft**\n\n"
-                "Please decrease 'Lateral length (ft)' or increase 'nx'/'dx' in the sidebar.",
-                icon="⚠️"
-            )
-            # Stop execution to prevent the crash
+            st.error(f"Optimization Cannot Run: The well is too long for the reservoir.\n\n- Reservoir X-Dimension (nx * dx): **{reservoir_x_dim:.0f} ft**\n- Well Lateral Length (L_ft): **{base_state['L_ft']:.0f} ft**\n\nPlease decrease 'Lateral length (ft)' or increase 'nx'/'dx' in the sidebar.", icon="⚠️")
             st.stop()
-        # --- END OF NEW BLOCK ---
-
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
         for i in range(iterations):
@@ -800,7 +760,6 @@ elif selected_tab == "Well Placement Optimization":
             progress_bar.progress((i + 1) / iterations, text=f"Step {i+1}/{iterations} | Score: {score:.3f}")
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
-        
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
         df_results = st.session_state.opt_results
         best_run = df_results.loc[df_results['Score'].idxmax()]
@@ -826,6 +785,7 @@ elif selected_tab == "Well Placement Optimization":
             fig_opt.add_trace(go.Scatter(x=fault_x, y=fault_y, mode='lines', line=dict(color='white', width=4, dash='dash'), name='Fault'))
         fig_opt.update_layout(title="<b>Well Placement Optimization Map</b>", xaxis_title="X position (ft)", yaxis_title="Y position (ft)", template="plotly_white", height=600)
         st.plotly_chart(fig_opt, use_container_width=True)
+
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("""
