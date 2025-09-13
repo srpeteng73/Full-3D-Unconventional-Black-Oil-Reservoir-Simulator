@@ -23,27 +23,26 @@ class Grid:
     def cell_volume_ft3(self):
         return self.dx * self.dy * self.dz
 
-# --- NEW: The Rock Class ---
+# --- The Rock Class (from Step 2) ---
 class Rock:
     def __init__(self, inputs, grid):
         rock_params = inputs.get('rock', {})
-        # Store properties as flattened 1D arrays for easy access
         self.poro = rock_params.get('phi', np.full(grid.num_cells, 0.1)).flatten()
         self.kx = rock_params.get('kx_md', np.full(grid.num_cells, 0.05)).flatten()
         self.ky = rock_params.get('ky_md', np.full(grid.num_cells, 0.05)).flatten()
+        # For simplicity, we assume kz = 0.1 * kx
+        self.kz = self.kx * 0.1
 
-# --- NEW: The Fluid Class ---
+# --- The Fluid Class (from Step 2) ---
 class Fluid:
     def __init__(self, inputs):
         pvt_params = inputs.get('pvt', {})
-        # Store the PVT function parameters
         self.pb_psi = pvt_params.get('pb_psi')
         self.Rs_pb = pvt_params.get('Rs_pb_scf_stb')
         self.Bo_pb = pvt_params.get('Bo_pb_rb_stb')
         self.muo_pb = pvt_params.get('muo_pb_cp')
         self.mug_pb = pvt_params.get('mug_pb_cp')
 
-    # We can reuse the PVT functions from app.py here for consistency
     def Bo(self, P):
         p = np.asarray(P, float)
         slope = -1.0e-5
@@ -52,12 +51,49 @@ class Fluid:
     def Rs(self, P):
         p = np.asarray(P, float)
         return np.where(p <= self.pb_psi, self.Rs_pb, self.Rs_pb + 0.00012*(p - self.pb_psi)**1.1)
-    
-    # ... Add functions for Bg, mu_o, mu_g, etc. as needed ...
+
+# --- NEW: The Transmissibility Class ---
+class Transmissibility:
+    def __init__(self, grid, rock):
+        """
+        Pre-calculates the geometric part of transmissibility between all cells.
+        This is a performance optimization. The formula is T = (kA / L), where
+        L is the distance between cell centers. We use a harmonic average for k.
+        """
+        self.T_x = np.zeros(grid.num_cells)
+        self.T_y = np.zeros(grid.num_cells)
+        self.T_z = np.zeros(grid.num_cells)
+        
+        conversion_factor = 0.001127 # Darcy units conversion for oilfield units
+        
+        # Loop through all interior cells
+        for k in range(grid.nz):
+            for j in range(grid.ny):
+                for i in range(grid.nx):
+                    m = grid.get_idx(i, j, k)
+                    
+                    # Transmissibility in X-direction (connection i to i+1)
+                    if i < grid.nx - 1:
+                        m_plus_1 = grid.get_idx(i + 1, j, k)
+                        k_harmonic_avg = 2 * rock.kx[m] * rock.kx[m_plus_1] / (rock.kx[m] + rock.kx[m_plus_1])
+                        area = grid.dy * grid.dz
+                        self.T_x[m] = conversion_factor * k_harmonic_avg * area / grid.dx
+                    
+                    # Transmissibility in Y-direction (connection j to j+1)
+                    if j < grid.ny - 1:
+                        m_plus_1 = grid.get_idx(i, j + 1, k)
+                        k_harmonic_avg = 2 * rock.ky[m] * rock.ky[m_plus_1] / (rock.ky[m] + rock.ky[m_plus_1])
+                        area = grid.dx * grid.dz
+                        self.T_y[m] = conversion_factor * k_harmonic_avg * area / grid.dy
+                        
+                    # Transmissibility in Z-direction (connection k to k+1)
+                    if k < grid.nz - 1:
+                        m_plus_1 = grid.get_idx(i, j, k + 1)
+                        k_harmonic_avg = 2 * rock.kz[m] * rock.kz[m_plus_1] / (rock.kz[m] + rock.kz[m_plus_1])
+                        area = grid.dx * grid.dy
+                        self.T_z[m] = conversion_factor * k_harmonic_avg * area / grid.dz
 
 def simulate(inputs):
-    engine_type = inputs.get('engine_type', 'Analytical Model (Fast Proxy)')
-    # For now, we are focusing on the 3D implicit blueprint.
     return simulate_3D_implicit(inputs)
 
 def simulate_3D_implicit(inputs):
@@ -71,12 +107,12 @@ def simulate_3D_implicit(inputs):
     grid = Grid(inputs)
     rock = Rock(inputs, grid)
     fluid = Fluid(inputs)
-    print(f"Grid, Rock, and Fluid components initialized.")
+    trans = Transmissibility(grid, rock)
+    print("Grid, Rock, Fluid, and Transmissibility components initialized.")
 
     # --- 2. Initialize State Variables ---
     unknowns = np.zeros(grid.num_cells * 3) 
-    # TODO: Initialize with p_init, Sw_init, Sg_init from 'inputs' dictionary
-
+    
     # --- 3. Setup Timesteps ---
     total_time_days = 30 * 365
     num_timesteps = 360
@@ -86,12 +122,16 @@ def simulate_3D_implicit(inputs):
     # --- 4. Main Time-Stepping Loop ---
     for step in range(num_timesteps):
         
-        # --- 5. Newton-Raphson Iteration Loop (for non-linearity) ---
+        # --- 5. Newton-Raphson Iteration Loop ---
         # PSEUDOCODE:
         # for newton_iter in range(max_newton_iter):
-        #     # Here you would use the new classes:
-        #     R = calculate_residuals(unknowns, old_unknowns, grid, rock, fluid, dt_days)
-        #     J = assemble_jacobian(unknowns, grid, rock, fluid, dt_days)
+        #     # You would now use the pre-calculated transmissibilities inside
+        #     # the residual and jacobian calculations. For example, the flow
+        #     # between cell m and m+1 in the x-direction would be:
+        #     # flow = trans.T_x[m] * mobility * (P[m] - P[m+1])
+        #
+        #     R = calculate_residuals(unknowns, old_unknowns, grid, rock, fluid, trans, dt_days)
+        #     J = assemble_jacobian(unknowns, grid, rock, fluid, trans, dt_days)
         #     dx = solve_linear_system(J, -R)
         #     unknowns += dx
         #     if converged: break
@@ -100,7 +140,6 @@ def simulate_3D_implicit(inputs):
     # --- 6. Post-Process and Return Results (Placeholder) ---
     qo_STBpd = 1000 * np.exp(-t_days[1:] / 500)
     qg_Mscfd = 8000 * np.exp(-t_days[1:] / 600)
-
     results = {
         't_days': t_days, 
         'qg_Mscfd': np.insert(qg_Mscfd, 0, 0), 
