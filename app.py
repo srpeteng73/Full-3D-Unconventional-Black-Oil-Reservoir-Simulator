@@ -851,24 +851,94 @@ elif selected_tab == "Well Placement Optimization":
 
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
+    st.markdown("---")
+
     st.markdown("""
-    Welcome to the Full 3D Reservoir Simulator! This tool models production from hydraulically fractured wells.
-    ### Quick Start
-    1.  **Select a Preset**: Choose a shale play from the sidebar and click "Apply preset".
-    2.  **Customize Inputs**: Adjust grid, rock, well, and fluid properties in the sidebar.
-    3.  **Run Simulation**: Go to the **Results** tab and click "Run simulation".
-    ### Tab Guide
-    - **Setup Preview**: A summary of your inputs and a fast analytical forecast.
-    - **Generate 3D...**: Visualize the 3D permeability and porosity fields.
-    - **PVT (Black-Oil)**: View fluid property charts.
-    - **Well Placement Optimization**: Run a routine to find the best drilling locations.
-    - **Results**: The main tab to run the full 3D simulation and see detailed results.
-    - **3D/Slice Viewer**: Inspect 3D data volumes (like pressure) after a run.
-    - **Sensitivity/Uncertainty**: Run automated analyses to see how EUR changes with key parameters or to quantify uncertainty.
-    - **Field Match**: Upload your own production data to compare with the simulation.
-    - **Solver & Profiling**: View advanced numerical solver settings and performance metrics.
+    ### 1. Introduction
+    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is an interactive tool designed for petroleum engineers, geoscientists, and students to model and forecast hydrocarbon production. It combines a user-friendly interface with powerful backend models to simulate complex reservoir behaviors, from multi-stage fractured horizontal wells in shale plays to conventional black-oil assets.
+    
+    The primary goal of this tool is to allow for rapid scenario analysis, sensitivity studies, and a deeper understanding of the interplay between geology, fluid properties, and completion design.
     """)
 
+    st.markdown("---")
+    
+    st.markdown("""
+    ### 2. Quick Start Guide
+    For those eager to get started immediately, follow these simple steps:
+    1.  **Select a Preset**: On the sidebar, choose a shale play from the **Shale play** dropdown (e.g., "Permian Basin (Wolfcamp)") and click **Apply preset**. This will populate the simulator with realistic parameters.
+    2.  **Generate Geology**: Navigate to the **Generate 3D property volumes...** tab and review the generated permeability and porosity maps.
+    3.  **Run Simulation**: Go to the **Results** tab and click the **Run simulation** button.
+    4.  **Analyze**: View the production profiles, EUR gauges, and explore the other tabs to see the detailed results.
+    """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### 3. Core Workflow: How to Create a Forecast (History Matching)
+    One of the most common tasks for a reservoir engineer is to match historical production data and then use the calibrated model to forecast future performance. This simulator is designed to facilitate this workflow.
+    
+    #### Phase 1: Setup and Data Loading
+    1.  **Start with an Analog**: Select the **Preset** from the sidebar that most closely matches your well's geology and fluid type.
+    2.  **Load Historical Data**: Go to the **Field Match (CSV)** tab. You can either upload your own CSV file or click **Load Demo Data** to practice with a synthetic dataset. The data will appear as scatter points on the plots once loaded.
+
+    #### Phase 2: The History Matching Loop
+    This is an iterative process of adjusting parameters to make the simulated curves match the historical data points.
+    1.  **Run the Initial Simulation**: Go to the **Results** tab and run the simulation with the initial preset parameters.
+    2.  **Compare the Match**: Go back to the **Field Match (CSV)** tab. Observe how well the solid lines (simulation) match the 'x' markers (historical data).
+    3.  **Adjust Key Parameters**: Based on the mismatch, go to the sidebar and adjust the most impactful parameters. Common adjustments include:
+        *   **If the initial rate is too low/high**: Adjust **Frac half-length (xf_ft)** or the initial **Pad BHP (psi)**.
+        *   **If the decline is too steep/shallow**: Adjust **Permeability (k stdev)** or **Pad BHP (psi)**. A lower BHP will create a steeper decline.
+        *   **If the GOR trend is wrong**: Adjust PVT properties like **Bubble Point (pb_psi)**.
+    4.  **Re-run and Repeat**: After each adjustment, click **Run simulation** again and check the match. Repeat this process until you achieve a satisfactory match for both oil and gas rates.
+
+    #### Phase 3: Forecasting
+    Once you have a satisfactory history match, the model is considered "calibrated." The simulated production profile that extends beyond the historical data is your **forecast**. You can analyze this forecast in the **Results** tab to see the 30-year EUR and expected production decline.
+    
+    #### Phase 4: Sensitivity & Uncertainty
+    A single forecast is never enough. Use your calibrated model as a base case and proceed to:
+    *   **Uncertainty & Monte Carlo Tab**: Define ranges for your key parameters to generate probabilistic forecasts (P10, P50, P90).
+    *   **Sensitivity: EUR vs Lateral Length Tab**: Analyze how changes in future well designs could impact recovery.
+    """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### 4. Detailed Tab-by-Tab Guide
+    
+    *   **Setup Preview**: A high-level summary of your grid, well, and frac design. The production charts here use a fast, simplified analytical model for quick previews, not the full 3D engine.
+    *   **Generate 3D property volumes...**: This is where the static geological model is created. The `k stdev` and `ϕ stdev` sliders control the heterogeneity of the reservoir. Click "Re-generate" to create a new random realization.
+    *   **PVT (Black-Oil)**: Visualizes the fluid behavior (Pressure-Volume-Temperature). The "Bubble Point" is a critical parameter that defines where gas starts to come out of solution from the oil.
+    *   **MSW Wellbore**: Models the physics inside the wellbore itself, showing how pressure drops from heel to toe and how that affects flow contribution from each fracture stage.
+    *   **RTA (Rate Transient Analysis)**: A diagnostic tool that plots the log-derivative of rate vs. time. The slope can indicate flow regimes (e.g., a slope of 0.5 often indicates linear flow from fractures).
+    *   **Results**: The main control panel. Click **Run simulation** to execute the full 3D engine. This tab displays the primary outputs: production rates, cumulative production, and EURs.
+    *   **3D Viewer**: A powerful visualization tool. After running a simulation, you can visualize 3D isosurfaces of properties like **Pressure Change (ΔP)** to see the drained rock volume (SRV) or **OOIP** to see where the hydrocarbons are concentrated. The well laterals are also displayed for context.
+    *   **Slice Viewer**: Allows you to inspect 2D cross-sections of the 3D volumes for detailed QC.
+    *   **QA / Material Balance**: A critical validation tab. It uses the P/Z (for gas) and Havlena-Odeh (for oil) methods to independently calculate the original fluid in place from the simulation's pressure and production data. If the MBE results are close to the simulator's EUR, it provides high confidence in the model's physical consistency.
+    *   **EUR vs Lateral Length**: A sensitivity analysis tool to quickly study the economic impact of changing well length.
+    *   **Field Match (CSV)**: Upload historical data or load a demo set to perform history matching.
+    *   **Uncertainty & Monte Carlo**: Quantifies risk by running hundreds of fast simulations with varying inputs to provide a probabilistic range of outcomes (P10, P50, P90).
+    *   **Well Placement Optimization**: An automated tool that searches for the optimal drilling location to maximize EUR while respecting constraints like fault boundaries.
+    *   **Solver & Profiling**: For advanced users, this shows the settings for the numerical solvers (e.g., Newton tolerance) and the computational time of the last run.
+    *   **DFN Viewer**: Visualizes Discrete Fracture Networks if a DFN file is loaded, allowing for QC of the fracture geometry.
+    """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### 5. About the Models
+    *   **Full 3D Engine (`full3d.py`)**: The primary model is a proxy engine that uses physics-informed analytical equations. It honors the 3D geological properties (like average permeability) and detailed well design to generate a realistic forecast and a 3D pressure plume for visualization.
+    *   **Fast Analytical Solver**: Used for previews, sensitivities, and Monte Carlo runs, this model is based on the Arps decline curve equation, with parameters intelligently estimated from the reservoir and completion inputs to ensure speed.
+    """)
+    
+    st.markdown("---")
+
+    st.markdown("""
+    ### 6. Credits and Attribution
+    *   **Author**: Omar Nur, Petroleum Engineer
+    *   **Developed By**: Omar Nur
+    
+    This software is intended for educational and demonstrational purposes.
+    """)
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("**Interpretation:** This tab provides details about the numerical solver settings and performance. Advanced users can tweak these settings in the sidebar.")
