@@ -263,6 +263,7 @@ def is_location_valid(x_pos, y_pos, state):
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
+
     st.markdown("### Engine & Presets")
     st.selectbox("Engine Type", 
                  ["3D Three-Phase Implicit (Phase 1b)",
@@ -281,18 +282,43 @@ with st.sidebar:
         _safe_rerun()
         
     st.markdown("### Grid (ft)")
-    c1,c2,c3 = st.columns(3); st.number_input("nx",10,500,key="nx"); st.number_input("ny",10,500,key="ny"); st.number_input("nz",1,200,key="nz")
-    c1,c2,c3 = st.columns(3); st.number_input("dx (ft)",step=1.0,key="dx"); st.number_input("dy (ft)",step=1.0,key="dy"); st.number_input("dz (ft)",step=1.0,key="dz")
+    c1,c2,c3 = st.columns(3)
+    st.number_input("nx", 10, 500, key="nx")
+    st.number_input("ny", 10, 500, key="ny")
+    st.number_input("nz", 1, 200, key="nz")
+
+    c1,c2,c3 = st.columns(3)
+    st.number_input("dx (ft)", step=1.0, key="dx")
+    st.number_input("dy (ft)", step=1.0, key="dy")
+    st.number_input("dz (ft)", step=1.0, key="dz")
+    
     st.markdown("### Heterogeneity & Anisotropy")
     st.selectbox("Facies style", ["Continuous (Gaussian)","Speckled (high-variance)","Layered (vertical bands)"], key="facies_style")
     st.slider("k stdev (mD around 0.02)",0.0,0.20,float(st.session_state.k_stdev),0.01,key="k_stdev")
     st.slider("ϕ stdev",0.0,0.20,float(st.session_state.phi_stdev),0.01,key="phi_stdev")
     st.slider("Anisotropy kx/ky",0.5,3.0,float(st.session_state.anis_kxky),0.05,key="anis_kxky")
+    
     st.markdown("### Faults")
     st.checkbox("Enable fault TMULT",value=bool(st.session_state.use_fault),key="use_fault")
-    st.selectbox("Fault plane",["i-plane (vertical)","j-plane (vertical)"],index=0,key="fault_plane")
-    st.number_input("Plane index",1,max(1,int(st.session_state.nx)-2),int(st.session_state.fault_index),1,key="fault_index")
+    fault_plane_choice = st.selectbox("Fault plane",["i-plane (vertical)","j-plane (vertical)"],index=0,key="fault_plane")
+
+    # --- THIS IS THE CORRECTED LOGIC ---
+    # Determine the max possible index based on the chosen plane and grid size
+    if 'i-plane' in fault_plane_choice:
+        max_idx = int(st.session_state.nx) - 2
+    else: # j-plane
+        max_idx = int(st.session_state.ny) - 2
+    
+    # Ensure the current fault index is not out of bounds BEFORE rendering the widget
+    if st.session_state.fault_index > max_idx:
+        st.session_state.fault_index = max_idx
+
+    # Now, render the widget with a guaranteed valid value and max_value
+    st.number_input("Plane index", 1, max(1, max_idx), key="fault_index")
+    # --- END OF CORRECTION ---
+    
     st.number_input("Transmissibility multiplier",value=float(st.session_state.fault_tm),step=0.01,key="fault_tm")
+    
     st.markdown("### Pad / Wellbore & Frac")
     st.number_input("Laterals",1,6,int(st.session_state.n_laterals),1,key="n_laterals")
     st.number_input("Lateral length (ft)",value=float(st.session_state.L_ft),step=50.0,key="L_ft")
@@ -344,7 +370,6 @@ with st.sidebar:
     st.markdown("##### Developed by:")
     st.markdown("##### Omar Nur, Petroleum Engineer")
     st.markdown("---")
-
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 
 tab_names = [
