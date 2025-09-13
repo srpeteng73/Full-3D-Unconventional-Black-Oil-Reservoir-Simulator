@@ -652,6 +652,7 @@ elif selected_tab == "QA / Material Balance":
 
         else:
             st.warning("Could not create plots. Pressure and time data have mismatched lengths.")elif selected_tab == "EUR vs Lateral Length":
+            
     st.header("Sensitivity: EUR vs Lateral Length")
     st.info("**Interpretation:** Analyze how Estimated Ultimate Recovery (EUR) changes with well lateral length. This analysis uses the fast analytical solver for speed.")
     c1, c2, c3 = st.columns(3)
