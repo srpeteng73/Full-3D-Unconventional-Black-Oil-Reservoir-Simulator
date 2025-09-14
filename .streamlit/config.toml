@@ -1,6 +1,6 @@
-mkdir .streamlit
-mv config.toml .streamlit/config.toml
-git add .streamlit/config.toml
-git rm config.toml
-git commit -m "Move config.toml into .streamlit folder"
-git push
+[theme]
+primaryColor="#e57373"
+backgroundColor="#F0F2F6"
+secondaryBackgroundColor="#FFFFFF"
+textColor="#31333F"
+font="sans serif"
