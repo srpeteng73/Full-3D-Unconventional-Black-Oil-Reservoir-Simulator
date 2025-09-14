@@ -8,7 +8,9 @@ import streamlit as st
 from scipy import stats
 from scipy.integrate import cumulative_trapezoid
 import numpy_financial as npf  # --- NEW: Import for Economics Tab ---
-from full3d import simulate  # IMPORTING YOUR REAL 3D ENGINE
+from core.full3d import simulate
+from engines.fast import fallback_fast_solver  # used in preview & fallbacks
+
 
 # ------------------------ Utils ------------------------
 def _setdefault(k, v):
