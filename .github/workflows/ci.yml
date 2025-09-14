@@ -38,5 +38,17 @@ jobs:
           ruff --version
           ruff check --exit-zero .
 
-      - name: Run smoke tests
-        run: pytest -q --maxfail=1 --disable-warnings tests/test_smoke.py
+      # 🔽 Replaced test step starts here
+      - name: Show workspace layout (debug)
+        run: |
+          pwd
+          ls -la
+          echo "---- top level ----"
+          find . -maxdepth 2 -type f | sed 's|^\./||' | sort
+
+      - name: Run smoke tests (verbose)
+        run: |
+          set -e
+          python -c "import sys,pytest; print('pytest version:', pytest.__version__)"
+          pytest -rA -vv tests/test_smoke.py
+      # 🔼 Replaced test step ends here
