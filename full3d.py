@@ -7,19 +7,13 @@ from scipy.sparse.linalg import spsolve
 class Grid:
     def __init__(self, inputs):
         grid_params = inputs.get('grid', {})
-        self.nx = grid_params.get('nx')
-        self.ny = grid_params.get('ny')
-        self.nz = grid_params.get('nz')
-        self.dx = grid_params.get('dx')
-        self.dy = grid_params.get('dy')
-        self.dz = grid_params.get('dz')
+        self.nx, self.ny, self.nz = grid_params.get('nx'), grid_params.get('ny'), grid_params.get('nz')
+        self.dx, self.dy, self.dz = grid_params.get('dx'), grid_params.get('dy'), grid_params.get('dz')
         self.num_cells = self.nx * self.ny * self.nz
-
     def get_idx(self, i, j, k):
         if 0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz:
             return k * (self.nx * self.ny) + j * self.nx + i
         return -1
-
     def cell_volume_bbl(self):
         return (self.dx * self.dy * self.dz) / 5.615
 
@@ -37,7 +31,8 @@ class Fluid:
     def __init__(self, inputs):
         pvt_params = inputs.get('pvt', {})
         self.pb_psi = pvt_params.get('pb_psi')
-        self.Rs_pb_scf_stb = pvt_params.get('Rs_pb_scf_stb') # Now correctly reads the key from appy.py
+        # --- THIS IS THE CORRECTED LINE ---
+        self.Rs_pb_scf_stb = pvt_params.get('Rs_pb_scf_stb') # Was self.Rs_pb
         self.Bo_pb = pvt_params.get('Bo_pb_rb_stb')
         self.muo_pb = pvt_params.get('muo_pb_cp')
         self.ct_oil = pvt_params.get('ct_o_1psi', 8e-6)
@@ -45,9 +40,9 @@ class Fluid:
     def Bo(self, P):
         return self.Bo_pb * (1.0 - self.ct_oil * (P - self.pb_psi))
     
-    # --- THIS IS THE CORRECTED & INCLUDED FUNCTION ---
     def Rs(self, P):
         p = np.asarray(P, float)
+        # This function now correctly uses self.Rs_pb_scf_stb
         return np.where(p <= self.pb_psi, self.Rs_pb_scf_stb, self.Rs_pb_scf_stb + 0.00012*(p - self.pb_psi)**1.1)
     
     def mu_oil(self, P):
