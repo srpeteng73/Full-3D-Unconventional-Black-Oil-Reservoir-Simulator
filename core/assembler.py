@@ -9,6 +9,8 @@ from core.relperm1 import CoreyRelPerm
 from core.grid1 import Grid
 from core.wells1 import WellSet
 
+_EPS = 1e-12
+
 @dataclass
 class Assembler:
     grid: Grid
@@ -17,28 +19,23 @@ class Assembler:
     wells: WellSet
     opts: dict | None = None
 
-    # neighbor topology and transmissibilities
-    neighbors: list[tuple[int, int, float]] = field(default_factory=list)
-    rate_well_indices: list[int] = field(default_factory=list)  # indices into wells.wells
+    # neighbor list of (c, n, T_o, T_w, T_g) with directional harmonic averages
+    neighbors: list[tuple[int, int, float, float, float]] = field(default_factory=list)
+    rate_well_indices: list[int] = field(default_factory=list)
 
     def __post_init__(self):
         self._build_neighbors()
         self.rate_well_indices = [wi for wi, w in enumerate(self.wells.wells) if w.control == "RATE"]
 
-    # --- DOF layout helpers
-    def n_cell_dof(self) -> int:
-        return 3 * self.grid.num_cells
+    # DOF layout
+    def n_cell_dof(self) -> int: return 3 * self.grid.num_cells
+    def n_extra_dof(self) -> int: return len(self.rate_well_indices)
+    def total_dof(self) -> int:   return self.n_cell_dof() + self.n_extra_dof()
 
-    def n_extra_dof(self) -> int:
-        return len(self.rate_well_indices)  # one pwf unknown per rate-controlled well
-
-    def total_dof(self) -> int:
-        return self.n_cell_dof() + self.n_extra_dof()
-
-    def ixP(self, c: int) -> int: return 3 * c
+    def ixP(self, c: int) -> int:  return 3 * c
     def ixSw(self, c: int) -> int: return 3 * c + 1
     def ixSg(self, c: int) -> int: return 3 * c + 2
-    def ixWell(self, iw_extra: int) -> int: return self.n_cell_dof() + iw_extra  # row/col for well pwf or constraint
+    def ixWell(self, iw_extra: int) -> int: return self.n_cell_dof() + iw_extra
 
     def clamp_state_inplace(self, x: np.ndarray) -> None:
         P = x[0::3]; Sw = x[1::3]; Sg = x[2::3]
@@ -50,50 +47,55 @@ class Assembler:
             Sg[neg] = Sg[neg] + So[neg]
         x[0::3], x[1::3], x[2::3] = P, Sw, Sg
 
-        # No clamp on well unknowns (pwf) here; leave Newton to solve it
+    @staticmethod
+    def _harm(a, b):
+        return 2.0 * a * b / (a + b + _EPS)
 
     def _build_neighbors(self):
-        """Simple 6-connectivity with a constant effective permeability (skeleton).
-        T = 0.001127 * k_eff * Area / Distance  (units folded into k_eff)"""
         g = self.grid
-        k_eff_md = 0.1  # TODO: wire real Kx,Ky,Kz fields
-        conv = 0.001127
+        conv = 0.001127  # unit conversion folded into T
+        nbrs = []
 
         # x-faces
         for k in range(g.nz):
             for j in range(g.ny):
                 for i in range(g.nx - 1):
-                    c = g.get_idx(i, j, k)
-                    n = g.get_idx(i + 1, j, k)
-                    area = g.dy * g.dz
-                    dist = g.dx
-                    T = conv * k_eff_md * area / dist
-                    self.neighbors.append((c, n, T))
+                    c = g.get_idx(i, j, k); n = g.get_idx(i + 1, j, k)
+                    area = g.dy * g.dz; dist = g.dx
+                    kxo = self._harm(g.kx[c], g.kx[n])
+                    kyo = self._harm(g.ky[c], g.ky[n])
+                    kzo = self._harm(g.kz[c], g.kz[n])
+                    T = conv * area / dist
+                    # directional k per phase (same permeability; phase mobility goes elsewhere)
+                    nbrs.append((c, n, T * kxo, T * kyo, T * kzo))
 
         # y-faces
         for k in range(g.nz):
             for j in range(g.ny - 1):
                 for i in range(g.nx):
-                    c = g.get_idx(i, j, k)
-                    n = g.get_idx(i, j + 1, k)
-                    area = g.dx * g.dz
-                    dist = g.dy
-                    T = conv * k_eff_md * area / dist
-                    self.neighbors.append((c, n, T))
+                    c = g.get_idx(i, j, k); n = g.get_idx(i, j + 1, k)
+                    area = g.dx * g.dz; dist = g.dy
+                    kxo = self._harm(g.kx[c], g.kx[n])
+                    kyo = self._harm(g.ky[c], g.ky[n])
+                    kzo = self._harm(g.kz[c], g.kz[n])
+                    T = conv * area / dist
+                    nbrs.append((c, n, T * kxo, T * kyo, T * kzo))
 
         # z-faces
         for k in range(g.nz - 1):
             for j in range(g.ny):
                 for i in range(g.nx):
-                    c = g.get_idx(i, j, k)
-                    n = g.get_idx(i, j, k + 1)
-                    area = g.dx * g.dy
-                    dist = g.dz
-                    T = conv * k_eff_md * area / dist
-                    self.neighbors.append((c, n, T))
+                    c = g.get_idx(i, j, k); n = g.get_idx(i, j, k + 1)
+                    area = g.dx * g.dy; dist = g.dz
+                    kxo = self._harm(g.kx[c], g.kx[n])
+                    kyo = self._harm(g.ky[c], g.ky[n])
+                    kzo = self._harm(g.kz[c], g.kz[n])
+                    T = conv * area / dist
+                    nbrs.append((c, n, T * kxo, T * kyo, T * kzo))
+
+        self.neighbors = nbrs
 
     def _pwf_overrides_from_x(self, x: np.ndarray) -> dict[int, float]:
-        """Map well index -> pwf for RATE wells, from tail of x."""
         overrides = {}
         for extra_i, wi in enumerate(self.rate_well_indices):
             overrides[wi] = x[self.ixWell(extra_i)]
@@ -106,83 +108,168 @@ class Assembler:
         J = lil_matrix((ndof, ndof))
         dt = max(dt_days, 1e-9)
 
-        # unpack states (cells)
+        # unpack states
         Pn = x_n[0::3]; Swn = x_n[1::3]; Sgn = x_n[2::3]
         Pm = x_prev[0::3]; Swm = x_prev[1::3]; Sgm = x_prev[2::3]
         So_n = 1.0 - Swn - Sgn
         So_m = 1.0 - Swm - Sgm
 
-        # fluid & mobility at n
+        # PVT and relperm + derivatives
         Bo_n, Bg_n, Bw_n = self.pvt.Bo(Pn), self.pvt.Bg(Pn), self.pvt.Bw(Pn)
         Bo_m, Bg_m, Bw_m = self.pvt.Bo(Pm), self.pvt.Bg(Pm), self.pvt.Bw(Pm)
+        dBo_dP, dBg_dP, dBw_dP = self.pvt.dBo_dP(Pn), self.pvt.dBg_dP(Pn), self.pvt.dBw_dP(Pn)
         Rs_n, Rs_m = self.pvt.Rs(Pn), self.pvt.Rs(Pm)
+        dRs_dP = self.pvt.dRs_dP(Pn)
+
         muo, mug, muw = self.pvt.mu_oil(Pn), self.pvt.mu_gas(Pn), self.pvt.mu_water(Pn)
-        kro, krw, krg = self.kr.kr(Swn, Sgn)
+        (kro, krw, krg,
+         dkro_dSw, dkro_dSg,
+         dkrw_dSw, dkrw_dSg,
+         dkrg_dSw, dkrg_dSg) = self.kr.kr_and_derivs(Swn, Sgn)
 
-        lam_o = kro / (muo * Bo_n + 1e-12)
-        lam_w = krw / (muw * Bw_n + 1e-12)
-        lam_g = krg / (mug * Bg_n + 1e-12)
+        inv_o = 1.0 / (muo * Bo_n + _EPS)
+        inv_w = 1.0 / (muw * Bw_n + _EPS)
+        inv_g = 1.0 / (mug * Bg_n + _EPS)
 
-        # accumulation
-        phi = 0.12  # placeholder porosity
-        Vb = (self.grid.dx * self.grid.dy * self.grid.dz) / 5.615  # bbl per cell
+        lam_o = kro * inv_o
+        lam_w = krw * inv_w
+        lam_g = krg * inv_g
 
+        dlamo_dSw = dkro_dSw * inv_o
+        dlamo_dSg = dkro_dSg * inv_o
+        dlamw_dSw = dkrw_dSw * inv_w
+        dlamw_dSg = dkrw_dSg * inv_w
+        dlamg_dSw = dkrg_dSw * inv_g
+        dlamg_dSg = dkrg_dSg * inv_g
+
+        phi = self.grid.phi
+        Vb = (self.grid.dx * self.grid.dy * self.grid.dz) / 5.615
+
+        # Accumulation with Jacobian pieces
         for c in range(n):
-            # Oil accumulation
-            Ao_n = phi * So_n[c] / max(Bo_n[c], 1e-12)
-            Ao_m = phi * So_m[c] / max(Bo_m[c], 1e-12)
+            # oil: Ao = phi*So/Bo
+            Ao_n = phi[c] * So_n[c] / max(Bo_n[c], _EPS)
+            Ao_m = phi[c] * So_m[c] / max(Bo_m[c], _EPS)
             R[self.ixP(c)] += (Ao_n - Ao_m) * Vb / dt
 
-            # Water accumulation
-            Aw_n = phi * Swn[c] / max(Bw_n[c], 1e-12)
-            Aw_m = phi * Swm[c] / max(Bw_m[c], 1e-12)
+            # ∂R_o/∂P via dBo/dP
+            dAo_dP = phi[c] * So_n[c] * (-1.0) * dBo_dP[c] / (Bo_n[c]**2 + _EPS)
+            J[self.ixP(c), self.ixP(c)] += dAo_dP * Vb / dt
+            # ∂R_o/∂Sw, ∂R_o/∂Sg via So = 1 - Sw - Sg
+            J[self.ixP(c), self.ixSw(c)] += (-phi[c] / (Bo_n[c] + _EPS)) * Vb / dt
+            J[self.ixP(c), self.ixSg(c)] += (-phi[c] / (Bo_n[c] + _EPS)) * Vb / dt
+
+            # water: Aw = phi*Sw/Bw
+            Aw_n = phi[c] * Swn[c] / max(Bw_n[c], _EPS)
+            Aw_m = phi[c] * Swm[c] / max(Bw_m[c], _EPS)
             R[self.ixSw(c)] += (Aw_n - Aw_m) * Vb / dt
+            # ∂R_w/∂P via dBw/dP
+            dAw_dP = phi[c] * Swn[c] * (-1.0) * dBw_dP[c] / (Bw_n[c]**2 + _EPS)
+            J[self.ixSw(c), self.ixP(c)] += dAw_dP * Vb / dt
+            # ∂R_w/∂Sw
+            J[self.ixSw(c), self.ixSw(c)] += (phi[c] / (Bw_n[c] + _EPS)) * Vb / dt
 
-            # Gas accumulation (free - dissolved)
-            Ag_n = phi * Sgn[c] / max(Bg_n[c], 1e-12) - phi * So_n[c] * Rs_n[c] / max(Bg_n[c], 1e-12)
-            Ag_m = phi * Sgm[c] / max(Bg_m[c], 1e-12) - phi * So_m[c] * Rs_m[c] / max(Bg_m[c], 1e-12)
+            # gas: Ag = phi*(Sg/Bg - So*Rs/Bg)
+            Ag_n = phi[c] * (Sgn[c] / max(Bg_n[c], _EPS) - So_n[c] * Rs_n[c] / max(Bg_n[c], _EPS))
+            Ag_m = phi[c] * (Sgm[c] / max(Bg_m[c], _EPS) - So_m[c] * Rs_m[c] / max(Bg_m[c], _EPS))
             R[self.ixSg(c)] += (Ag_n - Ag_m) * Vb / dt
+            # ∂R_g/∂P via dBg/dP and dRs/dP
+            term = (So_n[c] * Rs_n[c] - Sgn[c]) / (Bg_n[c]**2 + _EPS)
+            dAg_dP = phi[c] * (term * dBg_dP[c] - So_n[c] * dRs_dP[c] / (Bg_n[c] + _EPS))
+            J[self.ixSg(c), self.ixP(c)] += dAg_dP * Vb / dt
+            # ∂R_g/∂Sw
+            J[self.ixSg(c), self.ixSw(c)] += (phi[c] * (Rs_n[c] / (Bg_n[c] + _EPS))) * Vb / dt
+            # ∂R_g/∂Sg
+            J[self.ixSg(c), self.ixSg(c)] += (phi[c] * (1.0 / (Bg_n[c] + _EPS))) * Vb / dt
+            J[self.ixSg(c), self.ixSg(c)] += (phi[c] * (Rs_n[c] / (Bg_n[c] + _EPS)) * 0.0)  # placeholder for ∂(So)/∂Sg already in accumulation above
 
-        # flux terms (TPFA-like) — symmetric add/subtract, simple averaging of mobility
-        for c, nbh, T in self.neighbors:
-            # oil
-            lam_face_o = 0.5 * (lam_o[c] + lam_o[nbh])
-            R[self.ixP(c)]   += T * lam_face_o * (Pn[c] - Pn[nbh])
-            R[self.ixP(nbh)] += T * lam_face_o * (Pn[nbh] - Pn[c])
-            # Jacobian wrt pressures (ignore dλ/dP for now)
-            J[self.ixP(c),   self.ixP(c)]   += T * lam_face_o
-            J[self.ixP(c),   self.ixP(nbh)] += -T * lam_face_o
-            J[self.ixP(nbh), self.ixP(nbh)] += T * lam_face_o
-            J[self.ixP(nbh), self.ixP(c)]   += -T * lam_face_o
+        # Flux terms with λ dependence on Sw,Sg (TPFA-like)
+        for c, nbh, Tx, Ty, Tz in self.neighbors:
+            T = Tx  # single scalar T since directional already folded (using kx/ky/kz uniformly)
+            dP = Pn[c] - Pn[nbh]
 
-            # water
-            lam_face_w = 0.5 * (lam_w[c] + lam_w[nbh])
-            R[self.ixSw(c)]   += T * lam_face_w * (Pn[c] - Pn[nbh])
-            R[self.ixSw(nbh)] += T * lam_face_w * (Pn[nbh] - Pn[c])
-            J[self.ixSw(c),   self.ixP(c)]   += T * lam_face_w
-            J[self.ixSw(c),   self.ixP(nbh)] += -T * lam_face_w
-            J[self.ixSw(nbh), self.ixP(nbh)] += T * lam_face_w
-            J[self.ixSw(nbh), self.ixP(c)]   += -T * lam_face_w
+            # Oil
+            lam_face = 0.5 * (lam_o[c] + lam_o[nbh])
+            R[self.ixP(c)]   += T * lam_face * dP
+            R[self.ixP(nbh)] += T * lam_face * (-dP)
 
-            # gas
-            lam_face_g = 0.5 * (lam_g[c] + lam_g[nbh])
-            R[self.ixSg(c)]   += T * lam_face_g * (Pn[c] - Pn[nbh])
-            R[self.ixSg(nbh)] += T * lam_face_g * (Pn[nbh] - Pn[c])
-            J[self.ixSg(c),   self.ixP(c)]   += T * lam_face_g
-            J[self.ixSg(c),   self.ixP(nbh)] += -T * lam_face_g
-            J[self.ixSg(nbh), self.ixP(nbh)] += T * lam_face_g
-            J[self.ixSg(nbh), self.ixP(c)]   += -T * lam_face_g
+            J[self.ixP(c),   self.ixP(c)]   += T * lam_face
+            J[self.ixP(c),   self.ixP(nbh)] += -T * lam_face
+            J[self.ixP(nbh), self.ixP(nbh)] += T * lam_face
+            J[self.ixP(nbh), self.ixP(c)]   += -T * lam_face
 
-        # wells — sinks into cell residuals
-        pwf_over = self._pwf_overrides_from_x(x_n) if self.n_extra_dof() > 0 else {}
-        # distribute sinks and add Jacobian entries wrt P (and pwf for rate wells)
+            # λ derivatives wrt Sw/Sg
+            dlam_face_dSw_c   = 0.5 * dlamo_dSw[c]
+            dlam_face_dSw_nbh = 0.5 * dlamo_dSw[nbh]
+            dlam_face_dSg_c   = 0.5 * dlamo_dSg[c]
+            dlam_face_dSg_nbh = 0.5 * dlamo_dSg[nbh]
+
+            J[self.ixP(c),   self.ixSw(c)]   += T * dlam_face_dSw_c   * dP
+            J[self.ixP(c),   self.ixSw(nbh)] += T * dlam_face_dSw_nbh * dP
+            J[self.ixP(c),   self.ixSg(c)]   += T * dlam_face_dSg_c   * dP
+            J[self.ixP(c),   self.ixSg(nbh)] += T * dlam_face_dSg_nbh * dP
+
+            J[self.ixP(nbh), self.ixSw(c)]   += -T * dlam_face_dSw_c   * dP
+            J[self.ixP(nbh), self.ixSw(nbh)] += -T * dlam_face_dSw_nbh * dP
+            J[self.ixP(nbh), self.ixSg(c)]   += -T * dlam_face_dSg_c   * dP
+            J[self.ixP(nbh), self.ixSg(nbh)] += -T * dlam_face_dSg_nbh * dP
+
+            # Water
+            lam_face = 0.5 * (lam_w[c] + lam_w[nbh])
+            R[self.ixSw(c)]   += T * lam_face * dP
+            R[self.ixSw(nbh)] += T * lam_face * (-dP)
+
+            J[self.ixSw(c),   self.ixP(c)]   += T * lam_face
+            J[self.ixSw(c),   self.ixP(nbh)] += -T * lam_face
+            J[self.ixSw(nbh), self.ixP(nbh)] += T * lam_face
+            J[self.ixSw(nbh), self.ixP(c)]   += -T * lam_face
+
+            dlam_face_dSw_c   = 0.5 * dlamw_dSw[c]
+            dlam_face_dSw_nbh = 0.5 * dlamw_dSw[nbh]
+            dlam_face_dSg_c   = 0.5 * dlamw_dSg[c]
+            dlam_face_dSg_nbh = 0.5 * dlamw_dSg[nbh]
+
+            J[self.ixSw(c),   self.ixSw(c)]   += T * dlam_face_dSw_c   * dP
+            J[self.ixSw(c),   self.ixSw(nbh)] += T * dlam_face_dSw_nbh * dP
+            J[self.ixSw(c),   self.ixSg(c)]   += T * dlam_face_dSg_c   * dP
+            J[self.ixSw(c),   self.ixSg(nbh)] += T * dlam_face_dSg_nbh * dP
+
+            J[self.ixSw(nbh), self.ixSw(c)]   += -T * dlam_face_dSw_c   * dP
+            J[self.ixSw(nbh), self.ixSw(nbh)] += -T * dlam_face_dSw_nbh * dP
+            J[self.ixSw(nbh), self.ixSg(c)]   += -T * dlam_face_dSg_c   * dP
+            J[self.ixSw(nbh), self.ixSg(nbh)] += -T * dlam_face_dSg_nbh * dP
+
+            # Gas
+            lam_face = 0.5 * (lam_g[c] + lam_g[nbh])
+            R[self.ixSg(c)]   += T * lam_face * dP
+            R[self.ixSg(nbh)] += T * lam_face * (-dP)
+
+            J[self.ixSg(c),   self.ixP(c)]   += T * lam_face
+            J[self.ixSg(c),   self.ixP(nbh)] += -T * lam_face
+            J[self.ixSg(nbh), self.ixP(nbh)] += T * lam_face
+            J[self.ixSg(nbh), self.ixP(c)]   += -T * lam_face
+
+            dlam_face_dSw_c   = 0.5 * dlamg_dSw[c]
+            dlam_face_dSw_nbh = 0.5 * dlamg_dSw[nbh]
+            dlam_face_dSg_c   = 0.5 * dlamg_dSg[c]
+            dlam_face_dSg_nbh = 0.5 * dlamg_dSg[nbh]
+
+            J[self.ixSg(c),   self.ixSw(c)]   += T * dlam_face_dSw_c   * dP
+            J[self.ixSg(c),   self.ixSw(nbh)] += T * dlam_face_dSw_nbh * dP
+            J[self.ixSg(c),   self.ixSg(c)]   += T * dlam_face_dSg_c   * dP
+            J[self.ixSg(c),   self.ixSg(nbh)] += T * dlam_face_dSg_nbh * dP
+
+            J[self.ixSg(nbh), self.ixSw(c)]   += -T * dlam_face_dSw_c   * dP
+            J[self.ixSg(nbh), self.ixSw(nbh)] += -T * dlam_face_dSw_nbh * dP
+            J[self.ixSg(nbh), self.ixSg(c)]   += -T * dlam_face_dSg_c   * dP
+            J[self.ixSg(nbh), self.ixSg(nbh)] += -T * dlam_face_dSg_nbh * dP
+
+        # Wells — include λ(S) sensitivity + P and pwf couplings
         for wi, w in enumerate(self.wells.wells):
-            # choose pwf
             if w.control == "BHP":
                 pwf = w.target
                 extra_idx = None
             else:
-                # RATE well: pwf is an unknown at ixWell(extra_i)
                 extra_i = self.rate_well_indices.index(wi)
                 extra_idx = self.ixWell(extra_i)
                 pwf = x_n[extra_idx]
@@ -193,31 +280,40 @@ class Assembler:
                 if dp <= 0.0:
                     continue
 
-                # phase sinks
+                # sinks
                 qo = perf.WI * lam_o[c] * dp
                 qw = perf.WI * lam_w[c] * dp
                 qg = perf.WI * lam_g[c] * dp
 
-                # subtract into residuals
                 R[self.ixP(c)]  -= qo
                 R[self.ixSw(c)] -= qw
                 R[self.ixSg(c)] -= qg
 
-                # derivatives w.r.t P(c)
+                # dR/dP(c)
                 J[self.ixP(c),  self.ixP(c)]  += -perf.WI * lam_o[c]
                 J[self.ixSw(c), self.ixP(c)]  += -perf.WI * lam_w[c]
                 J[self.ixSg(c), self.ixP(c)]  += -perf.WI * lam_g[c]
 
-                # derivatives w.r.t pwf (if RATE well)
+                # dR/dpwf
                 if extra_idx is not None:
                     J[self.ixP(c),  extra_idx] +=  perf.WI * lam_o[c]
                     J[self.ixSw(c), extra_idx] +=  perf.WI * lam_w[c]
                     J[self.ixSg(c), extra_idx] +=  perf.WI * lam_g[c]
 
-        # rate-control constraints (gas rate in Mscf/d)
+                # dR/dSw and dR/dSg via λ
+                J[self.ixP(c),  self.ixSw(c)]  += -perf.WI * dlamo_dSw[c] * dp
+                J[self.ixP(c),  self.ixSg(c)]  += -perf.WI * dlamo_dSg[c] * dp
+
+                J[self.ixSw(c), self.ixSw(c)] += -perf.WI * dlamw_dSw[c] * dp
+                J[self.ixSw(c), self.ixSg(c)] += -perf.WI * dlamw_dSg[c] * dp
+
+                J[self.ixSg(c), self.ixSw(c)] += -perf.WI * dlamg_dSw[c] * dp
+                J[self.ixSg(c), self.ixSg(c)] += -perf.WI * dlamg_dSg[c] * dp
+
+        # Rate-well constraints (gas rate)
         for extra_i, wi in enumerate(self.rate_well_indices):
             w = self.wells.wells[wi]
-            row = self.ixWell(extra_i)  # constraint row also placed at this index
+            row = self.ixWell(extra_i)
             pwf = x_n[row]
             F = 0.0
             for perf in w.perfs:
@@ -228,12 +324,12 @@ class Assembler:
                 lamg = lam_g[c]
                 qg = perf.WI * lamg * dp
                 F += qg
-
-                # dF/dP(c)
                 J[row, self.ixP(c)] += perf.WI * lamg
-                # dF/dpwf
-                J[row, row] += -perf.WI * lamg
+                J[row, row]         += -perf.WI * lamg
+                # add λ(S) sensitivity
+                J[row, self.ixSw(c)] += perf.WI * dlamg_dSw[c] * dp
+                J[row, self.ixSg(c)] += perf.WI * dlamg_dSg[c] * dp
 
-            R[row] = F - w.target  # enforce gas rate = target
+            R[row] = F - w.target
 
         return R, J.tocsc()
