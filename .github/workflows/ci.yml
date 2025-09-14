@@ -10,11 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  tests:
     runs-on: ubuntu-latest
-    # Only run tests if the repo has any files under tests/
-    if: ${{ hashFiles('tests/**') != '' }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,8 +19,8 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
