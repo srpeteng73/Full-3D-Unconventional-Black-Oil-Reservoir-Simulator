@@ -21,7 +21,9 @@ class EngineOptions:
     clamp_eps: float = 1e-9
 
 def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    grid = Grid.from_inputs(inputs["grid"])
+    # engines/implicit.py  (only this line changes)
+grid = Grid.from_inputs(inputs["grid"], inputs.get("rock", {}))
+
     pvt  = BlackOilPVT.from_inputs(inputs["pvt"])
     kr   = CoreyRelPerm.from_inputs(inputs["relperm"])
 
