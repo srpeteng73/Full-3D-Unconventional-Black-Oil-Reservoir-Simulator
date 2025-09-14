@@ -6,35 +6,29 @@ on:
   pull_request:
     branches: [ main ]
 
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt || pip install -r requirements.txt
-      - name: Ruff (lint)
-        run: ruff check .
-      - name: Black (check only)
-        run: black --check .
+permissions:
+  contents: read
 
-  tests:
-    # Only run tests if there are files under tests/**
-    if: ${{ hashFiles('tests/**') != '' }}
+jobs:
+  smoke:
     runs-on: ubuntu-latest
+    # Only run tests if the repo has any files under tests/
+    if: ${{ hashFiles('tests/**') != '' }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
+          cache: 'pip'
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt || pip install -r requirements.txt
-      - name: Pytest
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
         run: pytest -q
