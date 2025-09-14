@@ -4,12 +4,14 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
 
+# Always use the new PVT implementation
 from core.blackoil_pvt1 import BlackOilPVT
 from core.relperm1      import CoreyRelPerm
 from core.grid1         import Grid
 from core.wells1        import WellSet
 from core.assembler     import Assembler
 
+# Linear solver
 try:
     from core.linear1 import solve_linear
 except Exception:
@@ -34,15 +36,22 @@ class EngineOptions:
     max_step_retries: int = 3
 
 
-def _enforce_pvt_iface(pvt: BlackOilPVT) -> None:
-    required = ("Bo", "Bw", "Bg", "Rs",
-                "dBo_dP", "dBw_dP", "dBg_dP", "dRs_dP",
-                "mu_oil", "mu_water", "mu_gas")
-    missing = [m for m in required if not hasattr(pvt, m)]
+def _enforce_pvt_iface(pvt: object) -> None:
+    """
+    Make sure we got the new BlackOilPVT API and not the legacy 'Fluid'.
+    This is the guard that prevents the 'Fluid has no attribute Rs' crash.
+    """
+    required = (
+        "Bo", "Bw", "Bg", "Rs",
+        "dBo_dP", "dBw_dP", "dBg_dP", "dRs_dP",
+        "mu_oil", "mu_gas", "mu_water",
+    )
+    missing = [name for name in required if not hasattr(pvt, name)]
     if missing:
         raise TypeError(
-            f"BlackOilPVT is missing {missing}. "
-            "Did an old placeholder Fluid class slip in?"
+            f"PVT must be BlackOilPVT; got {type(pvt).__name__} missing {missing}. "
+            "This usually means something still imported the old core.blackoil_pvt.Fluid. "
+            "Fix by re-exporting BlackOilPVT in core/blackoil_pvt.py (shim)."
         )
 
 
@@ -90,7 +99,7 @@ def _newton_with_linesearch(
 
     # Max Newton iterations hit
     R_end, _ = asm.residual_and_jacobian(x_n, x_prev, dt_days)
-    return False, x_n, opts.max_newton, 0, _res_norm(R_end)
+    return False, x_n, opts.max_newton, 0, _res_norm(R_end))
 
 
 def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -154,9 +163,8 @@ def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
                 pwf_overrides = None
                 if nextra > 0 and hasattr(asm, "rate_well_indices") and hasattr(asm, "ixWell"):
                     try:
-                        pwf_overrides = {}
-                        for extra_i, wi in enumerate(asm.rate_well_indices):
-                            pwf_overrides[wi] = x[asm.ixWell(extra_i)]
+                        pwf_overrides = {wi: x[asm.ixWell(extra_i)]
+                                         for extra_i, wi in enumerate(asm.rate_well_indices)}
                     except Exception:
                         pwf_overrides = None
 
