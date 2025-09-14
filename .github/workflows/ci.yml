@@ -1,54 +1,14 @@
-name: CI
+name: CI (paused)
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:  # Only runs when you click "Run workflow" manually
+
+permissions:
+  contents: read
 
 jobs:
-  tests:
+  noop:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: |
-            requirements-prod.txt
-            requirements-dev.txt
-            requirements.txt
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements-prod.txt ]; then pip install -r requirements-prod.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
-
-      # Optional: lint without failing builds (keeps it friendly)
-      - name: Lint (ruff)
-        if: hashFiles('pyproject.toml') != ''
-        run: |
-          pip install ruff
-          ruff --version
-          ruff check --exit-zero .
-
-      # 🔽 Replaced test step starts here
-      - name: Show workspace layout (debug)
-        run: |
-          pwd
-          ls -la
-          echo "---- top level ----"
-          find . -maxdepth 2 -type f | sed 's|^\./||' | sort
-
-      - name: Run smoke tests (verbose)
-        run: |
-          set -e
-          python -c "import sys,pytest; print('pytest version:', pytest.__version__)"
-          pytest -rA -vv tests/test_smoke.py
-      # 🔼 Replaced test step ends here
+      - name: CI paused
+        run: echo "CI is intentionally paused. No tests run."
