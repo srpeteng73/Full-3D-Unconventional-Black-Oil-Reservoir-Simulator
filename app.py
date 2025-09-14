@@ -143,42 +143,67 @@ def _get_sim_preview():
     else: tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
-def run_simulation_engine(state):
+def run_full_3d_simulation(state):
     t0 = time.time()
-    inputs = {'engine_type': state.get('engine_type'),'grid':{'nx':int(state['nx']),'ny':int(state['ny']),'nz':int(state['nz']),'dx':float(state['dx']),'dy':float(state['dy']),'dz':float(state['dz'])},'rock':{'kx_md':st.session_state.get('kx'),'ky_md':st.session_state.get('ky'),'phi':st.session_state.get('phi')},'pvt':{'pb_psi':float(state['pb_psi']),'Rs_pb_scf_stb':float(state['Rs_pb_scf_stb']),'Bo_pb_rb_stb':float(state['Bo_pb_rb_stb']),'muo_pb_cp':float(state['muo_pb_cp']),'mug_pb_cp':float(state['mug_pb_cp']),'ct_o_1psi':float(state['ct_o_1psi'])},'relperm':{'krw_end':float(state['krw_end']),'kro_end':float(state['kro_end']),'nw':float(state['nw']),'no':float(state['no']),'Swc':float(state['Swc']),'Sor':float(state['Sor'])},'init':{'p_init_psi':float(state['p_init_psi']), 'Sw_init':float(state['Swc'])},'schedule':{'bhp_psi':float(state['pad_bhp_psi'])},'msw':{'laterals':int(state['n_laterals']),'L_ft':float(state['L_ft']), 'ss_ft':float(state['stage_spacing_ft']),'hf_ft':float(state['hf_ft'])}}
-    try: engine_results = simulate(inputs)
-    except Exception as e: st.error(f"Error in full3d.py engine: {e}"); return None
+    # This dictionary is now perfectly aligned with the classes in full3d.py
+    inputs = {
+        'engine_type': state.get('engine_type'),
+        'grid':{
+            'nx':int(state['nx']), 'ny':int(state['ny']), 'nz':int(state['nz']),
+            'dx':float(state['dx']), 'dy':float(state['dy']), 'dz':float(state['dz'])
+        },
+        'rock':{
+            'kx_md':st.session_state.get('kx'), 
+            'ky_md':st.session_state.get('ky'), 
+            'phi':st.session_state.get('phi')
+        },
+        'pvt':{
+            'pb_psi':float(state['pb_psi']),
+            'Rs_pb_scf_stb': float(state['Rs_pb_scf_stb']),
+            'Bo_pb_rb_stb': float(state['Bo_pb_rb_stb']),
+            'muo_pb_cp': float(state['muo_pb_cp']),
+            'mug_pb_cp': float(state['mug_pb_cp']),
+            'ct_o_1psi': float(state['ct_o_1psi'])
+        },
+        'relperm':{
+            'krw_end':float(state['krw_end']), 'kro_end':float(state['kro_end']),
+            'nw':float(state['nw']), 'no':float(state['no']),
+            'Swc':float(state['Swc']), 'Sor':float(state['Sor'])
+        },
+        'init':{
+            'p_init_psi':float(state['p_init_psi']), 
+            'Sw_init':float(state['Swc'])
+        },
+        'schedule':{
+            'bhp_psi':float(state['pad_bhp_psi'])
+        },
+        'msw':{
+            'laterals':int(state['n_laterals']), 
+            'L_ft':float(state['L_ft']), 
+            'ss_ft':float(state['stage_spacing_ft']),
+            'hf_ft':float(state['hf_ft'])
+        }
+    }
+    
+    try: 
+        engine_results = simulate(inputs)
+    except Exception as e: 
+        st.error(f"Error in full3d.py engine: {e}")
+        return None
+        
     t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
-    if t is None or qg is None or qo is None: st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd)."); return None
+    if t is None or qg is None or qo is None: 
+        st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd).")
+        return None
+        
     EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6
-    engine_results['runtime_s'] = time.time() - t0; engine_results['EUR_g_BCF'] = EUR_g_BCF; engine_results['EUR_o_MMBO'] = EUR_o_MMBO
+    
+    # Add calculated values back into the results dictionary
+    engine_results['runtime_s'] = time.time() - t0
+    engine_results['EUR_g_BCF'] = EUR_g_BCF
+    engine_results['EUR_o_MMBO'] = EUR_o_MMBO
+    
     return engine_results
-def run_simulation(state):
-    if st.session_state.get('kx') is None:
-        rng = np.random.default_rng(int(st.session_state.rng_seed)); nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
-        kx_mid, ky_mid, phi_mid = 0.05+state["k_stdev"]*rng.standard_normal((ny,nx)), (0.05/state["anis_kxky"])+state["k_stdev"]*rng.standard_normal((ny,nx)), 0.10+state["phi_stdev"]*rng.standard_normal((ny,nx))
-        kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]; st.session_state.kx, st.session_state.ky, st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None), np.clip(ky_mid[None,...]*kz_scale,1e-4,None), np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
-        st.info("Generated 3D rock properties for the simulation.")
-    result = run_simulation_engine(state)
-    if result is None:
-        st.warning("Simulation failed. Showing results from fast preview solver."); result = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed))); return result
-    final_sim_data = result.copy()
-    for key in ["press_matrix", "press_frac", "So", "Sw", "p_init_3d", "ooip_3d"]:
-        if key in result and result.get(key) is not None:
-            final_sim_data[key] = ensure_3d(result[key])
-            if f"{key}_mid" not in final_sim_data: final_sim_data[f"{key}_mid"] = get_k_slice(final_sim_data[key], final_sim_data[key].shape[0]//2)
-    return final_sim_data
-def is_location_valid(x_pos, y_pos, state):
-    if state.get('use_fault', False):
-        fault_plane = state.get('fault_plane', 'i-plane (vertical)'); fault_index = int(state.get('fault_index', 0)); dx = float(state.get('dx', 40.0)); dy = float(state.get('dy', 40.0)); min_dist_ft = 150.0
-        if 'i-plane' in fault_plane:
-            fault_x_pos = fault_index * dx;
-            if abs(x_pos - fault_x_pos) < min_dist_ft: return False
-        elif 'j-plane' in fault_plane:
-            fault_y_pos = fault_index * dy;
-            if abs(y_pos - fault_y_pos) < min_dist_ft: return False
-    return True
-
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
