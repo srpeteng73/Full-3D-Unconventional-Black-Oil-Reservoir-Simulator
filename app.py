@@ -192,7 +192,13 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 
-def run_full_3d_simulation(state):
+#
+# --- REPLACE your old `run_full_3d_simulation` function with this one ---
+#
+def run_simulation_engine(state):
+    """
+    Assembles the complete inputs dictionary and calls the backend engine.
+    """
     t0 = time.time()
     inputs = {
         'engine_type': state.get('engine_type'),
@@ -211,28 +217,35 @@ def run_full_3d_simulation(state):
         'schedule':{'bhp_psi':float(state['pad_bhp_psi'])},
         'msw':{'laterals':int(state['n_laterals']),'L_ft':float(state['L_ft']), 'ss_ft':float(state['stage_spacing_ft']),'hf_ft':float(state['hf_ft'])}
     }
+    
     try: 
         engine_results = simulate(inputs)
     except Exception as e: 
         st.error(f"Error in full3d.py engine: {e}")
         return None
+        
     t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
     if t is None or qg is None or qo is None: 
         st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd).")
         return None
+        
     EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6
-    return {
-        't':t,'qg':qg,'qo':qo,
-        'press_matrix':engine_results.get('p3d_psi'),
-        'p_init_3d':engine_results.get('p_init_3d'),
-        'ooip_3d':engine_results.get('ooip_3d'),
-        'press_frac_mid':engine_results.get('pf_mid_psi'),
-        'pm_mid_psi':engine_results.get('pm_mid_psi'),
-        'Sw_mid':engine_results.get('Sw_mid'),
-        'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0
-    }
+    
+    # Add runtime to the results dictionary
+    engine_results['runtime_s'] = time.time() - t0
+    engine_results['EUR_g_BCF'] = EUR_g_BCF
+    engine_results['EUR_o_MMBO'] = EUR_o_MMBO
+    
+    return engine_results
 
+#
+# --- REPLACE your old `run_simulation` function with this one ---
+#
 def run_simulation(state):
+    """
+    Main simulation orchestrator. Generates rock properties if needed,
+    calls the selected engine, handles fallbacks, and post-processes results.
+    """
     if st.session_state.get('kx') is None:
         rng = np.random.default_rng(int(st.session_state.rng_seed))
         nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
@@ -240,19 +253,22 @@ def run_simulation(state):
         kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]
         st.session_state.kx, st.session_state.ky, st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None), np.clip(ky_mid[None,...]*kz_scale,1e-4,None), np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
         st.info("Generated 3D rock properties for the simulation.")
-    result = run_full_3d_simulation(state)
+        
+    result = run_simulation_engine(state)
+    
     if result is None:
         st.warning("Simulation failed. Showing results from fast preview solver.")
         result = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed)))
         return result
+        
     final_sim_data = result.copy()
     for key in ["press_matrix", "press_frac", "So", "Sw", "p_init_3d", "ooip_3d"]:
         if key in result and result.get(key) is not None:
             final_sim_data[key] = ensure_3d(result[key])
             if f"{key}_mid" not in final_sim_data:
                 final_sim_data[f"{key}_mid"] = get_k_slice(final_sim_data[key], final_sim_data[key].shape[0]//2)
+                
     return final_sim_data
-
 def is_location_valid(x_pos, y_pos, state):
     if state.get('use_fault', False):
         fault_plane = state.get('fault_plane', 'i-plane (vertical)')
