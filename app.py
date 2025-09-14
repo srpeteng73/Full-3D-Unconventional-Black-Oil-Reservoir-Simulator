@@ -98,7 +98,7 @@ def fallback_fast_solver(state, rng):
         qi_g_base, qi_o_base = 8000.0, 1600.0; rich_g, rich_o = 1.0 + 0.05 * np.clip(richness, 0.0, 1.4), 1.0 + 0.08 * np.clip(richness, 0.0, 1.4)
         qi_g, qi_o = np.clip(qi_g_base * geo_g * interf_mul * rich_g, 2000.0, 18000.0), np.clip(qi_o_base * geo_o * interf_mul * rich_o, 700.0, 3500.0); Di_g_yr, b_g, Di_o_yr, b_o = 0.45, 0.80, 0.42, 0.95
     Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0; qg, qo = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g), qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
-    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6 # np.trapz is deprecated, use trapezoid
+    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6
     return dict(t=t, qg=qg, qo=qo, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 def _get_sim_preview():
     if 'state' in globals(): tmp = state.copy()
@@ -220,19 +220,17 @@ if selected_tab == "Setup Preview":
         st.markdown("#### Grid & Rock Summary")
         grid_data = { "Parameter": ["Grid Dimensions (nx, ny, nz)", "Cell Size (dx, dy, dz) (ft)", "Total Volume (MM-ft³)", "Facies Style", "Permeability Anisotropy (kx/ky)"], "Value": [f"{state['nx']} x {state['ny']} x {state['nz']}", f"{state['dx']} x {state['dy']} x {state['dz']}", f"{state['nx']*state['ny']*state['nz']*state['dx']*state['dy']*state['dz']/1e6:.1f}", state['facies_style'], f"{state['anis_kxky']:.2f}"] }
         st.table(pd.DataFrame(grid_data))
-        with st.expander("Click for details"): st.markdown("""- **Grid Dimensions**: The number of cells in the X, Y, and Z directions. A larger grid provides more detail but takes longer to run.\n- **Cell Size**: The physical size of each grid cell in feet.\n- **Total Volume**: The total bulk volume of the reservoir model.\n- **Facies Style**: The method used to generate geological heterogeneity.\n- **Anisotropy**: The ratio of permeability in the X-direction (kx) to the Y-direction (ky). A value of 1.0 means the rock is equally permeable in both directions.""")
+        with st.expander("Click for details"): st.markdown("""- **Grid Dimensions**: The number of cells in the X, Y, and Z directions.\n- **Cell Size**: The physical size of each grid cell in feet.\n- **Total Volume**: The total bulk volume of the reservoir model.\n- **Facies Style**: The method used to generate geological heterogeneity.\n- **Anisotropy**: The ratio of permeability in the X-direction (kx) to the Y-direction (ky).""")
         st.markdown("#### Well & Frac Summary")
         well_data = { "Parameter": ["Laterals", "Lateral Length (ft)", "Frac Half-length (ft)", "Frac Height (ft)", "Stages", "Clusters/Stage"], "Value": [state['n_laterals'], state['L_ft'], state['xf_ft'], state['hf_ft'], int(state['L_ft'] / state['stage_spacing_ft']), state['clusters_per_stage']] }
         st.table(pd.DataFrame(well_data))
-        with st.expander("Click for details"): st.markdown("""- **Laterals**: The number of horizontal wells in the pad.\n- **Lateral Length**: The length of each horizontal wellbore.\n- **Frac Half-length (xf)**: The distance a hydraulic fracture extends from one side of the wellbore into the reservoir.\n- **Frac Height (hf)**: The vertical extent of the hydraulic fractures.\n- **Stages**: The number of separate hydraulic fracturing treatments along the lateral.\n- **Clusters/Stage**: The number of perforation clusters within each stage, representing individual entry points for fluid.""")
+        with st.expander("Click for details"): st.markdown("""- **Laterals**: The number of horizontal wells in the pad.\n- **Lateral Length**: The length of each horizontal wellbore.\n- **Frac Half-length (xf)**: The distance a hydraulic fracture extends from the wellbore.\n- **Frac Height (hf)**: The vertical extent of the hydraulic fractures.\n- **Stages**: The number of separate hydraulic fracturing treatments.\n- **Clusters/Stage**: The number of perforation clusters within each stage.""")
     with c2:
         st.markdown("#### Top-Down Schematic")
         fig = go.Figure()
-        nx, ny, dx, dy = state['nx'], state['ny'], state['dx'], state['dy']
-        L_ft, xf_ft, ss_ft, n_lats = state['L_ft'], state['xf_ft'], state['stage_spacing_ft'], state['n_laterals']
+        nx, ny, dx, dy = state['nx'], state['ny'], state['dx'], state['dy']; L_ft, xf_ft, ss_ft, n_lats = state['L_ft'], state['xf_ft'], state['stage_spacing_ft'], state['n_laterals']
         fig.add_shape(type="rect", x0=0, y0=0, x1=nx*dx, y1=ny*dy, line=dict(color="RoyalBlue"), fillcolor="lightskyblue", opacity=0.3)
-        lat_rows_y = [ny*dy/3, 2*ny*dy/3] if n_lats >= 2 else [ny*dy/2]
-        n_stages = max(1, int(L_ft / max(ss_ft, 1.0)))
+        lat_rows_y = [ny*dy/3, 2*ny*dy/3] if n_lats >= 2 else [ny*dy/2]; n_stages = max(1, int(L_ft / max(ss_ft, 1.0)))
         for i, y_lat in enumerate(lat_rows_y):
             fig.add_trace(go.Scatter(x=[0, L_ft], y=[y_lat, y_lat], mode='lines', line=dict(color='black', width=3), name='Lateral', showlegend=(i==0)))
             for j in range(n_stages):
@@ -241,16 +239,15 @@ if selected_tab == "Setup Preview":
                 fig.add_trace(go.Scatter(x=[x_stage, x_stage], y=[y_lat - xf_ft, y_lat + xf_ft], mode='lines', line=dict(color='red', width=2), name='Frac', showlegend=(i==0 and j==0)))
         fig.update_layout(title="<b>Well and Fracture Geometry</b>", xaxis_title="X (ft)", yaxis_title="Y (ft)", yaxis_range=[-0.1*ny*dy, 1.1*ny*dy]); fig.update_yaxes(scaleanchor = "x", scaleratio = 1)
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
-        with st.expander("Click for details"): st.markdown("""This plot provides a bird's-eye view of the simulation model.\n- The **light blue rectangle** represents the overall reservoir boundary.\n- The **black line(s)** show the path of the horizontal well laterals.\n- The **red lines** represent the hydraulic fractures extending from the wellbore. This helps visualize the scale of the stimulated area relative to the total reservoir size.""")
-    st.markdown("---")
-    st.markdown("### Production Forecast Preview (Analytical Model)")
+        with st.expander("Click for details"): st.markdown("""This plot provides a bird's-eye view of the simulation model.\n- The **light blue rectangle** is the reservoir boundary.\n- The **black line(s)** are the horizontal well laterals.\n- The **red lines** are the hydraulic fractures.""")
+    st.markdown("---"); st.markdown("### Production Forecast Preview (Analytical Model)")
     preview = _get_sim_preview()
     p_c1, p_c2 = st.columns(2)
     with p_c1:
         fig_g = go.Figure(); fig_g.add_trace(go.Scatter(x=preview['t'], y=preview['qg'], name="Gas Rate", line=dict(color="#d62728"))); fig_g.update_layout(**semi_log_layout("Gas Production Preview", yaxis="Gas Rate (Mscf/d)")); st.plotly_chart(fig_g, use_container_width=True, theme="streamlit")
     with p_c2:
         fig_o = go.Figure(); fig_o.add_trace(go.Scatter(x=preview['t'], y=preview['qo'], name="Oil Rate", line=dict(color="#2ca02c"))); fig_o.update_layout(**semi_log_layout("Oil Production Preview", yaxis="Oil Rate (STB/d)")); st.plotly_chart(fig_o, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""These charts show a rapid forecast based on a simplified analytical model (Arps decline curve). They are intended for quick iteration and sensitivity checks before running the full, more computationally intensive 3D simulation.\n- **Log-scale time axis**: This is standard for decline curve analysis, as it helps to visualize different flow regimes over the well's life.\n- The steep initial decline followed by a shallower, flatter tail is characteristic of production from unconventional reservoirs.""")
+    with st.expander("Click for details"): st.markdown("""These charts show a rapid forecast based on a simplified analytical model (Arps decline curve). They are for quick iteration before running the full 3D simulation.""")
 
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
@@ -263,25 +260,25 @@ elif selected_tab == "Generate 3D property volumes":
     c1,c2=st.columns(2)
     with c1:
         st.plotly_chart(px.imshow(kx_display,origin="lower",color_continuous_scale="Viridis",labels=dict(color="mD"),title="<b>kx — mid-layer (mD)</b>"),use_container_width=True, theme="streamlit")
-        with st.expander("Click for details"): st.markdown("""**Permeability (k)** is a measure of a rock's ability to transmit fluids. This map shows the permeability in the x-direction (kx) for the middle layer of the reservoir.\n- **High values (yellow)** indicate "sweet spots" where fluid can flow more easily.\n- **Low values (purple)** indicate tighter rock.\n- The spatial variation is controlled by the **'k stdev'** slider in the sidebar. A higher value creates more heterogeneity.""")
+        with st.expander("Click for details"): st.markdown("""**Permeability (k)** is a measure of a rock's ability to transmit fluids. This map shows kx for the middle layer.\n- **High values (yellow)** are 'sweet spots'.\n- **Low values (purple)** are tighter rock.""")
     with c2:
         st.plotly_chart(px.imshow(ky_display,origin="lower",color_continuous_scale="Cividis",labels=dict(color="mD"),title="<b>ky — mid-layer (mD)</b>"),use_container_width=True, theme="streamlit")
-        with st.expander("Click for details"): st.markdown("""This map shows the permeability in the y-direction (ky). Comparing this map to the kx map allows you to visually assess **anisotropy**.\n- If this map looks different from the kx map, it means the rock's permeability is direction-dependent.\n- The **'Anisotropy kx/ky'** slider in the sidebar directly controls the ratio between the two.""")
+        with st.expander("Click for details"): st.markdown("""This map shows permeability in the y-direction (ky). Comparing this to the kx map allows you to visually assess **anisotropy**.""")
     st.plotly_chart(px.imshow(phi_display,origin="lower",color_continuous_scale="Magma",labels=dict(color="ϕ"),title="<b>Porosity ϕ — mid-layer (fraction)</b>"),use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""**Porosity (ϕ)** is the fraction of void space in the rock where fluids (oil, gas, water) are stored.\n- **High values (yellow/white)** indicate areas that can store more hydrocarbons.\n- **Low values (purple/black)** indicate less storage capacity.\n- The spatial variation is controlled by the **'ϕ stdev'** slider in the sidebar.""")
+    with st.expander("Click for details"): st.markdown("""**Porosity (ϕ)** is the void space in the rock where fluids are stored.\n- **High values (yellow/white)** indicate more storage capacity.""")
 
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000,state["p_min_bhp_psi"]),max(2000,state["p_init_psi"]+1000),120)
     Rs,Bo,Bg,mug = Rs_of_p(P,state["pb_psi"],state["Rs_pb_scf_stb"]),Bo_of_p(P,state["pb_psi"],state["Bo_pb_rb_stb"]),Bg_of_p(P),mu_g_of_p(P,state["pb_psi"],state["mug_pb_cp"])
     f1=go.Figure();f1.add_trace(go.Scatter(x=P,y=Rs,line=dict(color="firebrick",width=3)));f1.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2,annotation_text="Bubble Point");f1.update_layout(template="plotly_white",title="<b>Solution GOR Rs vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Rs (scf/STB)");st.plotly_chart(f1,use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""This chart shows the **Solution Gas-Oil Ratio (Rs)**, which is the amount of gas dissolved in the oil at different pressures.\n- At pressures **above the Bubble Point**, all gas is dissolved, and Rs remains constant.\n- As pressure drops **below the Bubble Point**, gas comes out of solution. The simulator models this critical physical process.""")
+    with st.expander("Click for details"): st.markdown("""The **Solution Gas-Oil Ratio (Rs)** is the amount of gas dissolved in oil. As pressure drops below the Bubble Point, gas comes out of solution.""")
     f2=go.Figure();f2.add_trace(go.Scatter(x=P,y=Bo,line=dict(color="seagreen",width=3)));f2.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2,annotation_text="Bubble Point");f2.update_layout(template="plotly_white",title="<b>Oil FVF Bo vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Bo (rb/STB)");st.plotly_chart(f2,use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""The **Oil Formation Volume Factor (Bo)** represents the volume of reservoir oil required to produce one stock-tank barrel (STB) of oil at the surface.\n- **Above the Bubble Point**, oil is undersaturated and slightly compresses as pressure increases (Bo decreases).\n- **Below the Bubble Point**, as gas comes out of solution, the remaining oil shrinks, causing Bo to decrease.""")
+    with st.expander("Click for details"): st.markdown("""The **Oil Formation Volume Factor (Bo)** is the volume of reservoir oil needed to produce one barrel at the surface. As gas comes out of solution, the oil shrinks, and Bo decreases.""")
     f3=go.Figure();f3.add_trace(go.Scatter(x=P,y=Bg,line=dict(color="steelblue",width=3)));f3.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f3.update_layout(template="plotly_white",title="<b>Gas FVF Bg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="Bg (rb/scf)");st.plotly_chart(f3,use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""The **Gas Formation Volume Factor (Bg)** represents the volume of reservoir gas required to produce one standard cubic foot (scf) of gas at the surface.\n- As pressure decreases, gas expands significantly, so Bg increases. This expansion is a major drive mechanism in many reservoirs.""")
+    with st.expander("Click for details"): st.markdown("""The **Gas Formation Volume Factor (Bg)** is the volume of reservoir gas needed to produce one standard cubic foot at the surface. Gas expands as pressure drops, so Bg increases.""")
     f4=go.Figure();f4.add_trace(go.Scatter(x=P,y=mug,line=dict(color="mediumpurple",width=3)));f4.add_vline(x=state["pb_psi"],line_dash="dash",line_width=2);f4.update_layout(template="plotly_white",title="<b>Gas viscosity μg vs Pressure</b>",xaxis_title="Pressure (psi)",yaxis_title="μg (cP)");st.plotly_chart(f4,use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""**Gas Viscosity (μg)** is the measure of gas's resistance to flow.\n- Viscosity changes with pressure and has a direct impact on how easily gas can move through the reservoir rock to the wellbore.""")
+    with st.expander("Click for details"): st.markdown("""**Gas Viscosity (μg)** is the measure of gas's resistance to flow and is a key input for flow calculations.""")
 
 elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
@@ -305,10 +302,10 @@ elif selected_tab == "MSW Wellbore":
         c1_msw, c2_msw = st.columns(2)
         with c1_msw:
             fig_p = go.Figure(go.Scatter(x=np.arange(n_stages)*ss_ft, y=p_wellbore_at_stage, mode='lines+markers', name='Wellbore Pressure')); fig_p.update_layout(title="<b>Wellbore Pressure Profile</b>", xaxis_title="Position along Lateral (ft, 0=Heel)", yaxis_title="Pressure (psi)", template="plotly_white"); st.plotly_chart(fig_p, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"): st.markdown("""This plot shows the pressure inside the horizontal wellbore from the start (heel) to the end (toe). Due to friction, the pressure is lowest at the heel and increases towards the toe. This pressure difference is a key driver of the "heel-toe effect." """)
+            with st.expander("Click for details"): st.markdown("""This plot shows the pressure inside the horizontal wellbore. Due to friction, pressure is lowest at the heel and increases towards the toe, driving the "heel-toe effect." """)
         with c2_msw:
             fig_q = go.Figure(go.Bar(x=np.arange(n_stages)*ss_ft, y=q_dist * 100, name='Flow Contribution')); fig_q.update_layout(title="<b>Flow Contribution per Stage</b>", xaxis_title="Position along Lateral (ft, 0=Heel)", yaxis_title="Contribution (%)", template="plotly_white"); st.plotly_chart(fig_q, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"): st.markdown("""This chart shows the percentage of total production from each fracture stage. Because the pressure is lower at the heel, the drawdown is higher, causing stages near the heel to produce more than stages near the toe. This uneven drainage can impact overall recovery. The **Δp limited-entry** parameter can be used to mitigate this effect.""")
+            with st.expander("Click for details"): st.markdown("""This chart shows the production percentage from each stage. Stages near the heel often produce more due to higher drawdown. The **Δp limited-entry** parameter can be used to mitigate this.""")
     except Exception as e: st.warning(f"Could not compute wellbore hydraulics. Error: {e}")
 
 elif selected_tab == "RTA":
@@ -318,12 +315,12 @@ elif selected_tab == "RTA":
     rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode_unique")
     y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
     fig = go.Figure(); fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas")); fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)")); fig.update_yaxes(type=y_type_rta); st.plotly_chart(fig, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""This is a standard **Rate vs. Time** plot on a semi-log scale (logarithmic time axis). It is the primary data used for Rate Transient Analysis and shows the production decline over the well's life.""")
+    with st.expander("Click for details"): st.markdown("""This is a standard **Rate vs. Time** plot on a semi-log scale, showing the production decline.""")
     t_safe = np.maximum(t, 1e-9); qg_safe = np.maximum(qg, 1e-9)
     logt, logq = np.log(t_safe), np.log(qg_safe)
     slope = np.gradient(logq, logt)
     fig2 = go.Figure(); fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt")); fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope")); st.plotly_chart(fig2, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"): st.markdown("""This is the **log-log derivative** plot, a core diagnostic tool in RTA. The slope of the rate decline curve on a log-log scale can indicate the dominant flow regime:\n- **Slope ≈ 0.5**: Indicates **linear flow**, where fluid is primarily flowing from the rock matrix into the faces of the hydraulic fractures. This is the dominant regime early in the life of most unconventional wells.\n- **Slope > 0.5**: Can indicate complex fracture behavior or interference between fractures.\n- **Slope → 0**: Suggests the well is entering **boundary-dominated flow**, where the pressure transient has reached the edge of the drained area.""")
+    with st.expander("Click for details"): st.markdown("""This is the **log-log derivative** plot, a core RTA diagnostic tool. The slope indicates the dominant flow regime:\n- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n- **Slope → 0**: Suggests **boundary-dominated flow**.""")
 
 elif selected_tab == "Results":
     st.header("Simulation Results")
@@ -341,35 +338,34 @@ elif selected_tab == "Results":
             st.plotly_chart(eur_g_fig, use_container_width=True)
         with g2:
             st.plotly_chart(eur_o_fig, use_container_width=True)
-        with st.expander("Click for details"): st.markdown("""**Estimated Ultimate Recovery (EUR)** is the total volume of hydrocarbons expected to be recovered over the well's entire life (in this case, a 30-year forecast).\n- **BCF**: Billion Cubic Feet (for gas).\n- **MMBO**: Million Stock-Tank Barrels of Oil.\nThese gauges provide a quick, high-level summary of the well's projected performance.""")
+        with st.expander("Click for details"): st.markdown("""**Estimated Ultimate Recovery (EUR)** is the total hydrocarbons expected to be recovered over the well's life.\n- **BCF**: Billion Cubic Feet (gas).\n- **MMBO**: Million Stock-Tank Barrels of Oil.""")
         st.markdown("### Production Profiles")
         rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="res_rate_y_mode")
         y_type = "log" if rate_y_mode == "Log" else "linear"
         fig_rate = go.Figure(); fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], name="Gas Rate", line=dict(color="#d62728"), yaxis="y1")); fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], name="Oil Rate", line=dict(color="#2ca02c"), yaxis="y2"))
         layout_config = semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)"); layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728", showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type, color="#2ca02c", showgrid=False)); fig_rate.update_layout(layout_config)
         st.plotly_chart(fig_rate, use_container_width=True, theme="streamlit")
-        with st.expander("Click for details"): st.markdown("""This plot shows the simulated **production rates** for gas (red) and oil (green) over time. This is the primary output of the simulation. The dual-axis chart allows for direct comparison of both fluid phases. The characteristic steep initial decline is clearly visible.""")
+        with st.expander("Click for details"): st.markdown("""This plot shows the simulated **production rates** for gas (red) and oil (green) over time. This is the primary output of the simulation.""")
         c1_res, c2_res = st.columns(2)
         with c1_res:
             gor = np.divide(sim_data['qg'] * 1000, sim_data['qo'], out=np.full_like(sim_data['qg'], np.nan), where=sim_data['qo']>1e-3)
             fig_gor = go.Figure(go.Scatter(x=sim_data['t'], y=gor, name="GOR", line=dict(color="orange")))
             gor_layout = semi_log_layout("Gas-Oil Ratio (GOR)", yaxis="GOR (scf/STB)"); gor_layout['xaxis']['type'] = 'linear'; gor_layout['xaxis']['title'] = 'Day'; gor_layout['yaxis']['type'] = 'linear'; fig_gor.update_layout(gor_layout)
             st.plotly_chart(fig_gor, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"): st.markdown("""The **Gas-Oil Ratio (GOR)** is the ratio of produced gas (in standard cubic feet) to produced oil (in stock-tank barrels). Its trend is a powerful diagnostic tool:\n- **Rising GOR**: Typically seen in black oil reservoirs as pressure drops below the bubble point, liberating gas that flows more easily than oil.\n- **Falling GOR**: A classic signature of retrograde condensate reservoirs, where liquid drops out in the reservoir, leaving a leaner gas to be produced.""")
+            with st.expander("Click for details"): st.markdown("""The **Gas-Oil Ratio (GOR)** is the ratio of produced gas to produced oil. Its trend is a powerful fluid-type diagnostic.""")
         with c2_res:
             cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6; cum_o = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0) / 1e6
             fig_cum = go.Figure(); fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_g, name="Cumulative Gas", line=dict(color="#d62728"), yaxis="y1")); fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_o, name="Cumulative Oil", line=dict(color="#2ca02c"), yaxis="y2"))
             cum_layout = semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)"); cum_layout['xaxis']['type'] = 'linear'; cum_layout['xaxis']['title'] = 'Day'; cum_layout.update(yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"), yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False)); fig_cum.update_layout(cum_layout)
             st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"): st.markdown("""This plot shows the **cumulative production**, which is the total volume of oil and gas produced up to a given point in time. The curves are the integral of the rate curves. The final point on each curve at the end of the simulation represents the well's EUR.""")
+            with st.expander("Click for details"): st.markdown("""This plot shows the **cumulative production** over time. The final point on each curve represents the well's EUR.""")
     else:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
 
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
-    if sim_data is None and st.session_state.get('kx') is None:
-        st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
+    if sim_data is None and st.session_state.get('kx') is None: st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
     else:
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
         if sim_data: prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
@@ -399,9 +395,9 @@ elif selected_tab == "3D Viewer":
                 fig3d.update_layout(title=f"<b>3D Isosurface for {prop_3d}</b>",scene=dict(xaxis_title='X (ft)', yaxis_title='Y (ft)', zaxis_title='Z (ft)',aspectmode='data'),margin=dict(l=0, r=0, b=0, t=40))
                 st.plotly_chart(fig3d, use_container_width=True, theme="streamlit")
                 with st.expander("Click for details on the visualized property"):
-                    if 'Pressure Change' in prop_3d: st.markdown("This shows the **Pressure Drawdown (Initial - Final Pressure)**. The resulting 'plume' is a powerful visualization of the Stimulated Reservoir Volume (SRV) — the region of the reservoir effectively drained by the hydraulic fractures.")
-                    elif 'OOIP' in prop_3d: st.markdown("This shows the **Original Oil In Place** per grid cell. It highlights the 'sweet spots' in the reservoir that contain the highest concentration of hydrocarbons. The best wells are typically drilled to target these high-OOIP areas.")
-                    else: st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects all points with the same value. Use the **'Isosurface value'** slider to explore different value levels within the 3D volume.")
+                    if 'Pressure Change' in prop_3d: st.markdown("This shows the **Pressure Drawdown (Initial - Final Pressure)**. The resulting 'plume' is a powerful visualization of the Stimulated Reservoir Volume (SRV).")
+                    elif 'OOIP' in prop_3d: st.markdown("This shows the **Original Oil In Place** per grid cell, highlighting the 'sweet spots' in the reservoir.")
+                    else: st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects points of equal value.")
         else: st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
 
 elif selected_tab == "Slice Viewer":
@@ -429,10 +425,11 @@ elif selected_tab == "Slice Viewer":
             fig_slice = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
             fig_slice.update_layout(title=f"<b>{prop_slice} @ {plane_slice.split(' ')[0]} = {slice_idx}</b>")
             st.plotly_chart(fig_slice, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"): st.markdown("""This tool allows you to inspect 2D cross-sections of the 3D data volumes. This is essential for detailed quality control.\n- **k-plane**: A horizontal, top-down view at a specific depth layer.\n- **j-plane**: A vertical slice parallel to the well laterals.\n- **i-plane**: A vertical slice perpendicular to the well laterals, cutting across the hydraulic fractures.""")
+            with st.expander("Click for details"): st.markdown("""This tool allows you to inspect 2D cross-sections of the 3D data volumes.\n- **k-plane**: A horizontal, top-down view.\n- **j-plane**: A vertical slice parallel to the well laterals.\n- **i-plane**: A vertical slice perpendicular to the well laterals.""")
         else: st.warning(f"Data for '{prop_slice}' not found.")
 
-  elif selected_tab == "QA / Material Balance":
+
+elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     sim_data = st.session_state.get("sim")
     if sim_data is None: 
@@ -440,49 +437,55 @@ elif selected_tab == "Slice Viewer":
     elif sim_data.get('pm_mid_psi') is None: 
         st.info("The selected solver did not return the necessary pressure evolution data for this tab.")
     else:
-        cum_g_mmscf = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0)
-        p_avg_series = np.array([np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])])
-        if len(p_avg_series) == len(sim_data['t']):
-            st.markdown("### Gas Material Balance")
-            z_factors = z_factor_approx(p_avg_series, p_init_psi=state['p_init_psi'])
-            p_over_z = p_avg_series / z_factors
-            fit_start_index = len(cum_g_mmscf) // 4
-            slope, intercept, _, _, _ = stats.linregress(cum_g_mmscf[fit_start_index:], p_over_z[fit_start_index:])
-            giip_bcf = (-intercept / slope) / 1000.0 if slope != 0 else 0
-            sim_eur_g_bcf = sim_data['EUR_g_BCF']
-            c1, c2 = st.columns(2); c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF"); c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=f"{(giip_bcf-sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim")
-            fig_pz_gas = go.Figure(); fig_pz_gas.add_trace(go.Scatter(x=cum_g_mmscf, y=p_over_z, mode='markers', name='P/Z Data Points'))
-            x_fit = np.array([0, giip_bcf * 1000]); y_fit = slope * x_fit + intercept
-            fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode='lines', name='Linear Extrapolation', line=dict(dash='dash')))
-            fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white", xaxis_range=[0, giip_bcf * 1100])
-            st.plotly_chart(fig_pz_gas, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown("""This is a classic **P/Z vs. Gp** material balance plot for gas reservoirs. It serves as a powerful validation tool.\n- **Theory**: For a volumetric gas reservoir, a plot of (Pressure/Z-factor) vs. Cumulative Gas Production (Gp) should form a straight line.\n- **Interpretation**: The data points (blue dots) are calculated from the simulator's output. A linear regression (dashed line) is fitted to these points.\n- **GIIP**: Extrapolating the line to the x-axis (where P/Z = 0) gives an independent estimate of the Gas Initially In Place (GIIP).\n- **Validation**: The GIIP from this plot is compared to the simulator's EUR. A close match provides high confidence that the simulation is conserving mass and behaving physically correctly.""")
-            st.markdown("---")
-            st.markdown("### Oil Material Balance")
-            Np = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0); Gp = cumulative_trapezoid(sim_data['qg'] * 1000, sim_data['t'], initial=0)
-            Rp = np.divide(Gp, Np, out=np.zeros_like(Gp), where=Np!=0)
-            Bo = Bo_of_p(p_avg_series, state['pb_psi'], state['Bo_pb_rb_stb']); Rs = Rs_of_p(p_avg_series, state['pb_psi'], state['Rs_pb_scf_stb']); Bg = Bg_of_p(p_avg_series)
-            p_init = state['p_init_psi']; Boi = Bo_of_p(p_init, state['pb_psi'], state['Bo_pb_rb_stb']); Rsi = Rs_of_p(p_init, state['pb_psi'], state['Rs_pb_scf_stb'])
-            F = Np * (Bo + (Rp - Rs) * Bg); Et = (Bo - Boi) + (Rsi - Rs) * Bg
-            fit_start_index_oil = len(F) // 4
-            slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_index_oil:], F[fit_start_index_oil:])
-            ooip_mmstb = slope_oil / 1e6 if slope_oil > 0 else 0; sim_eur_o_mmstb = sim_data['EUR_o_MMBO']; rec_factor = (sim_eur_o_mmstb / ooip_mmstb) * 100 if ooip_mmstb > 0 else 0
-            c1, c2, c3 = st.columns(3); c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB"); c2.metric("Material Balance OOIP (from F vs Et)", f"{ooip_mmstb:.2f} MMSTB"); c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
-            fig_mbe_oil = go.Figure(); fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode='markers', name='F vs Et Data Points'))
-            x_fit_oil = np.array([0, np.max(Et)]); y_fit_oil = slope_oil * x_fit_oil
-            fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode='lines', name=f'Slope (OOIP) = {ooip_mmstb:.2f} MMSTB', line=dict(dash='dash')))
-            fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena-Odeh Plot)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
-            st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown("""This is a **Havlena-Odeh** material balance plot for oil reservoirs. It linearizes the complex MBE for solution-gas drive reservoirs.\n- **Theory**: A plot of the total underground withdrawal (F) versus the total fluid and rock expansion (Et) should form a straight line passing through the origin.\n- **Interpretation**: The slope of this line is a direct, independent estimate of the Original Oil In Place (OOIP).\n- **Validation**: The OOIP from this plot is compared to the simulator's results. The **Implied Recovery Factor** is then calculated by dividing the simulator's EUR by the MBE-derived OOIP, providing a critical check on the forecast's plausibility.""")
+        # Ensure we have valid time and rate data before proceeding
+        if 't' in sim_data and 'qg' in sim_data and 'qo' in sim_data and len(sim_data['t']) > 1:
+            cum_g_mmscf = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0)
+            p_avg_series = np.array([np.mean(p_slice) for p_slice in sim_data.get('pm_mid_psi', [])])
+            
+            if len(p_avg_series) == len(sim_data['t']):
+                st.markdown("### Gas Material Balance")
+                z_factors = z_factor_approx(p_avg_series, p_init_psi=state['p_init_psi'])
+                p_over_z = p_avg_series / z_factors
+                fit_start_index = len(cum_g_mmscf) // 4
+                slope, intercept, _, _, _ = stats.linregress(cum_g_mmscf[fit_start_index:], p_over_z[fit_start_index:])
+                giip_bcf = (-intercept / slope) / 1000.0 if slope != 0 else 0
+                sim_eur_g_bcf = sim_data['EUR_g_BCF']
+                c1, c2 = st.columns(2); c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF"); c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=f"{(giip_bcf-sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim")
+                fig_pz_gas = go.Figure(); fig_pz_gas.add_trace(go.Scatter(x=cum_g_mmscf, y=p_over_z, mode='markers', name='P/Z Data Points'))
+                x_fit = np.array([0, giip_bcf * 1000]); y_fit = slope * x_fit + intercept
+                fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode='lines', name='Linear Extrapolation', line=dict(dash='dash')))
+                fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white", xaxis_range=[0, giip_bcf * 1100])
+                st.plotly_chart(fig_pz_gas, use_container_width=True, theme="streamlit")
+                with st.expander("Click for details"):
+                    st.markdown("""This is a classic **P/Z vs. Gp** material balance plot for gas reservoirs. It serves as a powerful validation tool.\n- **Theory**: For a volumetric gas reservoir, a plot of (Pressure/Z-factor) vs. Cumulative Gas Production (Gp) should form a straight line.\n- **Interpretation**: The data points (blue dots) are calculated from the simulator's output. A linear regression (dashed line) is fitted to these points.\n- **GIIP**: Extrapolating the line to the x-axis (where P/Z = 0) gives an independent estimate of the Gas Initially In Place (GIIP).\n- **Validation**: The GIIP from this plot is compared to the simulator's EUR. A close match provides high confidence that the simulation is conserving mass and behaving physically correctly.""")
+                
+                st.markdown("---")
+                st.markdown("### Oil Material Balance")
+                Np = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0); Gp = cumulative_trapezoid(sim_data['qg'] * 1000, sim_data['t'], initial=0)
+                Rp = np.divide(Gp, Np, out=np.zeros_like(Gp), where=Np>1e-3)
+                Bo = Bo_of_p(p_avg_series, state['pb_psi'], state['Bo_pb_rb_stb']); Rs = Rs_of_p(p_avg_series, state['pb_psi'], state['Rs_pb_scf_stb']); Bg = Bg_of_p(p_avg_series)
+                p_init = state['p_init_psi']; Boi = Bo_of_p(p_init, state['pb_psi'], state['Bo_pb_rb_stb']); Rsi = Rs_of_p(p_init, state['pb_psi'], state['Rs_pb_scf_stb'])
+                F = Np * (Bo + (Rp - Rs) * Bg); Et = (Bo - Boi) + (Rsi - Rs) * Bg
+                fit_start_index_oil = len(F) // 4
+                slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_index_oil:], F[fit_start_index_oil:])
+                ooip_mmstb = slope_oil / 1e6 if slope_oil > 0 else 0; sim_eur_o_mmstb = sim_data.get('EUR_o_MMBO',0); rec_factor = (sim_eur_o_mmstb / ooip_mmstb) * 100 if ooip_mmstb > 0 else 0
+                c1, c2, c3 = st.columns(3); c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB"); c2.metric("Material Balance OOIP (from F vs Et)", f"{ooip_mmstb:.2f} MMSTB"); c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
+                fig_mbe_oil = go.Figure(); fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode='markers', name='F vs Et Data Points'))
+                x_fit_oil = np.array([0, np.max(Et)]); y_fit_oil = slope_oil * x_fit_oil
+                fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode='lines', name=f'Slope (OOIP) = {ooip_mmstb:.2f} MMSTB', line=dict(dash='dash')))
+                fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena-Odeh Plot)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
+                st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
+                with st.expander("Click for details"):
+                    st.markdown("""This is a **Havlena-Odeh** material balance plot for oil reservoirs. It linearizes the complex MBE for solution-gas drive reservoirs.\n- **Theory**: A plot of the total underground withdrawal (F) versus the total fluid and rock expansion (Et) should form a straight line passing through the origin.\n- **Interpretation**: The slope of this line is a direct, independent estimate of the Original Oil In Place (OOIP).\n- **Validation**: The OOIP from this plot is compared to the simulator's results. The **Implied Recovery Factor** is then calculated by dividing the simulator's EUR by the MBE-derived OOIP, providing a critical check on the forecast's plausibility.""")
+            else:
+                st.warning("Could not create plots. Pressure and time data have mismatched lengths.")
         else:
-            st.warning("Could not create plots. Pressure and time data have mismatched lengths.")
+            st.warning("Simulation data is missing required arrays ('t', 'qg', 'qo') for this analysis.")
 
 elif selected_tab == "Economics":
     st.header("Economics Analysis")
     sim_data = st.session_state.get("sim")
-    if not sim_data:
+    if not sim_data or 't' not in sim_data:
         st.warning("Please run a simulation on the 'Results' tab to perform an economic analysis.")
     else:
         st.markdown("#### Economic Inputs")
@@ -492,11 +495,17 @@ elif selected_tab == "Economics":
         with c3: discount_rate = st.number_input("Discount Rate (%)", 0.0, 25.0, 10.0, 0.5) / 100.0
         with c4: capex = st.number_input("CAPEX ($MM)", 0.0, 50.0, 10.0, 0.5) * 1e6
         
-        days = sim_data['t']; qo = sim_data['qo']; qg = sim_data['qg'] * 1000
-        years = (days / 365.25).astype(int); df = pd.DataFrame({'Year': years, 'Oil (bbl)': qo, 'Gas (scf)': qg})
-        yearly_prod = df.groupby('Year').sum()
-        yearly_prod['Revenue ($)'] = (yearly_prod['Oil (bbl)'] * oil_price) + (yearly_prod['Gas (scf)'] * gas_price / 1000)
-        cash_flow = [-capex] + yearly_prod['Revenue ($)'].tolist()
+        days = sim_data['t']; qo = sim_data['qo']; qg = sim_data['qg']
+        df = pd.DataFrame({'days': days, 'oil': qo, 'gas_mcfd': qg})
+        df['year'] = (df['days'] / 365.25).astype(int)
+        
+        # Calculate average daily rate for each year to get yearly volume
+        yearly_prod = df.groupby('year')[['oil', 'gas_mcfd']].mean()
+        yearly_prod['yearly_oil'] = yearly_prod['oil'] * 365.25
+        yearly_prod['yearly_gas_mcf'] = yearly_prod['gas_mcfd'] * 365.25
+        
+        yearly_prod['revenue'] = (yearly_prod['yearly_oil'] * oil_price) + (yearly_prod['yearly_gas_mcf'] * gas_price)
+        cash_flow = [-capex] + yearly_prod['revenue'].tolist()
         
         npv = npf.npv(discount_rate, cash_flow); irr = npf.irr(cash_flow) * 100 if npv > 0 else 0
         cumulative_cash_flow = np.cumsum(cash_flow); payout_year = "N/A"
@@ -763,4 +772,4 @@ elif selected_tab == "DFN Viewer":
             This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
             - Each **red line** represents an individual natural fracture defined in the input file.
             - This view is critical for Quality Control (QC) to ensure that the fractures have been loaded correctly and are in the expected location and orientation within the reservoir model.
-            """)      
+            """)
