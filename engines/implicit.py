@@ -25,11 +25,13 @@ except Exception:
     except Exception:
         _TS = None  # use a tiny local iterator
 
+
 @dataclass
 class EngineOptions:
     newton_tol: float = 1e-6
     max_newton: int = 12
     max_lin:   int = 200
+
 
 def _ts_iter(total_days: float, nsteps: int):
     """Local fallback if no timestepping class is available."""
@@ -39,16 +41,23 @@ def _ts_iter(total_days: float, nsteps: int):
         t_accum += dt
         yield dt, t_accum
 
+
 def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
     """Three-phase implicit driver (Phase 1.x skeleton, safe with/without rate DOFs)."""
     # ---- Build model objects
     grid = Grid.from_inputs(inputs["grid"], inputs.get("rock", {}))
     pvt  = BlackOilPVT.from_inputs(inputs["pvt"])
-    kr   = CoreyRelPerm.from_inputs(inputs["relperm"])
-    wells = WellSet.from_inputs(inputs.get("msw", {}), inputs.get("schedule", {}), grid, inputs)
 
-    # Sanity: make sure we didn't import an old placeholder PVT
-    assert all(hasattr(pvt, a) for a in ("Rs", "Bo", "Bg", "Bw")), f"Bad PVT object: {type(pvt)}"
+    # Explicit sanity check so legacy Fluid can't slip in
+    for req in ("Bo", "Bw", "Bg", "Rs"):
+        if not hasattr(pvt, req):
+            raise TypeError(
+                f"BlackOilPVT is missing required method '{req}'. "
+                "Did an old 'Fluid' object slip in?"
+            )
+
+    kr    = CoreyRelPerm.from_inputs(inputs["relperm"])
+    wells = WellSet.from_inputs(inputs.get("msw", {}), inputs.get("schedule", {}), grid, inputs)
 
     opts = EngineOptions(
         newton_tol=float(inputs.get("newton_tol", 1e-6)),
@@ -126,7 +135,9 @@ def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
             # older signature without pwf_overrides
             qo, qg, _ = wells.surface_rates(x, grid, pvt, kr)
 
-        t_days.append(t_accum); qg_list.append(qg); qo_list.append(qo)
+        t_days.append(t_accum)
+        qg_list.append(qg)
+        qo_list.append(qo)
 
     # ---- Pack results for the UI
     t  = np.asarray(t_days, float)
@@ -140,5 +151,5 @@ def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
         EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO,
         # placeholders for 3D fields (we’ll fill later)
         p_init_3d=np.full((grid.nz, grid.ny, grid.nx), P0[0]),
-        press_matrix=None, pm_mid_psi=None, ooip_3d=None, runtime_s=0.0
+        press_matrix=None, pm_mid_psi=None, ooip_3d=None, runtime_s=0.0,
     )
