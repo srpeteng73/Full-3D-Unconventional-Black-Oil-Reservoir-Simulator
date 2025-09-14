@@ -4,11 +4,12 @@ import numpy as np
 from scipy.sparse import lil_matrix
 from dataclasses import dataclass, field
 
-# Use the *1 modules everywhere
-from core.blackoil_pvt1 import BlackOilPVT   # <- not OilPVT/GasPVT/WaterPVT
-from core.relperm1      import CoreyRelPerm
-from core.grid1         import Grid
-from core.wells1        import WellSet
+from dataclasses import dataclass, field   # ← include field
+from core.blackoil_pvt1 import BlackOilPVT
+from core.relperm1 import CoreyRelPerm
+from core.grid1 import Grid
+from core.wells1 import WellSet
+
 
 _EPS = 1e-12
 
