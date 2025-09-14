@@ -2,16 +2,15 @@
 from __future__ import annotations
 import numpy as np
 from scipy.sparse import lil_matrix
+
 from dataclasses import dataclass
 
-# NEW (Option B)
-from core.blackoil_pvt1 import OilPVT, GasPVT, WaterPVT
-from core.relperm1 import RelPerm
+# Use the *1.py modules (Option B)
+from core.blackoil_pvt1 import BlackOilPVT
+from core.relperm1 import CoreyRelPerm
 from core.grid1 import Grid
-from core.linear1 import LinearSolver
-from core.timestepping1 import TimeStepping
-from core.wells1 import Well
-
+from core.wells1 import WellSet
+# (linear1 / timestepping1 are used by the engine driver, not here)
 
 @dataclass
 class Assembler:
@@ -19,23 +18,25 @@ class Assembler:
     pvt: BlackOilPVT
     kr: CoreyRelPerm
     wells: WellSet
-    opts: any
+    opts: dict | None = None
 
-    def clamp_state_inplace(self, x):
-        # x: [P, Sw, Sg] per cell
+    # Clamp to physical bounds so Newton doesn’t wander
+    def clamp_state_inplace(self, x: np.ndarray) -> None:
+        # x is [P0, Sw0, Sg0, P1, Sw1, Sg1, ...]
         P = x[0::3]; Sw = x[1::3]; Sg = x[2::3]
         Sw[:] = np.clip(Sw, self.kr.Swc + 1e-6, 1.0 - self.kr.Sor - 1e-6)
         Sg[:] = np.clip(Sg, self.kr.Sgc, 1.0 - self.kr.Swc - 1e-6)
         So = 1.0 - Sw - Sg
         neg = So < 0
         if np.any(neg):
-            # push Sg down a bit if So went negative
+            # If oil would go negative, shave it from gas
             Sg[neg] = Sg[neg] + So[neg]
         x[0::3], x[1::3], x[2::3] = P, Sw, Sg
 
-    def residual_and_jacobian(self, x_n, x_prev, dt_days):
-        """Skeletal 3eq per cell (oil, water, gas) with accumulation only + simple well sinks.
-           Next pass we’ll add full flux terms and all partials.
+    def residual_and_jacobian(self, x_n: np.ndarray, x_prev: np.ndarray, dt_days: float):
+        """
+        Skeleton black-oil residuals with accumulation + simple well sinks.
+        (Next pass: add full face fluxes and 3x3 Jacobian blocks.)
         """
         n = self.grid.num_cells
         ndof = 3 * n
@@ -54,36 +55,33 @@ class Assembler:
         Bo_m, Bg_m, Bw_m = self.pvt.Bo(Pm), self.pvt.Bg(Pm), self.pvt.Bw(Pm)
         Rs_n, Rs_m = self.pvt.Rs(Pn), self.pvt.Rs(Pm)
 
-        # accumulation terms (black-oil canonical forms, simplified rock compressibility)
-        phi = 0.12  # placeholder porosity
-        Vb = (self.grid.dx * self.grid.dy * self.grid.dz) / 5.615  # bbl per cell (ft^3 -> bbl)
+        # accumulation (rock compressibility ignored for now)
+        phi = 0.12  # placeholder porosity (will be field/array later)
+        Vb = (self.grid.dx * self.grid.dy * self.grid.dz) / 5.615  # ft^3 → bbl
         dt = max(dt_days, 1e-9)
 
-        # Oil equation index map helpers
-        def ixP(c): return 3*c
-        def ixSw(c): return 3*c + 1
-        def ixSg(c): return 3*c + 2
+        def ixP(c): return 3 * c
+        def ixSw(c): return 3 * c + 1
+        def ixSg(c): return 3 * c + 2
 
         for c in range(n):
-            # oil accumulation (with Rs coupling in gas eq later)
+            # Oil accumulation
             Ao_n = phi * So_n[c] / max(Bo_n[c], 1e-12)
             Ao_m = phi * So_m[c] / max(Bo_m[c], 1e-12)
             R[ixP(c)] += (Ao_n - Ao_m) * Vb / dt
 
-            # water accumulation
+            # Water accumulation
             Aw_n = phi * Swn[c] / max(Bw_n[c], 1e-12)
             Aw_m = phi * Swm[c] / max(Bw_m[c], 1e-12)
             R[ixSw(c)] += (Aw_n - Aw_m) * Vb / dt
 
-            # gas accumulation (free gas minus dissolved from oil)
+            # Gas accumulation: free gas minus dissolved from oil
             Ag_n = phi * Sgn[c] / max(Bg_n[c], 1e-12) - phi * So_n[c] * Rs_n[c] / max(Bg_n[c], 1e-12)
             Ag_m = phi * Sgm[c] / max(Bg_m[c], 1e-12) - phi * So_m[c] * Rs_m[c] / max(Bg_m[c], 1e-12)
             R[ixSg(c)] += (Ag_n - Ag_m) * Vb / dt
 
-        # simple well sink terms (BHP control) — add to residual
-        # (In next pass we’ll add Jacobian entries and full RATE control unknowns)
+        # Simple well sinks (BHP control). Next pass: add Jacobian & rate control unknowns.
         qo_s, qg_s, qw_s = self.wells.surface_rates(x_n, self.grid, self.pvt, self.kr)
-        # Distribute equally over perfs (placeholder)
         total_perfs = sum(len(w.perfs) for w in self.wells.wells)
         if total_perfs > 0:
             qo_cell = qo_s / total_perfs
@@ -91,13 +89,13 @@ class Assembler:
             qg_cell = qg_s / total_perfs
             for w in self.wells.wells:
                 for p in w.perfs:
-                    R[ixP(p.cell)] -= qo_cell
+                    R[ixP(p.cell)]  -= qo_cell
                     R[ixSw(p.cell)] -= qw_cell
                     R[ixSg(p.cell)] -= qg_cell
 
-        # Jacobian: start with diagonal stabilization so Newton doesn’t blow up before we add full partials
+        # Diagonal stabilization so Newton doesn’t explode before full Jacobian
         for c in range(n):
-            J[ixP(c), ixP(c)] = 1.0
+            J[ixP(c), ixP(c)]   = 1.0
             J[ixSw(c), ixSw(c)] = 1.0
             J[ixSg(c), ixSg(c)] = 1.0
 
