@@ -44,6 +44,11 @@ def simulate(inputs: dict) -> dict:
     inputs = dict(inputs)  # shallow copy to avoid side-effects upstream
     inputs = _coerce_pvt(inputs)
 
+    # --- DEBUG GUARD: prove we have a proper PVT object
+    pvt = inputs["pvt"]
+    print("[full3d] PVT type:", type(pvt))
+    assert hasattr(pvt, "Rs"), f"PVT missing Rs; got {type(pvt)}"
+
     engine_type = inputs.get("engine_type", "")
     if "Implicit" in engine_type and _HAS_IMPLICIT:
         return simulate_3phase_implicit(inputs)
