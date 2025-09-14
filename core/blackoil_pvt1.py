@@ -1,53 +1,79 @@
-# core/blackoil_pvt.py
+# core/blackoil_pvt1.py
 from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass
 
+_EPS = 1e-12
+
 @dataclass
 class BlackOilPVT:
-    pb: float
-    Rs_pb: float
-    Bo_pb: float
-    muo_pb: float
-    mug_pb: float
-    ct_oil: float
+    pb_psi: float
+    Rs_pb_scf_stb: float
+    Bo_pb_rb_stb: float
+    muo_pb_cp: float
+    mug_pb_cp: float
+    ct_o_1psi: float = 8e-6
+    ct_g_1psi: float = 3e-6
+    ct_w_1psi: float = 3e-6
+    Bw_ref: float = 1.01  # simple constant water FVF
 
     @staticmethod
     def from_inputs(pvt: dict) -> "BlackOilPVT":
         return BlackOilPVT(
-            pb=float(pvt["pb_psi"]),
-            Rs_pb=float(pvt["Rs_pb_scf_stb"]),
-            Bo_pb=float(pvt["Bo_pb_rb_stb"]),
-            muo_pb=float(pvt["muo_pb_cp"]),
-            mug_pb=float(pvt["mug_pb_cp"]),
-            ct_oil=float(pvt.get("ct_o_1psi", 8e-6)),
+            pb_psi=float(pvt.get("pb_psi", 5200.0)),
+            Rs_pb_scf_stb=float(pvt.get("Rs_pb_scf_stb", 650.0)),
+            Bo_pb_rb_stb=float(pvt.get("Bo_pb_rb_stb", 1.35)),
+            muo_pb_cp=float(pvt.get("muo_pb_cp", 1.2)),
+            mug_pb_cp=float(pvt.get("mug_pb_cp", 0.020)),
+            ct_o_1psi=float(pvt.get("ct_o_1psi", 8e-6)),
+            ct_g_1psi=float(pvt.get("ct_g_1psi", 3e-6)),
+            ct_w_1psi=float(pvt.get("ct_w_1psi", 3e-6)),
         )
 
-    # Simple, differentiable forms (we’ll refine later)
-    def Bo(self, P):  # rb/STB
-        return self.Bo_pb * (1.0 - self.ct_oil * (P - self.pb))
-    def dBo_dP(self, P):
-        return -self.Bo_pb * self.ct_oil * np.ones_like(P)
+    # Oil FVF: exponential compressibility about pb
+    def Bo(self, P):
+        P = np.asarray(P, float)
+        return self.Bo_pb_rb_stb * np.exp(-self.ct_o_1psi * (P - self.pb_psi))
 
+    def dBo_dP(self, P):
+        B = self.Bo(P)
+        return -self.ct_o_1psi * B
+
+    # Gas FVF: exponential w.r.t. pressure (proxy)
+    def Bg(self, P):
+        P = np.asarray(P, float)
+        Bg_pb = 1.2e-5  # reference Bg at pb (proxy)
+        return Bg_pb * np.exp(self.ct_g_1psi * (self.pb_psi - P))
+
+    def dBg_dP(self, P):
+        B = self.Bg(P)
+        return -self.ct_g_1psi * B
+
+    # Water FVF: near-constant with small compressibility
+    def Bw(self, P):
+        P = np.asarray(P, float)
+        return self.Bw_ref * np.exp(self.ct_w_1psi * (P - self.pb_psi))
+
+    def dBw_dP(self, P):
+        B = self.Bw(P)
+        return self.ct_w_1psi * B
+
+    # Rs(P): simple piecewise proxy consistent with your earlier app
     def Rs(self, P):
         P = np.asarray(P, float)
-        return np.where(P <= self.pb, self.Rs_pb, self.Rs_pb + 0.00012*(P - self.pb)**1.1)
+        a = 1.2e-4
+        out = np.where(P <= self.pb_psi, self.Rs_pb_scf_stb,
+                       self.Rs_pb_scf_stb + a * np.power(P - self.pb_psi, 1.1))
+        return out
+
     def dRs_dP(self, P):
         P = np.asarray(P, float)
-        return np.where(P <= self.pb, 0.0, 0.00012*1.1*(P - self.pb)**0.1)
+        a = 1.2e-4
+        d = np.where(P <= self.pb_psi, 0.0,
+                     a * 1.1 * np.power(np.maximum(P - self.pb_psi, 0.0), 0.1))
+        return d
 
-    def Bg(self, P):  # rb/scf (scaled)
-        pmin, pmax = P.min(), P.max()
-        return 1.2e-5 + (7.0e-6 - 1.2e-5) * (P - pmin) / (pmax - pmin + 1e-12)
-    def dBg_dP(self, P):
-        pmin, pmax = P.min(), P.max()
-        return (7e-6 - 1.2e-5) / (pmax - pmin + 1e-12) * np.ones_like(P)
-
-    def Bw(self, P):
-        return np.full_like(P, 1.01)
-    def dBw_dP(self, P):
-        return np.zeros_like(P)
-
-    def mu_oil(self, P): return np.full_like(P, self.muo_pb)
-    def mu_gas(self, P): return np.full_like(P, self.mug_pb)
-    def mu_water(self, P): return np.full_like(P, 0.5)
+    # viscosities (constants for now)
+    def mu_oil(self, P): return np.full_like(np.asarray(P, float), self.muo_pb_cp)
+    def mu_gas(self, P): return np.full_like(np.asarray(P, float), self.mug_pb_cp)
+    def mu_water(self, P): return np.full_like(np.asarray(P, float), 0.5)
