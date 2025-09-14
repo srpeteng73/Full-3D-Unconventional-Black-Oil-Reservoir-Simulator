@@ -3,6 +3,7 @@
 from __future__ import annotations
 import numpy as np
 import time
+from collections.abc import Mapping  # <-- added
 
 from engines.fast import fallback_fast_solver
 
@@ -19,16 +20,56 @@ from core.blackoil_pvt1 import BlackOilPVT
 
 
 def _coerce_pvt(inputs: dict) -> dict:
-    """Ensure inputs['pvt'] is a BlackOilPVT instance (convert legacy Fluid/dict)."""
+    """
+    Ensure inputs['pvt'] is a BlackOilPVT instance.
+    Accepts:
+      - BlackOilPVT (returned as-is)
+      - dict / Mapping (passed to BlackOilPVT.from_inputs)
+      - legacy object (e.g., 'Fluid') with attributes like pb_psi, Rs_pb_scf_stb, etc.
+    Falls back to sensible defaults if anything is missing.
+    """
     pvt_in = inputs.get("pvt", {})
-    if not isinstance(pvt_in, BlackOilPVT):
-        try:
+
+    # Already correct type
+    if isinstance(pvt_in, BlackOilPVT):
+        print("[full3d] PVT is already BlackOilPVT")
+        return inputs
+
+    try:
+        # Mapping (dict-like)
+        if isinstance(pvt_in, Mapping):
+            print("[full3d] Coercing PVT from Mapping")
             inputs["pvt"] = BlackOilPVT.from_inputs(pvt_in)
-        except Exception as e:
-            # Fallback to defaults if anything odd comes through
-            print("[full3d] PVT coercion failed:", e)
-            inputs["pvt"] = BlackOilPVT.from_inputs({})
-    return inputs
+            return inputs
+
+        # Legacy object (e.g., 'Fluid') – pull attributes safely
+        print("[full3d] Coercing PVT from legacy object:", type(pvt_in))
+
+        def take(*names, default=None):
+            for n in names:
+                if hasattr(pvt_in, n):
+                    return getattr(pvt_in, n)
+            return default
+
+        coerced = {
+            "pb_psi":           take("pb_psi", "pb", default=5200.0),
+            "Rs_pb_scf_stb":    take("Rs_pb_scf_stb", "Rs_pb", "rs_pb", default=650.0),
+            "Bo_pb_rb_stb":     take("Bo_pb_rb_stb", "Bo_pb", "bo_pb", default=1.35),
+            "muo_pb_cp":        take("muo_pb_cp", "mu_oil_pb_cp", "mu_o", default=1.2),
+            "mug_pb_cp":        take("mug_pb_cp", "mu_gas_pb_cp", "mu_g", default=0.020),
+            "ct_o_1psi":        take("ct_o_1psi", "cto", default=8e-6),
+            "ct_g_1psi":        take("ct_g_1psi", "ctg", default=3e-6),
+            "ct_w_1psi":        take("ct_w_1psi", "ctw", default=3e-6),
+            "Bw_ref":           take("Bw_ref", "bw_ref", default=1.01),
+        }
+
+        inputs["pvt"] = BlackOilPVT.from_inputs(coerced)
+        return inputs
+
+    except Exception as e:
+        print("[full3d] PVT coercion failed; falling back to defaults:", e)
+        inputs["pvt"] = BlackOilPVT.from_inputs({})
+        return inputs
 
 
 def simulate(inputs: dict) -> dict:
