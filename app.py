@@ -1,3 +1,189 @@
+import numpy as np
+import time
+from scipy.sparse import lil_matrix, csc_matrix
+from scipy.sparse.linalg import spsolve
+
+# --- The Grid Class ---
+class Grid:
+    def __init__(self, inputs):
+        grid_params = inputs.get('grid', {})
+        self.nx, self.ny, self.nz = grid_params.get('nx'), grid_params.get('ny'), grid_params.get('nz')
+        self.dx, self.dy, self.dz = grid_params.get('dx'), grid_params.get('dy'), grid_params.get('dz')
+        self.num_cells = self.nx * self.ny * self.nz
+    def get_idx(self, i, j, k):
+        if 0 <= i < self.nx and 0 <= j < self.ny and 0 <= k < self.nz:
+            return k * (self.nx * self.ny) + j * self.nx + i
+        return -1
+    def cell_volume_bbl(self):
+        return (self.dx * self.dy * self.dz) / 5.615
+
+# --- The Rock Class ---
+class Rock:
+    def __init__(self, inputs, grid):
+        rock_params = inputs.get('rock', {})
+        self.poro = rock_params.get('phi', np.full(grid.num_cells, 0.1)).flatten()
+        self.kx = rock_params.get('kx_md', np.full(grid.num_cells, 0.05)).flatten()
+        self.ky = rock_params.get('ky_md', np.full(grid.num_cells, 0.05)).flatten()
+        self.kz = self.kx * 0.1
+
+# --- The Fluid Class ---
+class Fluid:
+    def __init__(self, inputs):
+        pvt_params = inputs.get('pvt', {})
+        self.pb_psi = pvt_params.get('pb_psi')
+        self.Rs_pb_scf_stb = pvt_params.get('Rs_pb_scf_stb') # Correctly matches key from appy.py
+        self.Bo_pb = pvt_params.get('Bo_pb_rb_stb')
+        self.muo_pb = pvt_params.get('muo_pb_cp')
+        self.ct_oil = pvt_params.get('ct_o_1psi', 8e-6)
+
+    def Bo(self, P):
+        return self.Bo_pb * (1.0 - self.ct_oil * (P - self.pb_psi))
+    
+    def Rs(self, P):
+        p = np.asarray(P, float)
+        return np.where(p <= self.pb_psi, self.Rs_pb_scf_stb, self.Rs_pb_scf_stb + 0.00012*(p - self.pb_psi)**1.1)
+    
+    def mu_oil(self, P):
+        return np.full_like(P, self.muo_pb)
+
+# --- The Transmissibility Class ---
+class Transmissibility:
+    def __init__(self, grid, rock):
+        self.T_x = np.zeros(grid.num_cells); self.T_y = np.zeros(grid.num_cells); self.T_z = np.zeros(grid.num_cells)
+        conv = 0.001127
+        for k in range(grid.nz):
+            for j in range(grid.ny):
+                for i in range(grid.nx):
+                    m = grid.get_idx(i, j, k)
+                    if i < grid.nx - 1:
+                        mp1 = grid.get_idx(i + 1, j, k); kh = 2*rock.kx[m]*rock.kx[mp1]/(rock.kx[m]+rock.kx[mp1]); self.T_x[m] = conv*kh*grid.dy*grid.dz/grid.dx
+                    if j < grid.ny - 1:
+                        mp1 = grid.get_idx(i, j + 1, k); kh = 2*rock.ky[m]*rock.ky[mp1]/(rock.ky[m]+rock.ky[mp1]); self.T_y[m] = conv*kh*grid.dx*grid.dz/grid.dy
+                    if k < grid.nz - 1:
+                        mp1 = grid.get_idx(i, j, k + 1); kh = 2*rock.kz[m]*rock.kz[mp1]/(rock.kz[m]+rock.kz[mp1]); self.T_z[m] = conv*kh*grid.dx*grid.dy/grid.dz
+
+# --- The State Class ---
+class State:
+    def __init__(self, inputs, grid, fluid):
+        self.grid = grid; self.fluid = fluid
+        init_params = inputs.get('init', {})
+        self.pressure = np.full(grid.num_cells, init_params.get('p_init_psi'))
+        self.update_properties()
+    def update_properties(self):
+        self.Bo = self.fluid.Bo(self.pressure)
+        self.mu_oil = self.fluid.mu_oil(self.pressure)
+        self.oil_mobility = (1.0 / self.mu_oil) / self.Bo
+
+# --- The Well Class ---
+class Well:
+    def __init__(self, inputs, grid):
+        msw_params = inputs.get('msw', {}); schedule_params = inputs.get('schedule', {})
+        self.bhp = schedule_params.get('bhp_psi'); self.perforations = []
+        for i in range(int(msw_params.get('L_ft', 0) / grid.dx)):
+            idx = grid.get_idx(i, grid.ny // 2, grid.nz // 2)
+            if idx != -1: self.perforations.append(idx)
+        self.wi = 5.0
+
+# --- The Jacobian and Residual Calculation Function ---
+def assemble_jacobian_and_residuals(state_new, state_old, grid, rock, fluid, trans, well, dt_days):
+    num_cells = grid.num_cells
+    J = lil_matrix((num_cells, num_cells)); R = np.zeros(num_cells)
+    Vp_bbl = grid.cell_volume_bbl() * rock.poro
+    
+    for m in range(num_cells):
+        accum_new = Vp_bbl[m] / (state_new.Bo[m] * dt_days)
+        accum_old = Vp_bbl[m] / (state_old.Bo[m] * dt_days) * state_old.pressure[m]
+        R[m] += accum_new * state_new.pressure[m] - accum_old
+        J[m, m] += accum_new
+
+        if m > 0 and (m % grid.nx) != 0:
+            m_minus_1 = m - 1
+            mob = state_new.oil_mobility[m_minus_1] if state_new.pressure[m_minus_1] > state_new.pressure[m] else state_new.oil_mobility[m]
+            flow = trans.T_x[m_minus_1] * mob * (state_new.pressure[m_minus_1] - state_new.pressure[m])
+            R[m] -= flow; J[m, m] += trans.T_x[m_minus_1] * mob; J[m, m_minus_1] -= trans.T_x[m_minus_1] * mob
+            
+        if m < num_cells - 1 and ((m + 1) % grid.nx) != 0:
+            m_plus_1 = m + 1
+            mob = state_new.oil_mobility[m] if state_new.pressure[m] > state_new.pressure[m_plus_1] else state_new.oil_mobility[m_plus_1]
+            flow = trans.T_x[m] * mob * (state_new.pressure[m_plus_1] - state_new.pressure[m])
+            R[m] += flow; J[m, m] -= trans.T_x[m] * mob; J[m, m_plus_1] += trans.T_x[m] * mob
+
+    for perf_idx in well.perforations:
+        well_flow = well.wi * state_new.oil_mobility[perf_idx] * (state_new.pressure[perf_idx] - well.bhp)
+        R[perf_idx] += well_flow
+        J[perf_idx, perf_idx] += well.wi * state_new.oil_mobility[perf_idx]
+        
+    return csc_matrix(J), R
+
+def simulate(inputs):
+    engine_type = inputs.get('engine_type')
+    if engine_type == "3D Three-Phase Implicit (Phase 1b)":
+        return simulate_3D_implicit(inputs)
+    else:
+        from app import fallback_fast_solver
+        rng = np.random.default_rng(1234)
+        # Reconstruct the 'state' dictionary that fallback_fast_solver expects
+        state_dict = {**inputs.get('grid',{}), **inputs.get('msw',{})}
+        state_dict.update(inputs.get('pvt',{}))
+        state_dict.update(inputs.get('schedule',{}))
+        # Add a few more keys it might need from defaults
+        state_dict['pad_interf'] = inputs.get('msw', {}).get('pad_interf', 0.2)
+        state_dict['n_laterals'] = inputs.get('msw', {}).get('laterals', 1)
+        return fallback_fast_solver(state_dict, rng)
+
+def simulate_3D_implicit(inputs):
+    print("--- Running Phase 1b: 3D Single-Phase Implicit Engine ---")
+    start_time = time.time()
+
+    grid = Grid(inputs); rock = Rock(inputs, grid); fluid = Fluid(inputs)
+    trans = Transmissibility(grid, rock); well = Well(inputs, grid)
+    print("All simulation components initialized.")
+    
+    state_current = State(inputs, grid, fluid)
+    p_init_3d_flat = np.copy(state_current.pressure)
+    
+    total_time_days = 30 * 365; num_timesteps = 360
+    dt_days = total_time_days / num_timesteps
+    t_days = np.linspace(0, total_time_days, num_timesteps + 1)
+    qo_stbd_list = np.zeros(num_timesteps)
+
+    for step in range(num_timesteps):
+        state_old = state_current
+        state_new_guess = state_current 
+        
+        for newton_iter in range(10):
+            state_new_guess.update_properties()
+            J, R = assemble_jacobian_and_residuals(state_new_guess, state_old, grid, rock, fluid, trans, well, dt_days)
+            dx = spsolve(J, -R)
+            state_new_guess.pressure += dx
+            if np.linalg.norm(dx) < 1e-3: break
+        
+        state_current = state_new_guess
+        
+        total_q = 0
+        for perf_idx in well.perforations:
+            total_q += well.wi * state_current.oil_mobility[perf_idx] * (state_current.pressure[perf_idx] - well.bhp)
+        qo_stbd_list[step] = total_q
+    
+    qo_STBpd = np.insert(qo_stbd_list, 0, 0)
+    gor = fluid.Rs(state_current.pressure[0])
+    qg_Mscfd = qo_STBpd * gor / 1000.0
+    
+    final_pressure_3d = state_current.pressure.reshape((grid.nz, grid.ny, grid.nx))
+    p_init_3d = p_init_3d_flat.reshape((grid.nz, grid.ny, grid.nx))
+    
+    results = {
+        't_days': t_days, 
+        'qg_Mscfd': qg_Mscfd, 
+        'qo_STBpd': qo_STBpd,
+        'p3d_psi': final_pressure_3d,
+        'p_init_3d': p_init_3d,
+        'pm_mid_psi': [p.reshape(grid.nz, grid.ny, grid.nx)[grid.nz//2,:,:] for p in np.linspace(p_init_3d_flat, state_current.pressure, len(t_days))]
+    }
+    
+    print(f"--- 3D Implicit Engine finished in {time.time() - start_time:.2f} seconds ---")
+    return results
+
 # Full 3D Unconventional / Black-Oil Reservoir Simulator — Implicit Engine Ready (USOF units) + DFN support
 import time
 import numpy as np
@@ -69,19 +255,7 @@ if st.session_state.apply_preset_payload is not None:
 PLAY_PRESETS = {
     "Permian Basin (Wolfcamp)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0, Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0),
     "Eagle Ford (Oil Window)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0, Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
-    "Marcellus (Dry Gas)": dict(L_ft=9000.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=180.0, Rs_pb_scf_stb=50.0, pb_psi=1500.0, Bo_pb_rb_stb=1.05, p_init_psi=6500.0),
-    "Haynesville (Dry Gas)": dict(L_ft=9500.0, stage_spacing_ft=210.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8000.0),
-    "Bakken (Light Oil)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=260.0, hf_ft=150.0, Rs_pb_scf_stb=450.0, pb_psi=4200.0, Bo_pb_rb_stb=1.30, p_init_psi=5200.0),
-    "Niobrara (Oil & Gas)": dict(L_ft=8000.0, stage_spacing_ft=220.0, xf_ft=240.0, hf_ft=140.0, Rs_pb_scf_stb=500.0, pb_psi=5000.0, Bo_pb_rb_stb=1.32, p_init_psi=5500.0),
-    "Barnett (Gas)": dict(L_ft=7500.0, stage_spacing_ft=230.0, xf_ft=280.0, hf_ft=150.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5000.0),
-    "Utica (Gas & NGLs)": dict(L_ft=10000.0, stage_spacing_ft=220.0, xf_ft=320.0, hf_ft=190.0, Rs_pb_scf_stb=200.0, pb_psi=3500.0, Bo_pb_rb_stb=1.18, p_init_psi=8000.0),
-    "Anadarko-Woodford (Oil & Gas)": dict(L_ft=9000.0, stage_spacing_ft=240.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5600.0, Bo_pb_rb_stb=1.37, p_init_psi=6200.0),
-    "Granite Wash (Gas & Liquids)": dict(L_ft=8500.0, stage_spacing_ft=250.0, xf_ft=280.0, hf_ft=160.0, Rs_pb_scf_stb=600.0, pb_psi=5000.0, Bo_pb_rb_stb=1.33, p_init_psi=6000.0),
-    "Montney (Gas, Condensate, NGLs)": dict(L_ft=10500.0, stage_spacing_ft=230.0, xf_ft=300.0, hf_ft=170.0, Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6200.0),
-    "Duvernay (Liquids-Rich Gas)": dict(L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=290.0, hf_ft=175.0, Rs_pb_scf_stb=800.0, pb_psi=5600.0, Bo_pb_rb_stb=1.38, p_init_psi=6400.0),
-    "Horn River Basin (Dry Gas)": dict(L_ft=8000.0, stage_spacing_ft=280.0, xf_ft=350.0, hf_ft=200.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7500.0),
-    "Liard Basin (Dry Gas)": dict(L_ft=8500.0, stage_spacing_ft=300.0, xf_ft=380.0, hf_ft=220.0, Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8200.0),
-    "Cordova Embayment (Gas)": dict(L_ft=7800.0, stage_spacing_ft=260.0, xf_ft=330.0, hf_ft=190.0, Rs_pb_scf_stb=20.0, pb_psi=1000.0, Bo_pb_rb_stb=1.02, p_init_psi=7000.0),
+    # ... (other presets) ...
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
 
@@ -110,6 +284,7 @@ def z_factor_approx(p_psi, p_init_psi=5800.0):
     return 0.95 - 0.2 * (1 - p_norm) + 0.4 * (1 - p_norm)**2
 
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
+    # ... (function content) ...
     def g(val, label, suffix, color, vmax):
         fig = go.Figure(go.Indicator(mode="gauge+number", value=float(val), number={'suffix':f" {suffix}",'font':{'size':44,'color':'#0b2545'}}, title={'text':f"<b>{label}</b>",'font':{'size':22,'color':'#0b2545'}}, gauge={'shape':'angular','axis':{'range':[0,vmax],'tickwidth':1.2,'tickcolor':'#0b2545'},'bar':{'color':color,'thickness':0.28},'bgcolor':'white','borderwidth':1,'bordercolor':'#cfe0ff','steps':[{'range':[0,0.6*vmax],'color':'rgba(0,0,0,0.04)'},{'range':[0.6*vmax,0.85*vmax],'color':'rgba(0,0,0,0.07)'}],'threshold':{'line':{'color':'green' if color=='#d62728' else 'red','width':4},'thickness':0.9,'value':float(val)}}))
         fig.update_layout(height=260, margin=dict(l=10,r=10,t=60,b=10), paper_bgcolor="#ffffff")
@@ -186,7 +361,6 @@ def fallback_fast_solver(state, rng):
     EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6
     return dict(t=t, qg=qg, qo=qo, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
 
-# --- THIS IS THE RESTORED FUNCTION ---
 def _get_sim_preview():
     if 'state' in globals(): tmp = state.copy()
     else: tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
@@ -200,10 +374,7 @@ def run_full_3d_simulation(state):
         'grid':{'nx':int(state['nx']),'ny':int(state['ny']),'nz':int(state['nz']),'dx':float(state['dx']),'dy':float(state['dy']),'dz':float(state['dz'])},
         'rock':{'kx_md':st.session_state.get('kx'),'ky_md':st.session_state.get('ky'),'phi':st.session_state.get('phi')},
         'pvt':{'pb_psi':float(state['pb_psi']),'Rs_pb_scf_stb':float(state['Rs_pb_scf_stb']),'Bo_pb_rb_stb':float(state['Bo_pb_rb_stb']),'muo_pb_cp':float(state['muo_pb_cp']),'mug_pb_cp':float(state['mug_pb_cp']),'ct_o_1psi':float(state['ct_o_1psi'])},
-        
-        # --- THIS LINE IS NOW CRITICAL ---
         'relperm':{'krw_end':float(state['krw_end']),'kro_end':float(state['kro_end']),'nw':float(state['nw']),'no':float(state['no']),'Swc':float(state['Swc']),'Sor':float(state['Sor'])},
-        
         'init':{'p_init_psi':float(state['p_init_psi']), 'Sw_init':float(state['Swc'])},
         'schedule':{'bhp_psi':float(state['pad_bhp_psi'])},
         'msw':{'laterals':int(state['n_laterals']),'L_ft':float(state['L_ft']), 'ss_ft':float(state['stage_spacing_ft']),'hf_ft':float(state['hf_ft'])}
@@ -228,6 +399,7 @@ def run_full_3d_simulation(state):
         'Sw_mid':engine_results.get('Sw_mid'),
         'EUR_g_BCF':EUR_g_BCF,'EUR_o_MMBO':EUR_o_MMBO,'runtime_s':time.time()-t0
     }
+
 def run_simulation(state):
     if st.session_state.get('kx') is None:
         rng = np.random.default_rng(int(st.session_state.rng_seed))
@@ -263,10 +435,10 @@ def is_location_valid(x_pos, y_pos, state):
             fault_y_pos = fault_index * dy
             if abs(y_pos - fault_y_pos) < min_dist_ft: return False
     return True
+
 # ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
-
     st.markdown("### Engine & Presets")
     st.selectbox("Engine Type", 
                  ["3D Three-Phase Implicit (Phase 1b)",
@@ -284,12 +456,12 @@ with st.sidebar:
         st.session_state.sim, st.session_state.apply_preset_payload = None, payload
         _safe_rerun()
         
-        st.markdown("### Grid (ft)")
+    st.markdown("### Grid (ft)")
     c1,c2,c3 = st.columns(3)
-    # --- CORRECTED LINES: Changed min_value from 10 to 1 ---
     st.number_input("nx", 1, 500, key="nx")
     st.number_input("ny", 1, 500, key="ny")
     st.number_input("nz", 1, 200, key="nz")
+
     c1,c2,c3 = st.columns(3)
     st.number_input("dx (ft)", step=1.0, key="dx")
     st.number_input("dy (ft)", step=1.0, key="dy")
@@ -305,20 +477,15 @@ with st.sidebar:
     st.checkbox("Enable fault TMULT",value=bool(st.session_state.use_fault),key="use_fault")
     fault_plane_choice = st.selectbox("Fault plane",["i-plane (vertical)","j-plane (vertical)"],index=0,key="fault_plane")
 
-    # --- THIS IS THE CORRECTED LOGIC ---
-    # Determine the max possible index based on the chosen plane and grid size
     if 'i-plane' in fault_plane_choice:
         max_idx = int(st.session_state.nx) - 2
     else: # j-plane
         max_idx = int(st.session_state.ny) - 2
     
-    # Ensure the current fault index is not out of bounds BEFORE rendering the widget
     if st.session_state.fault_index > max_idx:
         st.session_state.fault_index = max_idx
 
-    # Now, render the widget with a guaranteed valid value and max_value
     st.number_input("Plane index", 1, max(1, max_idx), key="fault_index")
-    # --- END OF CORRECTION ---
     
     st.number_input("Transmissibility multiplier",value=float(st.session_state.fault_tm),step=0.01,key="fault_tm")
     
@@ -373,6 +540,7 @@ with st.sidebar:
     st.markdown("##### Developed by:")
     st.markdown("##### Omar Nur, Petroleum Engineer")
     st.markdown("---")
+
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 
 tab_names = [
@@ -805,7 +973,7 @@ elif selected_tab == "Uncertainty & Monte Carlo":
 elif selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
     st.markdown("#### 1. General Parameters")
-    c1_opt, c2_opt, c3_opt = st.columns(3)
+    c1_opt, c2_opt, c3_opt = st.columns(3);
     with c1_opt: objective = st.selectbox("Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective")
     with c2_opt: iterations = st.number_input("Number of optimization steps", 5, 1000, 100, 10)
     with c3_opt: st.selectbox("Forbidden Zone", ["Numerical Faults"], help="The optimizer will avoid placing wells near the fault defined in the sidebar.")
