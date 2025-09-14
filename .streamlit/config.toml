@@ -1,0 +1,6 @@
+mkdir .streamlit
+mv config.toml .streamlit/config.toml
+git add .streamlit/config.toml
+git rm config.toml
+git commit -m "Move config.toml into .streamlit folder"
+git push
