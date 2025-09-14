@@ -108,30 +108,86 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 def run_simulation_engine(state):
-    t0 = time.time(); inputs = {k: state.get(k) for k in defaults.keys()}; inputs['engine_type'] = state.get('engine_type')
-    inputs.update({ 'grid': {k: state.get(k) for k in ['nx', 'ny', 'nz', 'dx', 'dy', 'dz']}, 'rock': {'kx_md': st.session_state.get('kx'), 'ky_md': st.session_state.get('ky'), 'phi': st.session_state.get('phi')}, 'pvt': {k: state.get(k) for k in ['pb_psi', 'Rs_pb_scf_stb', 'Bo_pb_rb_stb', 'muo_pb_cp', 'mug_pb_cp', 'ct_o_1psi']}, 'relperm': {k: state.get(k) for k in ['krw_end', 'kro_end', 'nw', 'no', 'Swc', 'Sor']}, 'init': {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')}, 'schedule': {'bhp_psi': state.get('pad_bhp_psi')}, 'msw': {k: state.get(k) for k in ['laterals', 'L_ft', 'stage_spacing_ft', 'hf_ft']}})
-    try: engine_results = simulate(inputs)
-    except Exception as e: st.error(f"Error in full3d.py engine: {e}"); return None
-    t, qg, qo = engine_results.get('t_days'), engine_results.get('qg_Mscfd'), engine_results.get('qo_STBpd')
-    if t is None or qg is None or qo is None: st.error("Engine missing required data (t_days, qg_Mscfd, qo_STBpd)."); return None
-    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t)/1e6, np.trapezoid(qo, t)/1e6
-    engine_results['runtime_s'] = time.time() - t0; engine_results['EUR_g_BCF'] = EUR_g_BCF; engine_results['EUR_o_MMBO'] = EUR_o_MMBO
+    from core.blackoil_pvt1 import BlackOilPVT  # local import to avoid cycles
+
+    t0 = time.time()
+
+    # Build the inputs payload
+    inputs = {k: state.get(k) for k in defaults.keys()}
+    inputs['engine_type'] = state.get('engine_type')
+    inputs.update({
+        'grid': {
+            k: state.get(k) for k in ['nx', 'ny', 'nz', 'dx', 'dy', 'dz']
+        },
+        'rock': {
+            'kx_md': st.session_state.get('kx'),
+            'ky_md': st.session_state.get('ky'),
+            'phi':   st.session_state.get('phi'),
+        },
+        'pvt': {
+            k: state.get(k) for k in [
+                'pb_psi', 'Rs_pb_scf_stb', 'Bo_pb_rb_stb',
+                'muo_pb_cp', 'mug_pb_cp', 'ct_o_1psi', 'ct_g_1psi', 'ct_w_1psi'
+            ] if k in state
+        },
+        'relperm': {k: state.get(k) for k in ['krw_end', 'kro_end', 'nw', 'no', 'Swc', 'Sor']},
+        'init':    {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')},
+        'schedule': {'bhp_psi': state.get('pad_bhp_psi'), 'rate_mscfd': state.get('pad_rate_mscfd'),
+                     'control': state.get('pad_ctrl', 'BHP')},
+        'msw':     {k: state.get(k) for k in ['laterals', 'L_ft', 'stage_spacing_ft', 'hf_ft'] if k in state}
+    })
+
+    # --- HARD GUARD: coerce PVT on the APP side too (in addition to core/full3d)
+    pvt_in = inputs.get('pvt', {})
+    if not isinstance(pvt_in, BlackOilPVT):
+        try:
+            inputs['pvt'] = BlackOilPVT.from_inputs(pvt_in)
+        except Exception:
+            inputs['pvt'] = BlackOilPVT.from_inputs({})
+
+    # Tiny debug breadcrumbs (visible in Streamlit Cloud logs)
+    try:
+        import inspect
+        print("app.py simulate module:", getattr(simulate, "__module__", None))
+        print("app.py PVT type before simulate:", type(inputs['pvt']))
+        print("app.py calling engine_type:", inputs.get('engine_type'))
+    except Exception:
+        pass
+
+    # Call the engine
+    try:
+        engine_results = simulate(inputs)
+    except Exception as e:
+        st.error(f"Error in full3d.py engine: {e}")
+        return None
+
+    # Accept BOTH new and legacy result keys
+    def _pick(d, *keys):
+        for k in keys:
+            v = d.get(k)
+            if v is not None:
+                return v
+        return None
+
+    t  = _pick(engine_results, 't',  't_days', 'time_days')
+    qg = _pick(engine_results, 'qg', 'qg_Mscfd', 'qg_mscfd')
+    qo = _pick(engine_results, 'qo', 'qo_STBpd', 'qo_stbpd')
+
+    if t is None or qg is None or qo is None:
+        st.error("Engine missing required arrays (t/qg/qo).")
+        return None
+
+    # Use np.trapz (works on NumPy 1.x and 2.x)
+    EUR_g_BCF  = np.trapz(qg, t) / 1e6
+    EUR_o_MMBO = np.trapz(qo, t) / 1e6
+
+    engine_results['t'] = t
+    engine_results['qg'] = qg
+    engine_results['qo'] = qo
+    engine_results['runtime_s'] = time.time() - t0
+    engine_results['EUR_g_BCF'] = EUR_g_BCF
+    engine_results['EUR_o_MMBO'] = EUR_o_MMBO
     return engine_results
-def run_simulation(state):
-    if st.session_state.get('kx') is None:
-        rng = np.random.default_rng(int(st.session_state.rng_seed)); nz,ny,nx = int(state["nz"]),int(state["ny"]),int(state["nx"])
-        kx_mid, ky_mid, phi_mid = 0.05+state["k_stdev"]*rng.standard_normal((ny,nx)), (0.05/state["anis_kxky"])+state["k_stdev"]*rng.standard_normal((ny,nx)), 0.10+state["phi_stdev"]*rng.standard_normal((ny,nx))
-        kz_scale = np.linspace(0.95,1.05,nz)[:,None,None]; st.session_state.kx, st.session_state.ky, st.session_state.phi = np.clip(kx_mid[None,...]*kz_scale,1e-4,None), np.clip(ky_mid[None,...]*kz_scale,1e-4,None), np.clip(phi_mid[None,...]*kz_scale,0.01,0.35)
-        st.info("Generated 3D rock properties for the simulation.")
-    result = run_simulation_engine(state)
-    if result is None:
-        st.warning("Simulation failed. Showing results from fast preview solver."); result = fallback_fast_solver(state, np.random.default_rng(int(st.session_state.rng_seed))); return result
-    final_sim_data = result.copy()
-    for key in ["press_matrix", "press_frac", "So", "Sw", "p_init_3d", "ooip_3d"]:
-        if key in result and result.get(key) is not None:
-            final_sim_data[key] = ensure_3d(result[key])
-            if f"{key}_mid" not in final_sim_data: final_sim_data[f"{key}_mid"] = get_k_slice(final_sim_data[key], final_sim_data[key].shape[0]//2)
-    return final_sim_data
 def is_location_valid(x_pos, y_pos, state):
     if state.get('use_fault', False):
         fault_plane = state.get('fault_plane', 'i-plane (vertical)'); fault_index = int(state.get('fault_index', 0)); dx = float(state.get('dx', 40.0)); dy = float(state.get('dy', 40.0)); min_dist_ft = 150.0
