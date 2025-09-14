@@ -87,26 +87,13 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
         for xcell in xs:
             x_ft = xcell; z0, z1 = max(0.0, (nz*dz)/2.0 - half_h), min(nz*dz, (nz*dz)/2.0 + half_h); segs.append([x_ft, y_ft, z0, x_ft, y_ft, z1])
     return np.array(segs, float) if segs else None
-def fallback_fast_solver(state, rng):
-    t = np.linspace(1, 30 * 365, 360)
-    L, xf, hf, pad_interf, nlats = float(state["L_ft"]), float(state["xf_ft"]), float(state["hf_ft"]), float(state.get("pad_interf", 0.2)), int(state["n_laterals"])
-    richness = float(state.get("Rs_pb_scf_stb", 650.0)) / max(1.0, float(state.get("pb_psi", 5200.0)))
-    geo_g = (L / 10000.0)**0.85 * (xf / 300.0)**0.55 * (hf / 180.0)**0.20; geo_o = (L / 10000.0)**0.85 * (xf / 300.0)**0.40 * (hf / 180.0)**0.30
-    interf_mul = 1.0 / (1.00 + 1.25*pad_interf + 0.35*max(0, nlats - 1))
-    if st.session_state.get("fluid_model", "unconventional") == "unconventional":
-        qi_g_base, qi_o_base = 12000.0, 1000.0; rich_g, rich_o = 1.0 + 0.30 * np.clip(richness, 0.0, 1.4), 1.0 + 0.12 * np.clip(richness, 0.0, 1.4)
-        qi_g, qi_o = np.clip(qi_g_base * geo_g * interf_mul * rich_g, 3000.0, 28000.0), np.clip(qi_o_base * geo_o * interf_mul * rich_o, 400.0, 2500.0); Di_g_yr, b_g, Di_o_yr, b_o = 0.60, 0.85, 0.50, 1.00
-    else:
-        qi_g_base, qi_o_base = 8000.0, 1600.0; rich_g, rich_o = 1.0 + 0.05 * np.clip(richness, 0.0, 1.4), 1.0 + 0.08 * np.clip(richness, 0.0, 1.4)
-        qi_g, qi_o = np.clip(qi_g_base * geo_g * interf_mul * rich_g, 2000.0, 18000.0), np.clip(qi_o_base * geo_o * interf_mul * rich_o, 700.0, 3500.0); Di_g_yr, b_g, Di_o_yr, b_o = 0.45, 0.80, 0.42, 0.95
-    Di_g, Di_o = Di_g_yr / 365.0, Di_o_yr / 365.0; qg, qo = qi_g / (1.0 + b_g * Di_g * t)**(1.0/b_g), qi_o / (1.0 + b_o * Di_o * t)**(1.0/b_o)
-    EUR_g_BCF, EUR_o_MMBO = np.trapezoid(qg, t) / 1e6, np.trapezoid(qo, t) / 1e6
-    return dict(t=t, qg=qg, qo=qo, EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO)
+
 def _get_sim_preview():
     if 'state' in globals(): tmp = state.copy()
     else: tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
+
 def run_simulation_engine(state):
     from core.blackoil_pvt1 import BlackOilPVT  # local import to avoid cycles
 
@@ -132,12 +119,21 @@ def run_simulation_engine(state):
         },
         'relperm': {k: state.get(k) for k in ['krw_end', 'kro_end', 'nw', 'no', 'Swc', 'Sor']},
         'init':    {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')},
-        'schedule': {'bhp_psi': state.get('pad_bhp_psi'), 'rate_mscfd': state.get('pad_rate_mscfd'),
-                     'control': state.get('pad_ctrl', 'BHP')},
-        'msw':     {k: state.get(k) for k in ['laterals', 'L_ft', 'stage_spacing_ft', 'hf_ft'] if k in state}
+        'schedule': {
+            'bhp_psi': state.get('pad_bhp_psi'),
+            'rate_mscfd': state.get('pad_rate_mscfd'),
+            'control': state.get('pad_ctrl', 'BHP'),
+        },
+        # FIXED: map n_laterals -> 'laterals' and pass expected fields explicitly
+        'msw': {
+            'laterals': state.get('n_laterals'),
+            'L_ft': state.get('L_ft'),
+            'stage_spacing_ft': state.get('stage_spacing_ft'),
+            'hf_ft': state.get('hf_ft'),
+        },
     })
 
-    # --- HARD GUARD: coerce PVT on the APP side too (in addition to core/full3d)
+    # Coerce PVT to the engine class (guard)
     pvt_in = inputs.get('pvt', {})
     if not isinstance(pvt_in, BlackOilPVT):
         try:
@@ -145,7 +141,7 @@ def run_simulation_engine(state):
         except Exception:
             inputs['pvt'] = BlackOilPVT.from_inputs({})
 
-    # Tiny debug breadcrumbs (visible in Streamlit Cloud logs)
+    # Tiny debug breadcrumbs (visible in Streamlit logs)
     try:
         import inspect
         print("app.py simulate module:", getattr(simulate, "__module__", None))
@@ -177,7 +173,7 @@ def run_simulation_engine(state):
         st.error("Engine missing required arrays (t/qg/qo).")
         return None
 
-    # Use np.trapz (works on NumPy 1.x and 2.x)
+    # Stable across NumPy versions
     EUR_g_BCF  = np.trapz(qg, t) / 1e6
     EUR_o_MMBO = np.trapz(qo, t) / 1e6
 
@@ -188,6 +184,7 @@ def run_simulation_engine(state):
     engine_results['EUR_g_BCF'] = EUR_g_BCF
     engine_results['EUR_o_MMBO'] = EUR_o_MMBO
     return engine_results
+
 def is_location_valid(x_pos, y_pos, state):
     if state.get('use_fault', False):
         fault_plane = state.get('fault_plane', 'i-plane (vertical)'); fault_index = int(state.get('fault_index', 0)); dx = float(state.get('dx', 40.0)); dy = float(state.get('dy', 40.0)); min_dist_ft = 150.0
