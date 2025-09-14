@@ -1,9 +1,6 @@
-# Streamlit app core
-streamlit>=1.32,<2
-# Plotting
-plotly>=5.21,<6
-# Data & math
-pandas>=2.1,<3
-numpy>=1.26,<3
-scipy>=1.11,<2
+streamlit
+numpy
+pandas
+plotly
+scipy
 numpy-financial
