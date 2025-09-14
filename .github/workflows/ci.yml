@@ -8,6 +8,9 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,16 +18,27 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-            python-version: '3.11'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Base deps for the app
           pip install -r requirements.txt
-          # Dev/test deps (pytest, etc.)
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
-      - name: Run tests
+      - name: Debug import paths
         run: |
-          python -m pytest -q
+          python - <<'PY'
+          import os, sys, importlib
+          print("PYTHONPATH =", os.environ.get("PYTHONPATH"))
+          print("sys.path[0] =", sys.path[0])
+          for name in ("core", "engines", "core.full3d", "engines.fast"):
+              try:
+                  m = importlib.import_module(name)
+                  print("OK ", name, "->", getattr(m, "__file__", m))
+              except Exception as e:
+                  print("FAIL", name, ":", e)
+          PY
+
+      - name: Run tests
+        run: python -m pytest -q
