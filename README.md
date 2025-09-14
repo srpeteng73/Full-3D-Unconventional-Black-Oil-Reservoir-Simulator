@@ -34,6 +34,7 @@ This repository contains an interactive web application for performing 3D reserv
     ```bash
     streamlit run app.py
     ```
+![CI](https://github.com/srpeteng73/Full-3D-Unconventional-Black-Oil-Reservoir-Simulator/actions/workflows/ci.yml/badge.svg)
 
 ## Disclaimer
 
