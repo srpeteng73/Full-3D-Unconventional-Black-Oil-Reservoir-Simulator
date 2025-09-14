@@ -4,10 +4,14 @@ import numpy as np
 from scipy.sparse import lil_matrix
 from dataclasses import dataclass
 
-from core.grid import Grid
-from core.blackoil_pvt import BlackOilPVT
-from core.relperm import CoreyRelPerm
-from core.wells import WellSet
+# NEW (Option B)
+from core.blackoil_pvt1 import OilPVT, GasPVT, WaterPVT
+from core.relperm1 import RelPerm
+from core.grid1 import Grid
+from core.linear1 import LinearSolver
+from core.timestepping1 import TimeStepping
+from core.wells1 import Well
+
 
 @dataclass
 class Assembler:
