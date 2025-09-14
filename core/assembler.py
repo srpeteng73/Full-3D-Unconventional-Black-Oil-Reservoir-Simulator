@@ -3,23 +3,19 @@ from __future__ import annotations
 import numpy as np
 from scipy.sparse import lil_matrix
 from dataclasses import dataclass
-
 # use the *1 modules everywhere
 from core.blackoil_pvt1 import BlackOilPVT
 from core.relperm1 import CoreyRelPerm
 from core.grid1 import Grid
 from core.wells1 import WellSet
-
-
 _EPS = 1e-12
-
 @dataclass
 class Assembler:
     grid: Grid
     pvt: BlackOilPVT
     kr: CoreyRelPerm
     wells: WellSet
-    opts: dict | None = None
+    opts: any
 
     # neighbor list of (c, n, T_o, T_w, T_g) with directional harmonic averages
     neighbors: list[tuple[int, int, float, float, float]] = field(default_factory=list)
