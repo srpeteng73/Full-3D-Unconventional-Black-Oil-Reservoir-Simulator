@@ -1,0 +1,19 @@
+# tests/test_smoke.py
+
+def test_simulate_fast_proxy_runs():
+    # Use the router but avoid "Implicit" so the test stays fast & dependency-light
+    from core.full3d import simulate
+
+    inputs = {
+        "engine_type": "Proxy",  # any string that does NOT contain "Implicit"
+        "grid": {"nx": 2, "ny": 2, "nz": 1},
+        "init": {"p_init_psi": 3000.0},
+        # minimal fields the fast proxy reads
+        "L_ft": 10000.0,
+        "xf_ft": 300.0,
+        "hf_ft": 180.0,
+    }
+
+    out = simulate(inputs)
+    for k in ("t", "qg", "qo", "EUR_g_BCF", "EUR_o_MMBO"):
+        assert k in out
