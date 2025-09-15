@@ -61,6 +61,37 @@ def Bo_of_p(p, pb, Bo_pb): p = np.asarray(p, float); slope = -1.0e-5; return np.
 def Bg_of_p(p): p = np.asarray(p, float); return 1.2e-5 + (7.0e-6 - 1.2e-5) * (p - p.min())/(p.max() - p.min() + 1e-12)
 def mu_g_of_p(p, pb, mug_pb): p = np.asarray(p, float); peak = mug_pb*1.03; left = mug_pb - 0.0006; right = mug_pb - 0.0008; mu = np.where(p < pb, left + (peak-left)*(p-p.min())/(pb-p.min()+1e-9), peak + (right-peak)*(p-pb)/(p.max()-pb+1e-9)); return np.clip(mu, 0.001, None)
 def z_factor_approx(p_psi, p_init_psi=5800.0): p_norm = p_psi / p_init_psi; return 0.95 - 0.2 * (1 - p_norm) + 0.4 * (1 - p_norm)**2
+
+# --- (1) Engine PVT adapter: provide callables named exactly as full3d expects ---
+#     Supports BOTH attribute and mapping access (pvt.Rs and pvt['Rs'])
+class _PVTAdapter(dict):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.__dict__.update(kwargs)
+
+def _build_pvt_payload_from_state(state):
+    pb     = float(state.get('pb_psi', 1.0))
+    Rs_pb  = float(state.get('Rs_pb_scf_stb', 0.0))
+    Bo_pb  = float(state.get('Bo_pb_rb_stb', 1.0))
+    mug_pb = float(state.get('mug_pb_cp', 0.020))
+    muo_pb = float(state.get('muo_pb_cp', 1.20))
+
+    def Rs(p):   return Rs_of_p(p, pb, Rs_pb)                      # callable: Rs(p)
+    def Bo(p):   return Bo_of_p(p, pb, Bo_pb)                      # callable: Bo(p)
+    def Bg(p):   return Bg_of_p(p)                                 # callable: Bg(p)
+    def mu_g(p): return mu_g_of_p(p, pb, mug_pb)                   # callable: mu_g(p)
+    def mu_o(p): return np.full_like(np.asarray(p, float), muo_pb) # simple constant μo(p)
+
+    # Return BOTH legacy keys and compressibilities in case engine uses them
+    return _PVTAdapter(
+        Rs=Rs, Bo=Bo, Bg=Bg, mu_g=mu_g, mu_o=mu_o,
+        ct_o_1psi=state.get('ct_o_1psi', 8e-6),
+        ct_g_1psi=state.get('ct_g_1psi', 3e-6),
+        ct_w_1psi=state.get('ct_w_1psi', 3e-6),
+        include_RsP=bool(state.get('include_RsP', True)),
+        pb_psi=pb
+    )
+
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     def g(val, label, suffix, color, vmax):
         fig = go.Figure(go.Indicator(mode="gauge+number", value=float(val), number={'suffix':f" {suffix}",'font':{'size':44,'color':'#0b2545'}}, title={'text':f"<b>{label}</b>",'font':{'size':22,'color':'#0b2545'}}, gauge={'shape':'angular','axis':{'range':[0,vmax],'tickwidth':1.2,'tickcolor':'#0b2545'},'bar':{'color':color,'thickness':0.28},'bgcolor':'white','borderwidth':1,'bordercolor':'#cfe0ff'},steps=[{'range':[0,0.6*vmax],'color':'rgba(0,0,0,0.04)'},{'range':[0.6*vmax,0.85*vmax],'color':'rgba(0,0,0,0.07)'}],threshold={'line':{'color':'green' if color=='#d62728' else 'red','width':4},'thickness':0.9,'value':float(val)}}))
@@ -94,9 +125,8 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 
+# --- (2) UPDATED: use PVT adapter; no BlackOilPVT/Fluid import ---
 def run_simulation_engine(state):
-    from core.blackoil_pvt1 import BlackOilPVT  # local import to avoid cycles
-
     t0 = time.time()
 
     # Build the inputs payload
@@ -111,12 +141,8 @@ def run_simulation_engine(state):
             'ky_md': st.session_state.get('ky'),
             'phi':   st.session_state.get('phi'),
         },
-        'pvt': {
-            k: state.get(k) for k in [
-                'pb_psi', 'Rs_pb_scf_stb', 'Bo_pb_rb_stb',
-                'muo_pb_cp', 'mug_pb_cp', 'ct_o_1psi', 'ct_g_1psi', 'ct_w_1psi'
-            ] if k in state
-        },
+        # ✅ PVT adapter that exposes Rs/Bo/Bg/mu_g/mu_o as callables
+        'pvt': _build_pvt_payload_from_state(state),
         'relperm': {k: state.get(k) for k in ['krw_end', 'kro_end', 'nw', 'no', 'Swc', 'Sor']},
         'init':    {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')},
         'schedule': {
@@ -132,23 +158,6 @@ def run_simulation_engine(state):
             'hf_ft': state.get('hf_ft'),
         },
     })
-
-    # Coerce PVT to the engine class (guard)
-    pvt_in = inputs.get('pvt', {})
-    if not isinstance(pvt_in, BlackOilPVT):
-        try:
-            inputs['pvt'] = BlackOilPVT.from_inputs(pvt_in)
-        except Exception:
-            inputs['pvt'] = BlackOilPVT.from_inputs({})
-
-    # Tiny debug breadcrumbs (visible in Streamlit logs)
-    try:
-        import inspect
-        print("app.py simulate module:", getattr(simulate, "__module__", None))
-        print("app.py PVT type before simulate:", type(inputs['pvt']))
-        print("app.py calling engine_type:", inputs.get('engine_type'))
-    except Exception:
-        pass
 
     # Call the engine
     try:
@@ -381,7 +390,7 @@ elif selected_tab == "Results":
     st.header("Simulation Results")
     if st.button("Run simulation", type="primary", use_container_width=True):
         with st.spinner("Running full 3D simulation... This may take a few minutes."):
-            st.session_state.sim = run_simulation(state)
+            st.session_state.sim = run_simulation_engine(state)  # --- (3) FIXED: call the correct wrapper
             
     if st.session_state.sim:
         sim_data = st.session_state.sim
@@ -505,7 +514,7 @@ elif selected_tab == "QA / Material Balance":
                 slope, intercept, _, _, _ = stats.linregress(cum_g_mmscf[fit_start_index:], p_over_z[fit_start_index:])
                 giip_bcf = (-intercept / slope) / 1000.0 if slope != 0 else 0
                 sim_eur_g_bcf = sim_data['EUR_g_BCF']
-                c1, c2 = st.columns(2); c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF"); c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=f"{(giip_bcf-sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim")
+                c1, c2 = st.columns(2); c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF"); c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=f"{(giip_bcf-sim_eur_g_bcf)/sim_eur_g_bcf:.1%}")
                 fig_pz_gas = go.Figure(); fig_pz_gas.add_trace(go.Scatter(x=cum_g_mmscf, y=p_over_z, mode='markers', name='P/Z Data Points'))
                 x_fit = np.array([0, giip_bcf * 1000]); y_fit = slope * x_fit + intercept
                 fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode='lines', name='Linear Extrapolation', line=dict(dash='dash')))
@@ -629,9 +638,7 @@ elif selected_tab == "Field Match (CSV)":
         layout_config.update(yaxis=dict(title="Gas Rate (Mscf/d)"), yaxis2=dict(title="Oil Rate (STB/d)", overlaying="y", side="right", showgrid=False)); fig_match.update_layout(layout_config)
         st.plotly_chart(fig_match, use_container_width=True, theme="streamlit")
         with st.expander("Click for details"):
-            st.markdown("""This plot is the core of the history matching workflow.\n- **Solid Lines**: The production forecast from the simulator.\n- **'x' Markers**: The historical production data loaded from the CSV file or the demo data.\n- **Goal**: Adjust the reservoir and completion parameters in the sidebar until the solid lines provide a reasonable match to the historical data points. A good match provides confidence in the model's ability to forecast future production.""")
-    elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
-        st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+            st.markdown("""This plot is the core of the history matching workflow.\n- **Solid Lines**: The production forecast from the simulator.\n- **'x' Markers**: The historical production data loaded from the CSV file or the demo data.\n- **Goal**: Adjust the reservoir and completion parameters in the sidebar until the solid lines provide a reasonable match to the historical data. A good match provides confidence in the model's ability to forecast future production.""")
 
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
@@ -670,161 +677,161 @@ elif selected_tab == "Uncertainty & Monte Carlo":
 
 elif selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
+
     st.markdown("#### 1. General Parameters")
-    c1_opt, c2_opt, c3_opt = st.columns(3);
-    with c1_opt: objective = st.selectbox("Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective")
-    with c2_opt: iterations = st.number_input("Number of optimization steps", 5, 1000, 100, 10)
-    with c3_opt: st.selectbox("Forbidden Zone", ["Numerical Faults"], help="The optimizer will avoid placing wells near the fault defined in the sidebar.")
+    c1_opt, c2_opt, c3_opt = st.columns(3)
+    with c1_opt:
+        objective = st.selectbox(
+            "Objective Property",
+            ["Maximize Oil EUR", "Maximize Gas EUR"],
+            key="opt_objective"
+        )
+    with c2_opt:
+        iterations = st.number_input(
+            "Number of optimization steps", 5, 1000, 100, 10
+        )
+    with c3_opt:
+        st.selectbox(
+            "Forbidden Zone",
+            ["Numerical Faults"],
+            help="The optimizer will avoid placing wells near the fault defined in the sidebar."
+        )
+
     st.markdown("#### 2. Well Parameters")
     c1_well, c2_well = st.columns(2)
-    with c1_well: num_wells = st.number_input("Number of wells to place", 1, 1, 1, disabled=True, help="Currently supports optimizing a single well location.")
-    with c2_well: st.text_input("Well name prefix", "OptiWell", disabled=True)
+    with c1_well:
+        num_wells = st.number_input(
+            "Number of wells to place", 1, 1, 1,
+            disabled=True,
+            help="Currently supports optimizing a single well location."
+        )
+    with c2_well:
+        st.text_input("Well name prefix", "OptiWell", disabled=True)
+
     if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
         opt_results = []
-        base_state = state.copy(); rng_opt = np.random.default_rng(st.session_state.rng_seed)
-        reservoir_x_dim = base_state['nx'] * base_state['dx']; x_max = reservoir_x_dim - base_state['L_ft']
+        base_state = state.copy()
+        rng_opt = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
+
+        reservoir_x_dim = base_state['nx'] * base_state['dx']
+        x_max = reservoir_x_dim - base_state['L_ft']
         if x_max < 0:
-            st.error(f"Optimization Cannot Run: The well is too long for the reservoir.\n\n- Reservoir X-Dimension (nx * dx): **{reservoir_x_dim:.0f} ft**\n- Well Lateral Length (L_ft): **{base_state['L_ft']:.0f} ft**\n\nPlease decrease 'Lateral length (ft)' or increase 'nx'/'dx' in the sidebar.", icon="⚠️"); st.stop()
+            st.error(
+                f"Optimization Cannot Run: The well is too long for the reservoir.\n\n"
+                f"- Reservoir X-Dimension (nx * dx): **{reservoir_x_dim:.0f} ft**\n"
+                f"- Well Lateral Length (L_ft): **{base_state['L_ft']:.0f} ft**\n\n"
+                f"Please decrease 'Lateral length (ft)' or increase 'nx'/'dx' in the sidebar.",
+                icon="⚠️"
+            )
+            st.stop()
+
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
-        for i in range(iterations):
+
+        for i in range(int(iterations)):
+            # --- sample a valid heel location (avoid faults & edges) ---
             is_valid = False
-            while not is_valid:
-                x_heel_ft = rng_opt.uniform(0, x_max); y_heel_ft = rng_opt.uniform(50, y_max - 50)
+            attempts = 0
+            while not is_valid and attempts < 2000:
+                x_heel_ft = rng_opt.uniform(0, x_max)
+                y_heel_ft = rng_opt.uniform(50, y_max - 50)  # 50-ft safety margin
                 is_valid = is_location_valid(x_heel_ft, y_heel_ft, base_state)
-            temp_state = base_state.copy(); x_norm = x_heel_ft / (base_state['nx'] * base_state['dx']); temp_state['pad_interf'] = 0.4 * x_norm
-            result = fallback_fast_solver(temp_state, rng_opt)
-            score = result['EUR_o_MMBO'] if "Oil" in objective else result['EUR_g_BCF']
-            opt_results.append({"Step": i + 1, "x_ft": x_heel_ft, "y_ft": y_heel_ft, "Score": score})
-            progress_bar.progress((i + 1) / iterations, text=f"Step {i+1}/{iterations} | Score: {score:.3f}")
-        st.session_state.opt_results = pd.DataFrame(opt_results); progress_bar.empty()
+                attempts += 1
+
+            if not is_valid:
+                st.warning("Could not find a valid location after many attempts. Skipping this step.")
+                continue
+
+            # --- create a candidate state & run fast proxy ---
+            temp_state = base_state.copy()
+            # simple proxy: tie pad interference to normalized x-position
+            x_norm = x_heel_ft / max(reservoir_x_dim, 1.0)
+            temp_state['pad_interf'] = float(np.clip(0.4 * x_norm, 0.0, 0.8))
+
+            res = fallback_fast_solver(temp_state, rng_opt)
+
+            score = res['EUR_o_MMBO'] if "Oil" in objective else res['EUR_g_BCF']
+            opt_results.append({
+                "Step": i + 1,
+                "x_ft": float(x_heel_ft),
+                "y_ft": float(y_heel_ft),
+                "Score": float(score)
+            })
+
+            progress_bar.progress((i + 1) / int(iterations),
+                                  text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}")
+
+        progress_bar.empty()
+
+        if len(opt_results) == 0:
+            st.error("No optimization samples were evaluated.")
+        else:
+            st.session_state.opt_results = pd.DataFrame(opt_results)
+
+    # ---- results & map ----
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
-        df_results = st.session_state.opt_results; best_run = df_results.loc[df_results['Score'].idxmax()]
-        st.markdown("---"); st.markdown("### Optimization Results")
+        df_results = st.session_state.opt_results.copy()
+        best_run = df_results.loc[df_results['Score'].idxmax()]
+
+        st.markdown("---")
+        st.markdown("### Optimization Results")
         c1_res, c2_res = st.columns(2)
         with c1_res:
-            st.markdown("##### Best Placement Found"); score_unit = "MMBO" if "Oil" in objective else "BCF"
+            score_unit = "MMBO" if "Oil" in st.session_state.get("opt_objective", "Maximize Oil EUR") else "BCF"
             st.metric(label=f"Best Score ({score_unit})", value=f"{best_run['Score']:.3f}")
-            st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})"); st.write(f"Found at Step: {best_run['Step']}")
+            st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})")
+            st.write(f"Found at Step: {int(best_run['Step'])}")
         with c2_res:
-            st.markdown("##### Optimization Steps Log"); st.dataframe(df_results.sort_values("Score", ascending=False).head(10), height=210)
+            st.markdown("##### Optimization Steps Log")
+            st.dataframe(df_results.sort_values("Score", ascending=False).head(10), height=210)
+
+        # Background map (porosity mid-layer if available)
         fig_opt = go.Figure()
-        phi_map = get_k_slice(st.session_state.get('phi', np.zeros((state['nz'], state['ny'], state['nx']))), state['nz'] // 2)
-        fig_opt.add_trace(go.Heatmap(z=phi_map, dx=state['dx'], dy=state['dy'], colorscale='viridis', colorbar=dict(title='Porosity')))
-        fig_opt.add_trace(go.Scatter(x=df_results['x_ft'], y=df_results['y_ft'], mode='markers', marker=dict(color=df_results['Score'], colorscale='Reds', showscale=True, colorbar=dict(title='Score'), size=8, opacity=0.7), name='Tested Locations'))
-        fig_opt.add_trace(go.Scatter(x=[best_run['x_ft']], y=[best_run['y_ft']], mode='markers', marker=dict(color='cyan', size=16, symbol='star', line=dict(width=2, color='black')), name='Best Location'))
+        phi_vol = st.session_state.get('phi')
+        if phi_vol is not None:
+            phi_map = get_k_slice(phi_vol, state['nz'] // 2)
+        else:
+            phi_map = np.zeros((int(state['ny']), int(state['nx'])))
+        fig_opt.add_trace(go.Heatmap(
+            z=phi_map, dx=state['dx'], dy=state['dy'],
+            colorscale='viridis', colorbar=dict(title='Porosity')
+        ))
+
+        # Candidate points & best location
+        fig_opt.add_trace(go.Scatter(
+            x=df_results['x_ft'], y=df_results['y_ft'], mode='markers',
+            marker=dict(color=df_results['Score'], colorscale='Reds', showscale=True,
+                        colorbar=dict(title='Score'), size=8, opacity=0.7),
+            name='Tested Locations'
+        ))
+        fig_opt.add_trace(go.Scatter(
+            x=[best_run['x_ft']], y=[best_run['y_ft']], mode='markers',
+            marker=dict(color='cyan', size=16, symbol='star', line=dict(width=2, color='black')),
+            name='Best Location'
+        ))
+
+        # Optional: draw fault
         if state.get('use_fault'):
-            fault_x = [state['fault_index'] * state['dx'], state['fault_index'] * state['dx']]; fault_y = [0, state['ny'] * state['dy']]
-            fig_opt.add_trace(go.Scatter(x=fault_x, y=fault_y, mode='lines', line=dict(color='white', width=4, dash='dash'), name='Fault'))
-        fig_opt.update_layout(title="<b>Well Placement Optimization Map</b>", xaxis_title="X position (ft)", yaxis_title="Y position (ft)", template="plotly_white", height=600)
+            fault_x = [state['fault_index'] * state['dx'], state['fault_index'] * state['dx']]
+            fault_y = [0, state['ny'] * state['dy']]
+            fig_opt.add_trace(go.Scatter(
+                x=fault_x, y=fault_y, mode='lines',
+                line=dict(color='white', width=4, dash='dash'),
+                name='Fault'
+            ))
+
+        fig_opt.update_layout(
+            title="<b>Well Placement Optimization Map</b>",
+            xaxis_title="X position (ft)", yaxis_title="Y position (ft)",
+            template="plotly_white", height=600
+        )
         st.plotly_chart(fig_opt, use_container_width=True, theme="streamlit")
-        with st.expander("Click for details"):
-            st.markdown("""This map displays the results of the automated well placement optimization.\n- **Background Heatmap**: Shows a key reservoir property (like porosity) to indicate rock quality.\n- **Red Markers**: Each marker represents one simulation run at a specific location. The color intensity corresponds to the "Score" (the EUR for that run). Brighter red indicates a better result.\n- **Cyan Star**: Marks the single best location found by the optimizer, which yielded the highest EUR.\n- **White Dashed Line**: Represents the location of a fault, which the optimizer was constrained to avoid.""")
 
-elif selected_tab == "User’s Manual":
-    st.header("User’s Manual")
-    st.markdown("---")
-    st.markdown("""
-    ### 1. Introduction
-    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is an interactive tool designed for petroleum engineers, geoscientists, and students to model and forecast hydrocarbon production. It combines a user-friendly interface with powerful backend models to simulate complex reservoir behaviors, from multi-stage fractured horizontal wells in shale plays to conventional black-oil assets.
-    The primary goal of this tool is to allow for rapid scenario analysis, sensitivity studies, and a deeper understanding of the interplay between geology, fluid properties, and completion design.
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 2. Quick Start Guide
-    For those eager to get started immediately, follow these simple steps:
-    1.  **Select a Preset**: On the sidebar, choose a shale play from the **Shale play** dropdown (e.g., "Permian Basin (Wolfcamp)") and click **Apply preset**. This will populate the simulator with realistic parameters.
-    2.  **Generate Geology**: Navigate to the **Generate 3D property volumes...** tab and review the generated permeability and porosity maps.
-    3.  **Run Simulation**: Go to the **Results** tab and click the **Run simulation** button.
-    4.  **Analyze**: View the production profiles, EUR gauges, and explore the other tabs to see the detailed results.
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 3. Core Workflow: How to Create a Forecast (History Matching)
-    One of the most common tasks for a reservoir engineer is to match historical production data and then use the calibrated model to forecast future performance. This simulator is designed to facilitate this workflow.
-    #### Phase 1: Setup and Data Loading
-    1.  **Start with an Analog**: Select the **Preset** from the sidebar that most closely matches your well's geology and fluid type.
-    2.  **Load Historical Data**: Go to the **Field Match (CSV)** tab. You can either upload your own CSV file or click **Load Demo Data** to practice with a synthetic dataset. The data will appear as scatter points on the plots once loaded.
-    #### Phase 2: The History Matching Loop
-    This is an iterative process of adjusting parameters to make the simulated curves match the historical data points.
-    1.  **Run the Initial Simulation**: Go to the **Results** tab and run the simulation with the initial preset parameters.
-    2.  **Compare the Match**: Go back to the **Field Match (CSV)** tab. Observe how well the solid lines (simulation) match the 'x' markers (historical data).
-    3.  **Adjust Key Parameters**: Based on the mismatch, go to the sidebar and adjust the most impactful parameters. Common adjustments include:
-        *   **If the initial rate is too low/high**: Adjust **Frac half-length (xf_ft)** or the initial **Pad BHP (psi)**.
-        *   **If the decline is too steep/shallow**: Adjust **Permeability (k stdev)** or **Pad BHP (psi)**. A lower BHP will create a steeper decline.
-        *   **If the GOR trend is wrong**: Adjust PVT properties like **Bubble Point (pb_psi)**.
-    4.  **Re-run and Repeat**: After each adjustment, click **Run simulation** again and check the match. Repeat this process until you achieve a satisfactory match for both oil and gas rates.
-    #### Phase 3: Forecasting
-    Once you have a satisfactory history match, the model is considered "calibrated." The simulated production profile that extends beyond the historical data is your **forecast**. You can analyze this forecast in the **Results** tab to see the 30-year EUR and expected production decline.
-    #### Phase 4: Sensitivity & Uncertainty
-    A single forecast is never enough. Use your calibrated model as a base case and proceed to:
-    *   **Uncertainty & Monte Carlo Tab**: Define ranges for your key parameters to generate probabilistic forecasts (P10, P50, P90).
-    *   **Sensitivity: EUR vs Lateral Length Tab**: Analyze how changes in future well designs could impact recovery.
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 4. Detailed Tab-by-Tab Guide
-    *   **Setup Preview**: A high-level summary of your inputs and a fast analytical forecast.
-    *   **Generate 3D property volumes...**: This is where the static geological model is created.
-    *   **PVT (Black-Oil)**: Visualizes the fluid behavior (Pressure-Volume-Temperature).
-    *   **MSW Wellbore**: Models the physics inside the wellbore itself, showing how pressure drops from heel to toe.
-    *   **RTA (Rate Transient Analysis)**: A diagnostic tool that plots the log-derivative of rate vs. time to identify flow regimes.
-    *   **Results**: The main control panel. Click **Run simulation** to execute the full 3D engine and see the primary outputs.
-    *   **3D Viewer**: Visualize 3D isosurfaces of properties like **Pressure Change (ΔP)** to see the drained rock volume (SRV).
-    *   **Slice Viewer**: Inspect 2D cross-sections of the 3D volumes for detailed QC.
-    *   **QA / Material Balance**: A critical validation tab. It uses the P/Z and Havlena-Odeh methods to independently calculate the original fluid in place.
-    *   **EUR vs Lateral Length**: A sensitivity analysis tool to quickly study the economic impact of changing well length.
-    *   **Field Match (CSV)**: Upload historical data or load a demo set to perform history matching.
-    *   **Uncertainty & Monte Carlo**: Quantifies risk by running hundreds of fast simulations to provide a probabilistic range of outcomes.
-    *   **Well Placement Optimization**: An automated tool that searches for the optimal drilling location to maximize EUR.
-    *   **Solver & Profiling**: For advanced users, this shows the settings for the numerical solvers and the computational time of the last run.
-    *   **DFN Viewer**: Visualizes Discrete Fracture Networks if a DFN file is loaded.
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 5. About the Models
-    *   **Full 3D Engine (`full3d.py`)**: The primary model is a proxy engine that uses physics-informed analytical equations. It honors the 3D geological properties (like average permeability) and detailed well design to generate a realistic forecast and a 3D pressure plume for visualization.
-    *   **Fast Analytical Solver**: Used for previews, sensitivities, and Monte Carlo runs, this model is based on the Arps decline curve equation, with parameters intelligently estimated from the reservoir and completion inputs to ensure speed.
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 6. Credits and Disclaimer
-    *   **Author**: Omar Nur, Petroleum Engineer
-    *   **Developed By**: Omar Nur
-    
-    This software is a professional, cloud-based tool designed for rapid reservoir analysis, scenario screening, and forecasting. It is optimized for deployment on major platforms including **Google Cloud** and **AWS**.
-    
-    While it is built on fundamental reservoir engineering principles, it should not be used as the sole basis for making financial or operational decisions without validation against commercial-grade simulators and expert review.
-    
-    This software is on a path to commercialization as modules are completed.
-    """)
-
-elif selected_tab == "Solver & Profiling":
-    st.header("Solver & Profiling")
-    st.info("**Interpretation:** This tab provides details about the numerical solver settings and performance. Advanced users can tweak these settings in the sidebar.")
-    st.markdown("### Current Numerical Solver Settings")
-    solver_settings = {"Parameter": ["Newton Tolerance", "Max Newton Iterations", "Threads", "Use OpenMP", "Use MKL", "Use PyAMG", "Use cuSPARSE"], "Value": [f"{state['newton_tol']:.1e}", state['max_newton'], "Auto" if state['threads']==0 else state['threads'], "✅" if state['use_omp'] else "❌", "✅" if state['use_mkl'] else "❌", "✅" if state['use_pyamg'] else "❌", "✅" if state['use_cusparse'] else "❌"]}
-    st.table(pd.DataFrame(solver_settings))
-    st.markdown("### Profiling")
-    if st.session_state.get("sim") and 'runtime_s' in st.session_state.sim:
-        st.metric(label="Last Simulation Runtime", value=f"{st.session_state.sim['runtime_s']:.2f} seconds")
-        st.markdown("*Deeper profiling data (e.g., Jacobian assembly, linear solve time) is not returned by the current engine.*")
-    else: st.info("Run a simulation on the 'Results' tab to see performance profiling.")
-
-elif selected_tab == "DFN Viewer":
-    st.header("DFN Viewer — 3D line segments")
-    segs = st.session_state.dfn_segments
-    if segs is None or len(segs) == 0:
-        st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
-    else:
-        figd = go.Figure()
-        for i, seg in enumerate(segs):
-            figd.add_trace(go.Scatter3d(x=[seg[0], seg[3]], y=[seg[1], seg[4]], z=[seg[2], seg[5]], mode="lines", line=dict(width=4, color="red"), name="DFN" if i == 0 else None, showlegend=(i == 0)))
-        figd.update_layout(template="plotly_white", scene=dict(xaxis_title="x (ft)", yaxis_title="y (ft)", zaxis_title="z (ft)"), height=640, margin=dict(l=0, r=0, t=40, b=0))
-        st.plotly_chart(figd, use_container_width=True, theme="streamlit")
         with st.expander("Click for details"):
             st.markdown("""
-            This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
-            - Each **red line** represents an individual natural fracture defined in the input file.
-            - This view is critical for Quality Control (QC) to ensure that the fractures have been loaded correctly and are in the expected location and orientation within the reservoir model.
+            This map displays the automated well placement trial results.
+            - **Background Heatmap**: Porosity (mid-layer) for rock quality context.
+            - **Red markers**: Sampled locations; color encodes the score (EUR).
+            - **Cyan star**: Best location found.
+            - **White dashed line** (if shown): Numerical fault to avoid.
             """)
