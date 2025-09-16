@@ -269,45 +269,37 @@ def _get_sim_preview():
     return fallback_fast_solver(tmp, rng_preview)
 
 # --- (2) Engine wrapper: use adapter + monkey-patch; NO BlackOilPVT/Fluid conversions here ---
+# === PATCH 3: Engine wrapper using PVT adapter ===
 def run_simulation_engine(state):
     t0 = time.time()
 
-    pvt_adapter = _build_pvt_payload_from_state(state)
-    _monkeypatch_engine_fluid_if_needed(pvt_adapter)  # safety net if engine constructs its own Fluid
-
+    # Build inputs payload
     inputs = {k: state.get(k) for k in defaults.keys()}
     inputs['engine_type'] = state.get('engine_type')
+
     inputs.update({
-        'grid':  {k: state.get(k) for k in ['nx', 'ny', 'nz', 'dx', 'dy', 'dz']},
-        'rock':  {'kx_md': st.session_state.get('kx'),
-                  'ky_md': st.session_state.get('ky'),
-                  'phi':   st.session_state.get('phi')},
-        # Provide both: a callable-capable adapter for direct use, and raw params as backup
-        'pvt':   pvt_adapter,
-        'pvt_params': {
-            'pb_psi': state.get('pb_psi'),
-            'Rs_pb_scf_stb': state.get('Rs_pb_scf_stb'),
-            'Bo_pb_rb_stb': state.get('Bo_pb_rb_stb'),
-            'mug_pb_cp': state.get('mug_pb_cp'),
-            'muo_pb_cp': state.get('muo_pb_cp')
+        'grid': {k: state.get(k) for k in ['nx', 'ny', 'nz', 'dx', 'dy', 'dz']},
+        'rock': {
+            'kx_md': st.session_state.get('kx'),
+            'ky_md': st.session_state.get('ky'),
+            'phi':   st.session_state.get('phi'),
         },
-        'relperm': {k: state.get(k) for k in ['krw_end', 'kro_end', 'nw', 'no', 'Swc', 'Sor']},
+        'relperm': {k: state.get(k) for k in ['krw_end','kro_end','nw','no','Swc','Sor']},
         'init':    {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')},
-        'schedule': {'bhp_psi': state.get('pad_bhp_psi'),
-                     'rate_mscfd': state.get('pad_rate_mscfd'),
-                     'control': state.get('pad_ctrl', 'BHP')},
-        'msw': {'laterals': state.get('n_laterals'),
-                'L_ft': state.get('L_ft'),
-                'stage_spacing_ft': state.get('stage_spacing_ft'),
-                'hf_ft': state.get('hf_ft')},
+        'schedule': {'bhp_psi': state.get('pad_bhp_psi'), 'rate_mscfd': state.get('pad_rate_mscfd'), 'control': state.get('pad_ctrl', 'BHP')},
+        'msw': {'laterals': state.get('n_laterals'), 'L_ft': state.get('L_ft'), 'stage_spacing_ft': state.get('stage_spacing_ft'), 'hf_ft': state.get('hf_ft')},
     })
+
+    # PVT: adapter only — no BlackOilPVT/Fluid here
+    inputs['pvt'] = _pvt_from_state(state)
 
     try:
         engine_results = simulate(inputs)
     except Exception as e:
-        st.error(f"Error in full3d.py engine: {e}")
+        st.error(f"Simulation error: {e}")
         return None
 
+    # Allow multiple key styles from engines
     def _pick(d, *keys):
         for k in keys:
             v = d.get(k)
