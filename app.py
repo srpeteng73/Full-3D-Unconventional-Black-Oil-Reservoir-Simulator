@@ -154,11 +154,6 @@ def _build_pvt_payload_from_state(state):
         pb_psi=pb
     )
 
-
-
-
-
-
 # --- (NEW) Defensive monkey-patch: if engine's Fluid class lacks methods, inject them ---
 def _monkeypatch_engine_fluid_if_needed(adapter):
     """
@@ -1395,20 +1390,36 @@ elif selected_tab == "Solver & Profiling":
 
 elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
-    segs = st.session_state.dfn_segments
-    if segs is None or len(segs) == 0:
+    segs = st.session_state.get("dfn_segments")
+
+    if segs is None or (hasattr(segs, "__len__") and len(segs) == 0):
         st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
     else:
         figd = go.Figure()
         for i, seg in enumerate(segs):
+            # seg expected shape: [x0, y0, z0, x1, y1, z1, (optional k_mult), (optional aperture_ft)]
             figd.add_trace(go.Scatter3d(
-                x=[seg[0], seg[3]], y=[seg[1], seg[4]], z=[seg[2], seg[5]],
-                mode="lines", line=dict(width=4, color="red"),
-                name="DFN" if i == 0 else None, showlegend=(i == 0)
+                x=[seg[0], seg[3]],
+                y=[seg[1], seg[4]],
+                z=[seg[2], seg[5]],
+                mode="lines",
+                line=dict(width=4, color="red"),
+                name="DFN" if i == 0 else None,
+                showlegend=(i == 0),
             ))
-        figd.update_layout(template="plotly_white", scene=dict(xaxis_title="x (ft)", yaxis_title="y (ft)", zaxis_title="z (ft)"),
-                           height=640, margin=dict(l=0, r=0, t=40, b=0))
+
+        figd.update_layout(
+            template="plotly_white",
+            scene=dict(
+                xaxis_title="x (ft)",
+                yaxis_title="y (ft)",
+                zaxis_title="z (ft)",
+            ),
+            height=640,
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
         st.plotly_chart(figd, use_container_width=True, theme="streamlit")
+
         with st.expander("Click for details"):
             st.markdown("""
             This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
