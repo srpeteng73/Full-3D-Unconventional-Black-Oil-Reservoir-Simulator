@@ -715,17 +715,18 @@ elif selected_tab == "Results":
     st.header("Simulation Results")
 
     if st.button("Run simulation", type="primary", use_container_width=True):
-        with st.spinner("Running full 3D simulation..."):
-            sim_out = run_simulation_engine(state)  # (3) FIXED: call the correct wrapper
-        if sim_out is None:
-            st.session_state.sim = None
+        with st.spinner("Running full 3D simulation... This may take a few minutes."):
+            st.session_state.sim = run_simulation_engine(state)  # uses the wrapper with PVT adapter
+        if st.session_state.sim is None:
             st.error("Simulation failed. Showing results from fast preview solver.")
-        else:
-            st.session_state.sim = sim_out
 
-    if st.session_state.sim:
+    if st.session_state.get("sim"):
         sim_data = st.session_state.sim
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
+        # (keep your existing Results tab content here: EUR gauges, rate plots, GOR, cumulative, etc.)
+    else:
+        st.info("Click **Run simulation** to compute and display the full 3D results.")
+
 
         st.markdown("### EUR (30-year forecast)")
         g1, g2 = st.columns(2)
