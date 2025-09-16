@@ -304,13 +304,22 @@ def run_simulation_engine(state):
 with st.sidebar:
     st.markdown("## Simulation Setup")
     st.markdown("### Engine & Presets")
-    st.selectbox(
+
+    # === PATCH 1: Engine Type (unique key) ===
+    engine_type_ui = st.selectbox(
         "Engine Type",
         ["Analytical Model (Fast Proxy)", "3D Three-Phase Implicit (Phase 1b)"],
-        key="engine_type",
-        help="Select the core calculation engine. The implicit model is in development, while the analytical model is a stable, fast approximation."
+        key="engine_type_ui",
+        help="Select the core calculation engine. The implicit model is in development, while the analytical model is a stable, fast approximation.",
     )
-    model_choice = st.selectbox("Model Type", ["Unconventional Reservoir", "Black Oil Reservoir"], key="sim_mode")
+    # Use a single canonical key everywhere else in the app
+    st.session_state["engine_type"] = engine_type_ui
+
+    model_choice = st.selectbox(
+        "Model Type",
+        ["Unconventional Reservoir", "Black Oil Reservoir"],
+        key="sim_mode"
+    )
     st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
 
     play = st.selectbox("Shale Play Preset", PLAY_LIST, index=0, key="play_sel")
@@ -321,10 +330,12 @@ with st.sidebar:
             payload.update(dict(
                 Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, mug_pb_cp=0.020, a_g=0.15,
                 p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),
-                pad_ctrl="BHP", pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0)
+                pad_ctrl="BHP",
+                pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0),
             ))
         st.session_state.sim, st.session_state.apply_preset_payload = None, payload
         _safe_rerun()
+
 
     st.markdown("### Grid (ft)")
     c1, c2, c3 = st.columns(3)
