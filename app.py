@@ -125,6 +125,39 @@ def _build_pvt_payload_from_state(state):
         include_RsP=bool(state.get('include_RsP', True)),
         pb_psi=pb
     )
+# --- (1) Engine PVT adapter: callables named exactly as the engine expects ---
+class _PVTAdapter(dict):
+    """Adapter that holds PVT callables and parameters; supports attribute & dict access."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.__dict__.update(kwargs)  # allows pvt.Rs(...) as well as pvt['Rs'](...)
+
+def _build_pvt_payload_from_state(state):
+    pb     = float(state.get('pb_psi', 1.0))
+    Rs_pb  = float(state.get('Rs_pb_scf_stb', 0.0))
+    Bo_pb  = float(state.get('Bo_pb_rb_stb', 1.0))
+    mug_pb = float(state.get('mug_pb_cp', 0.020))
+    muo_pb = float(state.get('muo_pb_cp', 1.20))
+
+    def Rs(p):   return Rs_of_p(p, pb, Rs_pb)
+    def Bo(p):   return Bo_of_p(p, pb, Bo_pb)
+    def Bg(p):   return Bg_of_p(p)
+    def mu_g(p): return mu_g_of_p(p, pb, mug_pb)
+    def mu_o(p): return np.full_like(np.asarray(p, float), muo_pb, dtype=float)
+
+    return _PVTAdapter(
+        Rs=Rs, Bo=Bo, Bg=Bg, mu_g=mu_g, mu_o=mu_o,
+        ct_o_1psi=state.get('ct_o_1psi', 8e-6),
+        ct_g_1psi=state.get('ct_g_1psi', 3e-6),
+        ct_w_1psi=state.get('ct_w_1psi', 3e-6),
+        include_RsP=bool(state.get('include_RsP', True)),
+        pb_psi=pb
+    )
+
+
+
+
+
 
 # --- (NEW) Defensive monkey-patch: if engine's Fluid class lacks methods, inject them ---
 def _monkeypatch_engine_fluid_if_needed(adapter):
