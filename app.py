@@ -1322,9 +1322,8 @@ elif selected_tab == "Well Placement Optimization":
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
 
-        # Use while-loop to avoid any stray indentation/tab issues around for-loops
-        i = 0
-        while i < int(iterations):
+        # ---- Main loop (FOR) ----
+        for i in range(int(iterations)):
             # Propose a random heel location and check feasibility
             is_valid = False
             guard = 0
@@ -1356,8 +1355,6 @@ elif selected_tab == "Well Placement Optimization":
                 (i + 1) / int(iterations),
                 text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
             )
-
-            i += 1
 
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
