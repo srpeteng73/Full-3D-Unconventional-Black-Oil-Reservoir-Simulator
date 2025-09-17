@@ -1,4 +1,5 @@
 # Full 3D Unconventional / Black-Oil Reservoir Simulator — Implicit Engine Ready (USOF units) + DFN support
+
 import time
 import numpy as np
 import pandas as pd
@@ -11,6 +12,9 @@ import numpy_financial as npf  # Economics Tab
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 
+# --- Streamlit page config early (avoid warnings) ---
+st.set_page_config(page_title="3D Unconventional / Black-Oil Reservoir Simulator", layout="wide")
+
 # ------------------------ Utils ------------------------
 def _setdefault(k, v):
     if k not in st.session_state:
@@ -21,28 +25,6 @@ def _safe_rerun():
         st.rerun()
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
-
-def is_location_valid(x_ft, y_ft, state):
-    # Avoid near-fault zone if enabled
-    if state.get('use_fault'):
-        plane = state.get('fault_plane', 'i-plane (vertical)')
-        if 'i-plane' in plane:
-            fault_x = state['fault_index'] * state['dx']
-            if abs(x_ft - fault_x) < 2 * state['dx']:
-                return False
-        else:
-            fault_y = state['fault_index'] * state['dy']
-            if abs(y_ft - fault_y) < 2 * state['dy']:
-                return False
-    # Keep lateral fully inside the model box
-    if x_ft < 0 or (x_ft + state['L_ft']) > state['nx'] * state['dx']:
-        return False
-    if y_ft < 0 or y_ft > state['ny'] * state['dy']:
-        return False
-    return True
-
-
-st.set_page_config(page_title="3D Unconventional / Black-Oil Reservoir Simulator", layout="wide")
 
 # ------------------------ Defaults ------------------------
 _setdefault("apply_preset_payload", None); _setdefault("sim", None); _setdefault("rng_seed", 1234)
@@ -70,11 +52,12 @@ defaults = dict(
     use_omp=False, use_mkl=False, use_pyamg=False, use_cusparse=False,
     dfn_radius_ft=60.0,
     dfn_strength_psi=500.0,
-    engine_type="Analytical Model (Fast Proxy)"  # Set stable engine as default
+    engine_type="Analytical Model (Fast Proxy)"  # stable engine as default
 )
 for k, v in defaults.items():
     _setdefault(k, v)
 
+# Apply preset payload (if any)
 if st.session_state.apply_preset_payload is not None:
     for k, v in st.session_state.apply_preset_payload.items():
         st.session_state[k] = v
@@ -124,7 +107,7 @@ class _PVTAdapter(dict):
         super().__init__(**kwargs)
         self.__dict__.update(kwargs)  # allows pvt.Rs(...) and pvt['Rs'](...)
 
-def _pvt_from_state(state):
+def _build_pvt_payload_from_state(state):
     """Build a PVT payload the engine can use directly (with callables)."""
     pb     = float(state.get('pb_psi', 1.0))
     Rs_pb  = float(state.get('Rs_pb_scf_stb', 0.0))
@@ -146,7 +129,6 @@ def _pvt_from_state(state):
         include_RsP=bool(state.get('include_RsP', True)),
         pb_psi=pb
     )
-
 
 # --- Defensive monkey-patch: if engine's Fluid class lacks methods, inject thin wrappers ---
 def _monkeypatch_engine_fluid_if_needed(adapter):
@@ -184,6 +166,7 @@ def _pvt_from_state(state):
     _monkeypatch_engine_fluid_if_needed(adapter)
     return adapter
 
+# --- Plot/array helpers ---
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     def g(val, label, suffix, color, vmax):
         fig = go.Figure(go.Indicator(
@@ -254,7 +237,7 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
     return np.array(segs, float) if segs else None
 
 def is_location_valid(x_heel_ft, y_heel_ft, state):
-    """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
+    """Feasibility check for well placement (stay inside model and avoid fault strip)."""
     x_max = state['nx'] * state['dx'] - state['L_ft']
     y_max = state['ny'] * state['dy']
     if not (0 <= x_heel_ft <= x_max and 0 <= y_heel_ft <= y_max):
@@ -277,7 +260,7 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 
-# --- (2) Engine wrapper: use adapter + monkey-patch; NO BlackOilPVT/Fluid conversions here ---
+# --- Engine wrapper: uses adapter + monkey-patch; NO BlackOilPVT/Fluid conversions here ---
 def run_simulation_engine(state):
     t0 = time.time()
 
@@ -338,15 +321,14 @@ with st.sidebar:
     st.markdown("## Simulation Setup")
     st.markdown("### Engine & Presets")
 
-    # === PATCH 1: Engine Type (unique key) ===
+    # Engine Type (dedicated UI key; canonical key stored too)
     engine_type_ui = st.selectbox(
         "Engine Type",
         ["Analytical Model (Fast Proxy)", "3D Three-Phase Implicit (Phase 1b)"],
         key="engine_type_ui",
         help="Select the core calculation engine. The implicit model is in development, while the analytical model is a stable, fast approximation.",
     )
-    # Use a single canonical key everywhere else in the app
-    st.session_state["engine_type"] = engine_type_ui
+    st.session_state["engine_type"] = engine_type_ui  # canonical key used elsewhere
 
     model_choice = st.selectbox(
         "Model Type",
@@ -371,13 +353,15 @@ with st.sidebar:
 
     st.markdown("### Grid (ft)")
     c1, c2, c3 = st.columns(3)
-    st.number_input("nx", 1, 500, key="nx")
-    st.number_input("ny", 1, 500, key="ny")
-    st.number_input("nz", 1, 200, key="nz")
-    c1, c2, c3 = st.columns(3)
-    st.number_input("dx (ft)", step=1.0, key="dx")
-    st.number_input("dy (ft)", step=1.0, key="dy")
-    st.number_input("dz (ft)", step=1.0, key="dz")
+    with c1:
+        st.number_input("nx", 1, 500, key="nx")
+        st.number_input("dx (ft)", step=1.0, key="dx")
+    with c2:
+        st.number_input("ny", 1, 500, key="ny")
+        st.number_input("dy (ft)", step=1.0, key="dy")
+    with c3:
+        st.number_input("nz", 1, 200, key="nz")
+        st.number_input("dz (ft)", step=1.0, key="dz")
 
     st.markdown("### Heterogeneity & Anisotropy")
     st.selectbox("Facies style", ["Continuous (Gaussian)", "Speckled (high-variance)", "Layered (vertical bands)"], key="facies_style")
@@ -479,7 +463,6 @@ st.write(
 selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
 # ------------------------ TAB CONTENT DEFINITIONS ------------------------
-
 if selected_tab == "Setup Preview":
     st.header("Setup Preview")
     c1, c2 = st.columns([1, 1])
@@ -644,6 +627,7 @@ elif selected_tab == "PVT (Black-Oil)":
     st.plotly_chart(f4, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
         st.markdown("**Gas Viscosity (μg)** is the measure of gas's resistance to flow and is a key input for flow calculations.")
+
 elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
     try:
@@ -721,12 +705,10 @@ elif selected_tab == "RTA":
             "- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n"
             "- **Slope → 0**: Suggests **boundary-dominated flow**."
         )
-
-# ==== BEGIN RESULTS BLOCK ====
+# ==== RESULTS ====
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
-    # Run the simulation (adapter-safe wrapper)
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
         with st.spinner("Running full 3D simulation..."):
@@ -737,7 +719,6 @@ elif selected_tab == "Results":
         else:
             st.session_state.sim = sim_out
 
-    # Pull once and branch cleanly (prevents dangling 'else')
     sim_data = st.session_state.get("sim")
 
     if sim_data is None:
@@ -822,9 +803,8 @@ elif selected_tab == "Results":
             st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
                 st.markdown("Final points on these curves correspond to the EURs.")
-# ==== END RESULTS BLOCK ====
 
-# ==== BEGIN 3D VIEWER BLOCK ====
+# ==== 3D VIEWER ====
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
@@ -897,8 +877,8 @@ elif selected_tab == "3D Viewer":
                         st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects points of equal value.")
         else:
             st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
-# ==== END 3D VIEWER BLOCK ====
 
+# ==== SLICE VIEWER ====
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     sim_data = st.session_state.get("sim")
@@ -923,14 +903,17 @@ elif selected_tab == "Slice Viewer":
         if data_slice_3d is not None:
             nz, ny, nx = data_slice_3d.shape
             if "k-plane" in plane_slice:
-                idx_max, labels, slice_idx = nz - 1, dict(x="i-index", y="j-index"), st.slider("k-index (z-layer)", 0, nz - 1, nz // 2)
+                slice_idx = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2)
                 data_2d = data_slice_3d[slice_idx, :, :]
+                labels = dict(x="i-index", y="j-index")
             elif "j-plane" in plane_slice:
-                idx_max, labels, slice_idx = ny - 1, dict(x="i-index", y="k-index"), st.slider("j-index (y-layer)", 0, ny - 1, ny // 2)
+                slice_idx = st.slider("j-index (y-layer)", 0, ny - 1, ny // 2)
                 data_2d = data_slice_3d[:, slice_idx, :]
+                labels = dict(x="i-index", y="k-index")
             else:
-                idx_max, labels, slice_idx = nx - 1, dict(x="j-index", y="k-index"), st.slider("i-index (x-layer)", 0, nx - 1, nx // 2)
+                slice_idx = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2)
                 data_2d = data_slice_3d[:, :, slice_idx]
+                labels = dict(x="j-index", y="k-index")
 
             fig_slice = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
             fig_slice.update_layout(title=f"<b>{prop_slice} @ {plane_slice.split(' ')[0]} = {slice_idx}</b>")
@@ -944,7 +927,7 @@ elif selected_tab == "Slice Viewer":
                 )
         else:
             st.warning(f"Data for '{prop_slice}' not found.")
-
+# ==== QA / Material Balance ====
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     sim_data = st.session_state.get("sim")
@@ -1026,6 +1009,7 @@ elif selected_tab == "QA / Material Balance":
         else:
             st.warning("Simulation data is missing required arrays ('t', 'qg', 'qo') for this analysis.")
 
+# ==== ECONOMICS ====
 elif selected_tab == "Economics":
     st.header("Economics Analysis")
     sim_data = st.session_state.get("sim")
@@ -1073,6 +1057,7 @@ elif selected_tab == "Economics":
         fig_cf.update_layout(title="<b>Cumulative Cash Flow Over Time</b>", xaxis_title="Year", yaxis_title="Cumulative Cash Flow ($)", template="plotly_white")
         st.plotly_chart(fig_cf, use_container_width=True, theme="streamlit")
 
+# ==== EUR vs LATERAL LENGTH ====
 elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
     c1, c2, c3 = st.columns(3)
@@ -1089,7 +1074,7 @@ elif selected_tab == "EUR vs Lateral Length":
         bar = st.progress(0, text="Running sensitivities...")
         base_state, rng_sens = state.copy(), np.random.default_rng(st.session_state.rng_seed)
         for i, length in enumerate(lengths):
-            temp_state = {**base_state, 'L_ft': length}
+            temp_state = {**base_state, 'L_ft': float(length)}
             result = fallback_fast_solver(temp_state, rng_sens)
             eur_g_list.append(result['EUR_g_BCF'])
             eur_o_list.append(result['EUR_o_MMBO'])
@@ -1109,6 +1094,7 @@ elif selected_tab == "EUR vs Lateral Length":
             fig_o_eur.update_layout(title="<b>Oil EUR vs. Lateral Length</b>", xaxis_title="Lateral Length (ft)", yaxis_title="EUR (MMSTB)", template="plotly_white")
             st.plotly_chart(fig_o_eur, use_container_width=True, theme="streamlit")
 
+# ==== FIELD MATCH (CSV) ====
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
 
@@ -1122,8 +1108,7 @@ elif selected_tab == "Field Match (CSV)":
                 st.error(f"Error reading CSV file: {e}")
 
     with c2:
-        st.write("")
-        st.write("")
+        st.write(""); st.write("")
         if st.button("Load Demo Data", use_container_width=True):
             rng = np.random.default_rng(123)
             days = np.arange(0, 731, 15)
@@ -1173,7 +1158,7 @@ elif selected_tab == "Field Match (CSV)":
     elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
         st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
 
-# ---------------- Uncertainty & Monte Carlo ----------------
+# ==== UNCERTAINTY & MONTE CARLO ====
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
 
@@ -1275,7 +1260,7 @@ elif selected_tab == "Uncertainty & Monte Carlo":
                 "shaded area shows P10–P90 envelope. Histograms summarize EUR distributions."
             )
 
-# ---------------- Well Placement Optimization ----------------
+# ==== WELL PLACEMENT OPTIMIZATION ====
 elif selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
     st.markdown("#### 1. General Parameters")
@@ -1383,7 +1368,7 @@ elif selected_tab == "Well Placement Optimization":
                 "and the fault (white dashed) if enabled."
             )
 
-# ---------------- User’s Manual ----------------
+# ==== USER’S MANUAL ====
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
@@ -1407,7 +1392,7 @@ elif selected_tab == "User’s Manual":
     simulated rates align with measured points.
     """)
 
-# ---------------- Solver & Profiling ----------------
+# ==== SOLVER & PROFILING ====
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
@@ -1428,7 +1413,7 @@ elif selected_tab == "Solver & Profiling":
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-# ---------------- DFN Viewer ----------------
+# ==== DFN VIEWER ====
 elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
