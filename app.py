@@ -722,24 +722,27 @@ elif selected_tab == "RTA":
             "- **Slope → 0**: Suggests **boundary-dominated flow**."
         )
 
-# ===== Results =====
+# ==== BEGIN RESULTS BLOCK ====
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
-    # Run the simulation (uses the adapter-safe wrapper)
-    if st.button("Run simulation", type="primary", use_container_width=True):
+    # Run the simulation (adapter-safe wrapper)
+    run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
+    if run_clicked:
         with st.spinner("Running full 3D simulation..."):
-            sim_out = run_simulation_engine(state)  # wrapper that builds PVT adapter and calls core.full3d.simulate
+            sim_out = run_simulation_engine(state)
         if sim_out is None:
             st.session_state.sim = None
             st.error("Simulation failed. Showing results from fast preview solver.")
         else:
             st.session_state.sim = sim_out
 
-    # Pull once and branch; avoids a loose else:
+    # Pull once and branch cleanly (prevents dangling 'else')
     sim_data = st.session_state.get("sim")
 
-    if sim_data is not None:
+    if sim_data is None:
+        st.info("Click **Run simulation** to compute and display the full 3D results.")
+    else:
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
 
         # --- EUR gauges ---
@@ -747,8 +750,8 @@ elif selected_tab == "Results":
         g1, g2 = st.columns(2)
         eur_g = float(sim_data.get('EUR_g_BCF', 0.0))
         eur_o = float(sim_data.get('EUR_o_MMBO', 0.0))
+        eur_g_fig, eur_o_fig = eur_gauges(eur_g, eur_o)
         with g1:
-            eur_g_fig, eur_o_fig = eur_gauges(eur_g, eur_o)
             st.plotly_chart(eur_g_fig, use_container_width=True)
         with g2:
             st.plotly_chart(eur_o_fig, use_container_width=True)
@@ -772,8 +775,7 @@ elif selected_tab == "Results":
         layout_config = semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)")
         layout_config.update(
             yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728",
-                       showgrid=True, gridcolor="rgba(0,0,0,0.15)")),
-        layout_config.update(
+                       showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
             yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type,
                         color="#2ca02c", showgrid=False),
         )
@@ -784,6 +786,7 @@ elif selected_tab == "Results":
 
         # --- GOR & Cumulative ---
         c1_res, c2_res = st.columns(2)
+
         with c1_res:
             gor = np.divide(
                 sim_data['qg'] * 1000, sim_data['qo'],
@@ -819,19 +822,20 @@ elif selected_tab == "Results":
             st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
                 st.markdown("Final points on these curves correspond to the EURs.")
-    else:
-        st.info("Click **Run simulation** to compute and display the full 3D results.")
+# ==== END RESULTS BLOCK ====
 
-# ===== 3D Viewer =====
+# ==== BEGIN 3D VIEWER BLOCK ====
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
+
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
     else:
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
         if sim_data:
             prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
+
         prop_3d = st.selectbox("Select property to view:", prop_list)
         c1_3d, c2_3d = st.columns(2)
         with c1_3d:
@@ -844,13 +848,13 @@ elif selected_tab == "3D Viewer":
             data_3d, colorscale, colorbar_title = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
         elif 'ϕ' in prop_3d:
             data_3d, colorscale, colorbar_title = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
-        elif 'Pressure (psi)' in prop_3d:
+        elif 'Pressure (psi)' in prop_3d and sim_data:
             data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
-        elif 'Pressure Change' in prop_3d:
+        elif 'Pressure Change' in prop_3d and sim_data:
             p_final = sim_data.get('press_matrix'); p_init = sim_data.get('p_init_3d')
             if p_final is not None and p_init is not None:
                 data_3d, colorscale, colorbar_title = p_init - p_final, 'inferno', 'ΔP (psi)'
-        elif 'OOIP' in prop_3d:
+        elif 'OOIP' in prop_3d and sim_data:
             data_3d, colorscale, colorbar_title = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
 
         if data_3d is not None:
@@ -869,7 +873,7 @@ elif selected_tab == "3D Viewer":
                 ))
                 if sim_data:
                     n_lats = int(state.get('n_laterals', 1))
-                    L_ft = float(state.get('L_ft', 10000.))
+                    L_ft = float(state.get('L_ft', 10000.0))
                     lat_rows_y = [ny*state['dy']/3, 2*ny*state['dy']/3] if n_lats >= 2 else [ny*state['dy']/2]
                     lat_z = nz * state['dz'] / 2
                     for i, lat_y in enumerate(lat_rows_y):
@@ -893,6 +897,7 @@ elif selected_tab == "3D Viewer":
                         st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects points of equal value.")
         else:
             st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
+# ==== END 3D VIEWER BLOCK ====
 
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
