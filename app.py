@@ -1404,6 +1404,156 @@ elif selected_tab == "Well Placement Optimization":
                 "Map shows tested locations (colored by score), the best location (cyan star), "
                 "and the fault (white dashed) if enabled."
             )
+# ---------------- Well Placement Optimization ----------------
+elif selected_tab == "Well Placement Optimization":
+    st.header("Well Placement Optimization")
+
+    st.markdown("#### 1. General Parameters")
+    c1_opt, c2_opt, c3_opt = st.columns(3)
+    with c1_opt:
+        objective = st.selectbox(
+            "Objective Property",
+            ["Maximize Oil EUR", "Maximize Gas EUR"],
+            key="opt_objective"
+        )
+    with c2_opt:
+        iterations = st.number_input(
+            "Number of optimization steps", 5, 1000, 100, 10
+        )
+    with c3_opt:
+        st.selectbox(
+            "Forbidden Zone",
+            ["Numerical Faults"],
+            help="The optimizer will avoid placing wells near the fault defined in the sidebar."
+        )
+
+    st.markdown("#### 2. Well Parameters")
+    c1_well, c2_well = st.columns(2)
+    with c1_well:
+        num_wells = st.number_input(
+            "Number of wells to place", 1, 1, 1, disabled=True,
+            help="Currently supports optimizing a single well location."
+        )
+    with c2_well:
+        st.text_input("Well name prefix", "OptiWell", disabled=True)
+
+    # Put the button OUTSIDE the column blocks to avoid weird indentation issues
+    launch_opt = st.button("🚀 Launch Optimization", use_container_width=True, type="primary")
+
+    if launch_opt:
+        opt_results = []
+        base_state = state.copy()
+        rng_opt = np.random.default_rng(int(st.session_state.rng_seed))
+
+        reservoir_x_dim = base_state['nx'] * base_state['dx']
+        x_max = reservoir_x_dim - base_state['L_ft']
+        if x_max < 0:
+            st.error(
+                "Optimization Cannot Run: The well is too long for the reservoir.\n\n"
+                f"- Reservoir X-Dimension (nx * dx): **{reservoir_x_dim:.0f} ft**\n"
+                f"- Well Lateral Length (L_ft): **{base_state['L_ft']:.0f} ft**\n\n"
+                "Please decrease 'Lateral length (ft)' or increase 'nx'/'dx' in the sidebar.",
+                icon="⚠️"
+            )
+            st.stop()
+
+        y_max = base_state['ny'] * base_state['dy']
+        progress_bar = st.progress(0, text="Starting optimization...")
+
+        for i in range(int(iterations)):
+            # propose a random heel location and check feasibility
+            is_valid = False
+            guard = 0
+            while not is_valid and guard < 10000:
+                x_heel_ft = rng_opt.uniform(0, x_max)
+                y_heel_ft = rng_opt.uniform(50, y_max - 50)
+                is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)
+                guard += 1
+
+            if not is_valid:
+                st.error("Could not find a valid heel location. Check grid size, L_ft, and fault settings.")
+                break
+
+            temp_state = base_state.copy()
+            x_norm = x_heel_ft / (base_state['nx'] * base_state['dx'])
+            temp_state['pad_interf'] = 0.4 * x_norm
+
+            result = fallback_fast_solver(temp_state, rng_opt)
+            score = result['EUR_o_MMBO'] if "Oil" in objective else result['EUR_g_BCF']
+
+            opt_results.append({
+                "Step": i + 1,
+                "x_ft": float(x_heel_ft),
+                "y_ft": float(y_heel_ft),
+                "Score": float(score),
+            })
+
+            progress_bar.progress(
+                (i + 1) / int(iterations),
+                text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
+            )
+
+        st.session_state.opt_results = pd.DataFrame(opt_results)
+        progress_bar.empty()
+
+    if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
+        df_results = st.session_state.opt_results
+        best_run = df_results.loc[df_results['Score'].idxmax()]
+
+        st.markdown("---")
+        st.markdown("### Optimization Results")
+        c1_res, c2_res = st.columns(2)
+        with c1_res:
+            st.markdown("##### Best Placement Found")
+            score_unit = "MMBO" if "Oil" in st.session_state.get("opt_objective", "Maximize Oil EUR") else "BCF"
+            st.metric(label=f"Best Score ({score_unit})", value=f"{best_run['Score']:.3f}")
+            st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})")
+            st.write(f"Found at Step: {int(best_run['Step'])}")
+        with c2_res:
+            st.markdown("##### Optimization Steps Log")
+            st.dataframe(df_results.sort_values("Score", ascending=False).head(10), height=210)
+
+        fig_opt = go.Figure()
+        phi_map = get_k_slice(
+            st.session_state.get('phi', np.zeros((state['nz'], state['ny'], state['nx']))),
+            state['nz'] // 2
+        )
+        fig_opt.add_trace(go.Heatmap(
+            z=phi_map, dx=state['dx'], dy=state['dy'],
+            colorscale='viridis', colorbar=dict(title='Porosity')
+        ))
+        fig_opt.add_trace(go.Scatter(
+            x=df_results['x_ft'], y=df_results['y_ft'], mode='markers',
+            marker=dict(
+                color=df_results['Score'], colorscale='Reds', showscale=True,
+                colorbar=dict(title='Score'), size=8, opacity=0.7
+            ),
+            name='Tested Locations'
+        ))
+        fig_opt.add_trace(go.Scatter(
+            x=[best_run['x_ft']], y=[best_run['y_ft']], mode='markers',
+            marker=dict(color='cyan', size=16, symbol='star', line=dict(width=2, color='black')),
+            name='Best Location'
+        ))
+        if state.get('use_fault'):
+            fault_x = [state['fault_index'] * state['dx'], state['fault_index'] * state['dx']]
+            fault_y = [0, state['ny'] * state['dy']]
+            fig_opt.add_trace(go.Scatter(
+                x=fault_x, y=fault_y, mode='lines',
+                line=dict(color='white', width=4, dash='dash'), name='Fault'
+            ))
+        fig_opt.update_layout(
+            title="<b>Well Placement Optimization Map</b>",
+            xaxis_title="X position (ft)", yaxis_title="Y position (ft)",
+            template="plotly_white", height=600
+        )
+        st.plotly_chart(fig_opt, use_container_width=True, theme="streamlit")
+
+        with st.expander("Click for details"):
+            st.markdown(
+                "Map shows tested locations (colored by score), the best location (cyan star), "
+                "and the fault (white dashed) if enabled."
+            )
 
 # ---------------- User’s Manual ----------------
 elif selected_tab == "User’s Manual":
