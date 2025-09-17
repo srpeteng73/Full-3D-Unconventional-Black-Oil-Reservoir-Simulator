@@ -1295,7 +1295,7 @@ elif selected_tab == "Well Placement Optimization":
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
 
-    # IMPORTANT: Button and its body are OUTSIDE the column block to avoid indentation/misnesting issues
+    # Button MUST be outside the column block to avoid nesting issues
     if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
         opt_results = []
         base_state = state.copy()
