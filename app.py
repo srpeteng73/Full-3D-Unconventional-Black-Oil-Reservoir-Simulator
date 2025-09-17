@@ -38,14 +38,18 @@ def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
             return abs(y_heel_ft - fault_y) > 2 * state['dy']
     return True
 
-
 st.set_page_config(page_title="3D Unconventional / Black-Oil Reservoir Simulator", layout="wide")
 
 # ------------------------ Defaults ------------------------
-_setdefault("apply_preset_payload", None); _setdefault("sim", None); _setdefault("rng_seed", 1234)
+_setdefault("apply_preset_payload", None)
+_setdefault("sim", None)
+_setdefault("rng_seed", 1234)
 _setdefault("sim_mode", "3D Unconventional Reservoir Simulator — Implicit Engine Ready")
-_setdefault("dfn_segments", None); _setdefault("use_dfn_sink", True); _setdefault("use_auto_dfn", True)
-_setdefault("vol_downsample", 2); _setdefault("iso_value_rel", 0.5)
+_setdefault("dfn_segments", None)
+_setdefault("use_dfn_sink", True)
+_setdefault("use_auto_dfn", True)
+_setdefault("vol_downsample", 2)
+_setdefault("iso_value_rel", 0.5)
 
 defaults = dict(
     nx=300, ny=60, nz=12,
@@ -80,10 +84,14 @@ if st.session_state.apply_preset_payload is not None:
 
 # ------------------------ Presets ------------------------
 PLAY_PRESETS = {
-    "Permian Basin (Wolfcamp)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
-                                     Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0),
-    "Eagle Ford (Oil Window)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
-                                    Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
+    "Permian Basin (Wolfcamp)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
+        Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0
+    ),
+    "Eagle Ford (Oil Window)": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0
+    ),
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
 
@@ -93,7 +101,8 @@ def Rs_of_p(p, pb, Rs_pb):
     return np.where(p <= pb, Rs_pb, Rs_pb + 0.00012 * (p - pb) ** 1.1)
 
 def Bo_of_p(p, pb, Bo_pb):
-    p = np.asarray(p, float); slope = -1.0e-5
+    p = np.asarray(p, float)
+    slope = -1.0e-5
     return np.where(p <= pb, Bo_pb, Bo_pb + slope * (p - pb))
 
 def Bg_of_p(p):
@@ -102,7 +111,9 @@ def Bg_of_p(p):
 
 def mu_g_of_p(p, pb, mug_pb):
     p = np.asarray(p, float)
-    peak = mug_pb * 1.03; left = mug_pb - 0.0006; right = mug_pb - 0.0008
+    peak = mug_pb * 1.03
+    left = mug_pb - 0.0006
+    right = mug_pb - 0.0008
     mu = np.where(
         p < pb,
         left + (peak - left) * (p - p.min()) / (pb - p.min() + 1e-9),
@@ -114,7 +125,7 @@ def z_factor_approx(p_psi, p_init_psi=5800.0):
     p_norm = p_psi / p_init_psi
     return 0.95 - 0.2 * (1 - p_norm) + 0.4 * (1 - p_norm) ** 2
 
-# --- PVT adapter: callables named exactly as the engine expects ---
+# --- PVT adapter ---
 class _PVTAdapter(dict):
     """Adapter that holds PVT callables and parameters; supports attribute & dict access."""
     def __init__(self, **kwargs):
@@ -144,7 +155,7 @@ def _build_pvt_payload_from_state(state):
         pb_psi=pb
     )
 
-# --- Defensive monkey-patch: if engine's Fluid class lacks methods, inject thin wrappers ---
+# Defensive monkey-patch
 def _monkeypatch_engine_fluid_if_needed(adapter):
     """
     Some engine builds instantiate their own `Fluid` and expect .Rs/.Bo/.Bg/.mu_g/.mu_o.
@@ -154,13 +165,13 @@ def _monkeypatch_engine_fluid_if_needed(adapter):
         from core.blackoil_pvt1 import Fluid as EngineFluid  # optional; may not exist in all builds
         patched = []
         if not hasattr(EngineFluid, "Rs"):
-            EngineFluid.Rs   = lambda self, p: adapter.Rs(p)
+            EngineFluid.Rs = lambda self, p: adapter.Rs(p)
             patched.append("Rs")
         if not hasattr(EngineFluid, "Bo"):
-            EngineFluid.Bo   = lambda self, p: adapter.Bo(p)
+            EngineFluid.Bo = lambda self, p: adapter.Bo(p)
             patched.append("Bo")
         if not hasattr(EngineFluid, "Bg"):
-            EngineFluid.Bg   = lambda self, p: adapter.Bg(p)
+            EngineFluid.Bg = lambda self, p: adapter.Bg(p)
             patched.append("Bg")
         if not hasattr(EngineFluid, "mu_g"):
             EngineFluid.mu_g = lambda self, p: adapter.mu_g(p)
@@ -173,7 +184,6 @@ def _monkeypatch_engine_fluid_if_needed(adapter):
     except Exception:
         pass  # safety net
 
-# --- Public helper used by run_simulation_engine(...) ---
 def _pvt_from_state(state):
     adapter = _build_pvt_payload_from_state(state)
     _monkeypatch_engine_fluid_if_needed(adapter)
@@ -214,11 +224,14 @@ def ensure_3d(arr2d_or_3d):
     return a[None, ...] if a.ndim == 2 else a
 
 def get_k_slice(A, k):
-    A3 = ensure_3d(A); nz = A3.shape[0]; k = int(np.clip(k, 0, nz - 1))
+    A3 = ensure_3d(A)
+    nz = A3.shape[0]
+    k = int(np.clip(k, 0, nz - 1))
     return A3[k, :, :]
 
 def downsample_3d(A, ds):
-    A3 = ensure_3d(A); ds = max(1, int(ds))
+    A3 = ensure_3d(A)
+    ds = max(1, int(ds))
     return A3[::ds, ::ds, ::ds]
 
 def parse_dfn_csv(uploaded_file):
@@ -238,30 +251,17 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
     n_stages = max(1, int(L_ft / max(stage_spacing_ft, 1.0)))
     Lcells = int(L_ft / max(dx, 1.0))
     xs = np.linspace(5, max(6, Lcells - 5), n_stages) * dx
-    lat_rows = [ny // 3, 2 * ny // 3] if n_lats >= 2 else [ny // 2]; segs = []
+    lat_rows = [ny // 3, 2 * ny // 3] if n_lats >= 2 else [ny // 2]
+    segs = []
     half_h = hf_ft / 2.0
     for jr in lat_rows:
         y_ft = jr * dy
         for xcell in xs:
             x_ft = xcell
-            z0, z1 = max(0.0, (nz * dz) / 2.0 - half_h), min(nz * dz, (nz * dz) / 2.0 + half_h)
+            z0 = max(0.0, (nz * dz) / 2.0 - half_h)
+            z1 = min(nz * dz, (nz * dz) / 2.0 + half_h)
             segs.append([x_ft, y_ft, z0, x_ft, y_ft, z1])
     return np.array(segs, float) if segs else None
-
-def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
-    x_max = state['nx'] * state['dx'] - state['L_ft']
-    y_max = state['ny'] * state['dy']
-    if not (0 <= x_heel_ft <= x_max and 0 <= y_heel_ft <= y_max):
-        return False
-    if state.get('use_fault'):
-        plane = state.get('fault_plane', 'i-plane (vertical)')
-        if 'i-plane' in plane:
-            fault_x = state['fault_index'] * state['dx']
-            return abs(x_heel_ft - fault_x) > 2 * state['dx']
-        else:
-            fault_y = state['fault_index'] * state['dy']
-            return abs(y_heel_ft - fault_y) > 2 * state['dy']
-    return True
 
 def _get_sim_preview():
     if 'state' in globals():
@@ -271,28 +271,30 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 
-# --- (2) Engine wrapper: use adapter + monkey-patch; NO BlackOilPVT/Fluid conversions here ---
+# --- Engine wrapper ---
 def run_simulation_engine(state):
     t0 = time.time()
 
     # Build inputs payload
     inputs = {k: state.get(k) for k in defaults.keys()}
     inputs['engine_type'] = state.get('engine_type')
-
     inputs.update({
         'grid': {k: state.get(k) for k in ['nx', 'ny', 'nz', 'dx', 'dy', 'dz']},
-        'rock': {
-            'kx_md': st.session_state.get('kx'),
-            'ky_md': st.session_state.get('ky'),
-            'phi':   st.session_state.get('phi'),
-        },
+        'rock': {'kx_md': st.session_state.get('kx'),
+                 'ky_md': st.session_state.get('ky'),
+                 'phi':   st.session_state.get('phi')},
         'relperm': {k: state.get(k) for k in ['krw_end','kro_end','nw','no','Swc','Sor']},
         'init':    {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')},
-        'schedule': {'bhp_psi': state.get('pad_bhp_psi'), 'rate_mscfd': state.get('pad_rate_mscfd'), 'control': state.get('pad_ctrl', 'BHP')},
-        'msw': {'laterals': state.get('n_laterals'), 'L_ft': state.get('L_ft'), 'stage_spacing_ft': state.get('stage_spacing_ft'), 'hf_ft': state.get('hf_ft')},
+        'schedule': {'bhp_psi': state.get('pad_bhp_psi'),
+                     'rate_mscfd': state.get('pad_rate_mscfd'),
+                     'control': state.get('pad_ctrl', 'BHP')},
+        'msw': {'laterals': state.get('n_laterals'),
+                'L_ft': state.get('L_ft'),
+                'stage_spacing_ft': state.get('stage_spacing_ft'),
+                'hf_ft': state.get('hf_ft')},
     })
 
-    # PVT: adapter only — no BlackOilPVT/Fluid here
+    # PVT
     inputs['pvt'] = _pvt_from_state(state)
 
     try:
@@ -301,7 +303,6 @@ def run_simulation_engine(state):
         st.error(f"Simulation error: {e}")
         return None
 
-    # Allow multiple key styles from engines
     def _pick(d, *keys):
         for k in keys:
             v = d.get(k)
@@ -333,14 +334,12 @@ with st.sidebar:
     st.markdown("## Simulation Setup")
     st.markdown("### Engine & Presets")
 
-    # === PATCH 1: Engine Type (unique key) ===
     engine_type_ui = st.selectbox(
         "Engine Type",
         ["Analytical Model (Fast Proxy)", "3D Three-Phase Implicit (Phase 1b)"],
         key="engine_type_ui",
         help="Select the core calculation engine. The implicit model is in development, while the analytical model is a stable, fast approximation.",
     )
-    # Use a single canonical key everywhere else in the app
     st.session_state["engine_type"] = engine_type_ui
 
     model_choice = st.selectbox(
@@ -638,13 +637,19 @@ elif selected_tab == "PVT (Black-Oil)":
     st.plotly_chart(f4, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
         st.markdown("**Gas Viscosity (μg)** is the measure of gas's resistance to flow and is a key input for flow calculations.")
+
 elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
     try:
-        L_ft, ss_ft, n_clusters = float(state['L_ft']), float(state['stage_spacing_ft']), int(state['clusters_per_stage'])
+        L_ft = float(state['L_ft'])
+        ss_ft = float(state['stage_spacing_ft'])
+        n_clusters = int(state['clusters_per_stage'])
         n_stages = max(1, int(L_ft / ss_ft))
-        well_id_ft, f_fric, dP_le = float(state['wellbore_ID_ft']), float(state['f_fric']), float(state['dP_LE_psi'])
-        p_bhp, p_res = float(state['pad_bhp_psi']), float(state['p_init_psi'])
+        well_id_ft = float(state['wellbore_ID_ft'])
+        f_fric = float(state['f_fric'])
+        dP_le = float(state['dP_LE_psi'])
+        p_bhp = float(state['pad_bhp_psi'])
+        p_res = float(state['p_init_psi'])
 
         preview = _get_sim_preview()
         q_oil_total_stbd = preview['qo'][0]
@@ -658,10 +663,10 @@ elif selected_tab == "MSW Wellbore":
             flow_rate_bpd = q_oil_total_stbd
             for i in range(n_stages):
                 p_wellbore_at_stage[i] = p_current
-                q_ft3_s = flow_rate_bpd * 5.615 / (24*3600)
-                area_ft2 = np.pi * (well_id_ft/2)**2
+                q_ft3_s = flow_rate_bpd * 5.615 / (24 * 3600)
+                area_ft2 = np.pi * (well_id_ft / 2) ** 2
                 v_fps = q_ft3_s / area_ft2
-                dp_psi_segment = (2 * f_fric * rho_o_lb_ft3 * v_fps**2 * ss_ft / well_id_ft) / 144.0
+                dp_psi_segment = (2 * f_fric * rho_o_lb_ft3 * v_fps ** 2 * ss_ft / well_id_ft) / 144.0
                 p_current += dp_psi_segment
                 flow_rate_bpd -= q_per_stage_bpd[i]
             drawdown = p_res - p_wellbore_at_stage - dP_le
@@ -671,13 +676,13 @@ elif selected_tab == "MSW Wellbore":
 
         c1_msw, c2_msw = st.columns(2)
         with c1_msw:
-            fig_p = go.Figure(go.Scatter(x=np.arange(n_stages)*ss_ft, y=p_wellbore_at_stage, mode='lines+markers', name='Wellbore Pressure'))
+            fig_p = go.Figure(go.Scatter(x=np.arange(n_stages) * ss_ft, y=p_wellbore_at_stage, mode='lines+markers', name='Wellbore Pressure'))
             fig_p.update_layout(title="<b>Wellbore Pressure Profile</b>", xaxis_title="Position along Lateral (ft, 0=Heel)", yaxis_title="Pressure (psi)", template="plotly_white")
             st.plotly_chart(fig_p, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
                 st.markdown("This plot shows the pressure inside the horizontal wellbore. Due to friction, pressure is lowest at the heel and increases towards the toe, driving the \"heel-toe effect.\" ")
         with c2_msw:
-            fig_q = go.Figure(go.Bar(x=np.arange(n_stages)*ss_ft, y=q_dist * 100, name='Flow Contribution'))
+            fig_q = go.Figure(go.Bar(x=np.arange(n_stages) * ss_ft, y=q_dist * 100, name='Flow Contribution'))
             fig_q.update_layout(title="<b>Flow Contribution per Stage</b>", xaxis_title="Position along Lateral (ft, 0=Heel)", yaxis_title="Contribution (%)", template="plotly_white")
             st.plotly_chart(fig_q, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
@@ -701,7 +706,8 @@ elif selected_tab == "RTA":
     with st.expander("Click for details"):
         st.markdown("This is a standard **Rate vs. Time** plot on a semi-log scale, showing the production decline.")
 
-    t_safe = np.maximum(t, 1e-9); qg_safe = np.maximum(qg, 1e-9)
+    t_safe = np.maximum(t, 1e-9)
+    qg_safe = np.maximum(qg, 1e-9)
     logt, logq = np.log(t_safe), np.log(qg_safe)
     slope = np.gradient(logq, logt)
 
@@ -715,11 +721,10 @@ elif selected_tab == "RTA":
             "- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n"
             "- **Slope → 0**: Suggests **boundary-dominated flow**."
         )
-# ==== BEGIN RESULTS BLOCK ====
+
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
-    # Run the simulation (adapter-safe wrapper)
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
         with st.spinner("Running full 3D simulation..."):
@@ -730,7 +735,6 @@ elif selected_tab == "Results":
         else:
             st.session_state.sim = sim_out
 
-    # Pull once and branch cleanly (prevents dangling 'else')
     sim_data = st.session_state.get("sim")
 
     if sim_data is None:
@@ -738,7 +742,6 @@ elif selected_tab == "Results":
     else:
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
 
-        # --- EUR gauges ---
         st.markdown("### EUR (30-year forecast)")
         g1, g2 = st.columns(2)
         eur_g = float(sim_data.get('EUR_g_BCF', 0.0))
@@ -755,7 +758,6 @@ elif selected_tab == "Results":
                 "- **MMBO**: Million Stock-Tank Barrels of Oil"
             )
 
-        # --- Production profiles ---
         st.markdown("### Production Profiles")
         rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="res_rate_y_mode")
         y_type = "log" if rate_y_mode == "Log" else "linear"
@@ -777,9 +779,7 @@ elif selected_tab == "Results":
         with st.expander("Click for details"):
             st.markdown("This plot shows simulated **production rates** for gas (red) and oil (green) over time.")
 
-        # --- GOR & Cumulative ---
         c1_res, c2_res = st.columns(2)
-
         with c1_res:
             gor = np.divide(
                 sim_data['qg'] * 1000, sim_data['qo'],
@@ -795,7 +795,6 @@ elif selected_tab == "Results":
             st.plotly_chart(fig_gor, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
                 st.markdown("**GOR** = produced gas / produced oil. Its trend is a fluid-type diagnostic.")
-
         with c2_res:
             cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6   # BCF
             cum_o = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0) / 1e6   # MMSTB
@@ -815,9 +814,7 @@ elif selected_tab == "Results":
             st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
                 st.markdown("Final points on these curves correspond to the EURs.")
-# ==== END RESULTS BLOCK ====
-
-# ==== BEGIN 3D VIEWER BLOCK ====
+# ==== 3D VIEWER ====
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
@@ -844,7 +841,8 @@ elif selected_tab == "3D Viewer":
         elif 'Pressure (psi)' in prop_3d and sim_data:
             data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
         elif 'Pressure Change' in prop_3d and sim_data:
-            p_final = sim_data.get('press_matrix'); p_init = sim_data.get('p_init_3d')
+            p_final = sim_data.get('press_matrix')
+            p_init = sim_data.get('p_init_3d')
             if p_final is not None and p_init is not None:
                 data_3d, colorscale, colorbar_title = p_init - p_final, 'inferno', 'ΔP (psi)'
         elif 'OOIP' in prop_3d and sim_data:
@@ -890,7 +888,6 @@ elif selected_tab == "3D Viewer":
                         st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects points of equal value.")
         else:
             st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
-# ==== END 3D VIEWER BLOCK ====
 
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
@@ -916,14 +913,17 @@ elif selected_tab == "Slice Viewer":
         if data_slice_3d is not None:
             nz, ny, nx = data_slice_3d.shape
             if "k-plane" in plane_slice:
-                idx_max, labels, slice_idx = nz - 1, dict(x="i-index", y="j-index"), st.slider("k-index (z-layer)", 0, nz - 1, nz // 2)
+                slice_idx = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2)
                 data_2d = data_slice_3d[slice_idx, :, :]
+                labels = dict(x="i-index", y="j-index")
             elif "j-plane" in plane_slice:
-                idx_max, labels, slice_idx = ny - 1, dict(x="i-index", y="k-index"), st.slider("j-index (y-layer)", 0, ny - 1, ny // 2)
+                slice_idx = st.slider("j-index (y-layer)", 0, ny - 1, ny // 2)
                 data_2d = data_slice_3d[:, slice_idx, :]
+                labels = dict(x="i-index", y="k-index")
             else:
-                idx_max, labels, slice_idx = nx - 1, dict(x="j-index", y="k-index"), st.slider("i-index (x-layer)", 0, nx - 1, nx // 2)
+                slice_idx = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2)
                 data_2d = data_slice_3d[:, :, slice_idx]
+                labels = dict(x="j-index", y="k-index")
 
             fig_slice = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
             fig_slice.update_layout(title=f"<b>{prop_slice} @ {plane_slice.split(' ')[0]} = {slice_idx}</b>")
@@ -964,7 +964,8 @@ elif selected_tab == "QA / Material Balance":
 
                 fig_pz_gas = go.Figure()
                 fig_pz_gas.add_trace(go.Scatter(x=cum_g_mmscf, y=p_over_z, mode='markers', name='P/Z Data Points'))
-                x_fit = np.array([0, giip_bcf * 1000]); y_fit = slope * x_fit + intercept
+                x_fit = np.array([0, giip_bcf * 1000])
+                y_fit = slope * x_fit + intercept
                 fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode='lines', name='Linear Extrapolation', line=dict(dash='dash')))
                 fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white", xaxis_range=[0, giip_bcf * 1100])
                 st.plotly_chart(fig_pz_gas, use_container_width=True, theme="streamlit")
@@ -1004,16 +1005,13 @@ elif selected_tab == "QA / Material Balance":
 
                 fig_mbe_oil = go.Figure()
                 fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode='markers', name='F vs Et Data Points'))
-                x_fit_oil = np.array([0, np.max(Et)]); y_fit_oil = slope_oil * x_fit_oil
+                x_fit_oil = np.array([0, np.max(Et)])
+                y_fit_oil = slope_oil * x_fit_oil
                 fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode='lines', name=f'Slope (OOIP) = {ooip_mmstb:.2f} MMSTB', line=dict(dash='dash')))
                 fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena-Odeh Plot)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
                 st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
                 with st.expander("Click for details"):
-                    st.markdown(
-                        "This is a **Havlena-Odeh** material balance plot for solution-gas drive reservoirs.\n"
-                        "- The slope gives an independent **OOIP** estimate.\n"
-                        "- Compare to simulator EUR to sanity-check recovery."
-                    )
+                    st.markdown("This is a **Havlena-Odeh** material balance plot for solution-gas drive reservoirs.\n- The slope gives an independent **OOIP** estimate.\n- Compare to simulator EUR to sanity-check recovery.")
             else:
                 st.warning("Could not create plots. Pressure and time data have mismatched lengths.")
         else:
@@ -1036,7 +1034,9 @@ elif selected_tab == "Economics":
         with c4:
             capex = st.number_input("CAPEX ($MM)", 0.0, 50.0, 10.0, 0.5) * 1e6
 
-        days = sim_data['t']; qo = sim_data['qo']; qg = sim_data['qg']
+        days = sim_data['t']
+        qo = sim_data['qo']
+        qg = sim_data['qg']
         df = pd.DataFrame({'days': days, 'oil': qo, 'gas_mcfd': qg})
         df['year'] = (df['days'] / 365.25).astype(int)
 
@@ -1052,15 +1052,17 @@ elif selected_tab == "Economics":
         cumulative_cash_flow = np.cumsum(cash_flow)
         payout_year = "N/A"
         if np.any(cumulative_cash_flow > 0):
-            payout_year = np.argmax(cumulative_cash_flow > 0)
+            payout_year = int(np.argmax(cumulative_cash_flow > 0))
 
-        st.markdown("---"); st.markdown("#### Key Financial Metrics")
+        st.markdown("---")
+        st.markdown("#### Key Financial Metrics")
         m1, m2, m3 = st.columns(3)
         m1.metric("Net Present Value (NPV)", f"${npv/1e6:.2f} MM")
         m2.metric("Internal Rate of Return (IRR)", f"{irr:.1f}%")
         m3.metric("Payout (Year)", f"{payout_year}")
 
-        st.markdown("---"); st.markdown("#### Cash Flow Analysis")
+        st.markdown("---")
+        st.markdown("#### Cash Flow Analysis")
         fig_cf = go.Figure()
         fig_cf.add_trace(go.Bar(x=list(range(len(cumulative_cash_flow))), y=cumulative_cash_flow, name='Cumulative Cash Flow'))
         fig_cf.update_layout(title="<b>Cumulative Cash Flow Over Time</b>", xaxis_title="Year", yaxis_title="Cumulative Cash Flow ($)", template="plotly_white")
@@ -1082,7 +1084,7 @@ elif selected_tab == "EUR vs Lateral Length":
         bar = st.progress(0, text="Running sensitivities...")
         base_state, rng_sens = state.copy(), np.random.default_rng(st.session_state.rng_seed)
         for i, length in enumerate(lengths):
-            temp_state = {**base_state, 'L_ft': length}
+            temp_state = {**base_state, 'L_ft': float(length)}
             result = fallback_fast_solver(temp_state, rng_sens)
             eur_g_list.append(result['EUR_g_BCF'])
             eur_o_list.append(result['EUR_o_MMBO'])
@@ -1165,7 +1167,6 @@ elif selected_tab == "Field Match (CSV)":
             )
     elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
         st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
-
 # ---------------- Uncertainty & Monte Carlo ----------------
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
@@ -1293,8 +1294,9 @@ elif selected_tab == "Well Placement Optimization":
         )
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
-    
-        if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
+
+    # IMPORTANT: Button and its body are OUTSIDE the column block to avoid indentation/misnesting issues
+    if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
         opt_results = []
         base_state = state.copy()
         rng_opt = np.random.default_rng(st.session_state.rng_seed)
@@ -1343,7 +1345,6 @@ elif selected_tab == "Well Placement Optimization":
 
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
-
 
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
         df_results = st.session_state.opt_results
