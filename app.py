@@ -1410,34 +1410,17 @@ elif selected_tab == "Well Placement Optimization":
 
     st.markdown("#### 1. General Parameters")
     c1_opt, c2_opt, c3_opt = st.columns(3)
-    with c1_opt:
-        objective = st.selectbox(
-            "Objective Property",
-            ["Maximize Oil EUR", "Maximize Gas EUR"],
-            key="opt_objective"
-        )
-    with c2_opt:
-        iterations = st.number_input(
-            "Number of optimization steps", 5, 1000, 100, 10
-        )
-    with c3_opt:
-        st.selectbox(
-            "Forbidden Zone",
-            ["Numerical Faults"],
-            help="The optimizer will avoid placing wells near the fault defined in the sidebar."
-        )
+    objective  = c1_opt.selectbox("Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective")
+    iterations = c2_opt.number_input("Number of optimization steps", 5, 1000, 100, 10)
+    c3_opt.selectbox("Forbidden Zone", ["Numerical Faults"],
+                     help="The optimizer will avoid placing wells near the fault defined in the sidebar.")
 
     st.markdown("#### 2. Well Parameters")
     c1_well, c2_well = st.columns(2)
-    with c1_well:
-        num_wells = st.number_input(
-            "Number of wells to place", 1, 1, 1, disabled=True,
-            help="Currently supports optimizing a single well location."
-        )
-    with c2_well:
-        st.text_input("Well name prefix", "OptiWell", disabled=True)
+    num_wells = c1_well.number_input("Number of wells to place", 1, 1, 1, disabled=True,
+                                     help="Currently supports optimizing a single well location.")
+    c2_well.text_input("Well name prefix", "OptiWell", disabled=True)
 
-    # Put the button OUTSIDE the column blocks to avoid weird indentation issues
     launch_opt = st.button("🚀 Launch Optimization", use_container_width=True, type="primary")
 
     if launch_opt:
@@ -1464,7 +1447,7 @@ elif selected_tab == "Well Placement Optimization":
             # propose a random heel location and check feasibility
             is_valid = False
             guard = 0
-            while not is_valid and guard < 10000:
+            while (not is_valid) and (guard < 10000):
                 x_heel_ft = rng_opt.uniform(0, x_max)
                 y_heel_ft = rng_opt.uniform(50, y_max - 50)
                 is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)
@@ -1488,10 +1471,8 @@ elif selected_tab == "Well Placement Optimization":
                 "Score": float(score),
             })
 
-            progress_bar.progress(
-                (i + 1) / int(iterations),
-                text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
-            )
+            progress_bar.progress((i + 1) / int(iterations),
+                                  text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}")
 
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
@@ -1554,6 +1535,7 @@ elif selected_tab == "Well Placement Optimization":
                 "Map shows tested locations (colored by score), the best location (cyan star), "
                 "and the fault (white dashed) if enabled."
             )
+
 
 # ---------------- User’s Manual ----------------
 elif selected_tab == "User’s Manual":
