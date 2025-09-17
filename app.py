@@ -705,7 +705,10 @@ elif selected_tab == "RTA":
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
-        st.markdown("This is the **log-log derivative** plot, a core RTA diagnostic tool. The slope indicates the dominant flow regime:\n- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n- **Slope → 0**: Suggests **boundary-dominated flow**.")
+    
+       st.markdown("This is the **log-log derivative** plot, a core RTA diagnostic tool. The slope indicates the dominant flow regime:\n- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n- **Slope → 0**: Suggests **boundary-dominated flow**.")
+
+
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
@@ -807,9 +810,11 @@ elif selected_tab == "Results":
     else:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
 
+# ===== end Results =====
+
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
-    sim_data = st.session_state.get("sim")
+      sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
     else:
