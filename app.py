@@ -23,11 +23,6 @@ def _safe_rerun():
         st.experimental_rerun()
 
 def is_location_valid(x_ft, y_ft, state):
-    """
-    Returns True if a proposed heel location (x_ft, y_ft) is valid for the optimizer:
-    - Respects the 'forbidden zone' near a numerical fault if enabled.
-    - Keeps the full lateral inside the model bounds.
-    """
     # Avoid near-fault zone if enabled
     if state.get('use_fault'):
         plane = state.get('fault_plane', 'i-plane (vertical)')
@@ -39,13 +34,11 @@ def is_location_valid(x_ft, y_ft, state):
             fault_y = state['fault_index'] * state['dy']
             if abs(y_ft - fault_y) < 2 * state['dy']:
                 return False
-
     # Keep lateral fully inside the model box
     if x_ft < 0 or (x_ft + state['L_ft']) > state['nx'] * state['dx']:
         return False
     if y_ft < 0 or y_ft > state['ny'] * state['dy']:
         return False
-
     return True
 
 
@@ -124,15 +117,15 @@ def z_factor_approx(p_psi, p_init_psi=5800.0):
     p_norm = p_psi / p_init_psi
     return 0.95 - 0.2 * (1 - p_norm) + 0.4 * (1 - p_norm) ** 2
 
-# --- Engine PVT adapter: callables named exactly as the engine expects ---
+# --- PVT adapter: callables named exactly as the engine expects ---
 class _PVTAdapter(dict):
-    """Adapter that holds PVT callables and parameters; supports attribute & dict-style access."""
+    """Adapter that holds PVT callables and parameters; supports attribute & dict access."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.__dict__.update(kwargs)  # allows pvt.Rs(...) as well as pvt['Rs'](...)
+        self.__dict__.update(kwargs)  # allows pvt.Rs(...) and pvt['Rs'](...)
 
-def _build_pvt_payload_from_state(state):
-    """Builds a simple black-oil PVT callable bundle from sidebar state."""
+def _pvt_from_state(state):
+    """Build a PVT payload the engine can use directly (with callables)."""
     pb     = float(state.get('pb_psi', 1.0))
     Rs_pb  = float(state.get('Rs_pb_scf_stb', 0.0))
     Bo_pb  = float(state.get('Bo_pb_rb_stb', 1.0))
@@ -153,6 +146,7 @@ def _build_pvt_payload_from_state(state):
         include_RsP=bool(state.get('include_RsP', True)),
         pb_psi=pb
     )
+
 
 # --- Defensive monkey-patch: if engine's Fluid class lacks methods, inject thin wrappers ---
 def _monkeypatch_engine_fluid_if_needed(adapter):
@@ -728,6 +722,7 @@ elif selected_tab == "RTA":
             "- **Slope → 0**: Suggests **boundary-dominated flow**."
         )
 
+# ===== Results =====
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
@@ -778,8 +773,10 @@ elif selected_tab == "Results":
         layout_config.update(
             yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728",
                        showgrid=True, gridcolor="rgba(0,0,0,0.15)")),
-        layout_config["yaxis2"] = dict(title="Oil Rate (STB/d)", side="right", overlaying="y",
-                                       type=y_type, color="#2ca02c", showgrid=False)
+        layout_config.update(
+            yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type,
+                        color="#2ca02c", showgrid=False),
+        )
         fig_rate.update_layout(layout_config)
         st.plotly_chart(fig_rate, use_container_width=True, theme="streamlit")
         with st.expander("Click for details"):
@@ -815,22 +812,20 @@ elif selected_tab == "Results":
             cum_layout['xaxis']['type'] = 'linear'
             cum_layout['xaxis']['title'] = 'Day'
             cum_layout.update(
-                yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"))
-            cum_layout["yaxis2"] = dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False)
+                yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
+                yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False),
+            )
             fig_cum.update_layout(cum_layout)
             st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
             with st.expander("Click for details"):
                 st.markdown("Final points on these curves correspond to the EURs.")
-
     else:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
 
-# ===== end Results =====
-
+# ===== 3D Viewer =====
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
-    sim_data = st.session_state.get("sim")  # <- no extra leading spaces here
-
+    sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
     else:
@@ -849,13 +844,13 @@ elif selected_tab == "3D Viewer":
             data_3d, colorscale, colorbar_title = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
         elif 'ϕ' in prop_3d:
             data_3d, colorscale, colorbar_title = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
-        elif 'Pressure (psi)' in prop_3d and sim_data:
+        elif 'Pressure (psi)' in prop_3d:
             data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
-        elif 'Pressure Change' in prop_3d and sim_data:
+        elif 'Pressure Change' in prop_3d:
             p_final = sim_data.get('press_matrix'); p_init = sim_data.get('p_init_3d')
             if p_final is not None and p_init is not None:
                 data_3d, colorscale, colorbar_title = p_init - p_final, 'inferno', 'ΔP (psi)'
-        elif 'OOIP' in prop_3d and sim_data:
+        elif 'OOIP' in prop_3d:
             data_3d, colorscale, colorbar_title = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
 
         if data_3d is not None:
