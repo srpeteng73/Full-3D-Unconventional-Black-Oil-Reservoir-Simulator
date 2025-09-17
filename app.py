@@ -125,44 +125,14 @@ def _build_pvt_payload_from_state(state):
         include_RsP=bool(state.get('include_RsP', True)),
         pb_psi=pb
     )
-# --- (1) Engine PVT adapter: callables named exactly as the engine expects ---
-class _PVTAdapter(dict):
-    """Adapter that holds PVT callables and parameters; supports attribute & dict access."""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.__dict__.update(kwargs)  # allows pvt.Rs(...) as well as pvt['Rs'](...)
 
-def _build_pvt_payload_from_state(state):
-    pb     = float(state.get('pb_psi', 1.0))
-    Rs_pb  = float(state.get('Rs_pb_scf_stb', 0.0))
-    Bo_pb  = float(state.get('Bo_pb_rb_stb', 1.0))
-    mug_pb = float(state.get('mug_pb_cp', 0.020))
-    muo_pb = float(state.get('muo_pb_cp', 1.20))
-
-    def Rs(p):   return Rs_of_p(p, pb, Rs_pb)
-    def Bo(p):   return Bo_of_p(p, pb, Bo_pb)
-    def Bg(p):   return Bg_of_p(p)
-    def mu_g(p): return mu_g_of_p(p, pb, mug_pb)
-    def mu_o(p): return np.full_like(np.asarray(p, float), muo_pb, dtype=float)
-
-    return _PVTAdapter(
-        Rs=Rs, Bo=Bo, Bg=Bg, mu_g=mu_g, mu_o=mu_o,
-        ct_o_1psi=state.get('ct_o_1psi', 8e-6),
-        ct_g_1psi=state.get('ct_g_1psi', 3e-6),
-        ct_w_1psi=state.get('ct_w_1psi', 3e-6),
-        include_RsP=bool(state.get('include_RsP', True)),
-        pb_psi=pb
-    )
-
-# --- (NEW) Defensive monkey-patch: if engine's Fluid class lacks methods, inject them ---
+# --- Defensive monkey-patch: if engine's Fluid class lacks methods, inject them ---
 def _monkeypatch_engine_fluid_if_needed(adapter):
     """
     Some engine builds construct their own `Fluid` class and later call `fluid.Rs(p)`.
     If that class lacks Rs/Bo/Bg/mu_g/mu_o, we attach thin wrappers that forward to our adapter.
-    This runs safely even if the engine module is absent or already correct.
     """
     try:
-        # Import lazily so app still runs if module path changes.
         from core.blackoil_pvt1 import Fluid as EngineFluid  # type: ignore
         patched = []
         if not hasattr(EngineFluid, "Rs"):
@@ -182,9 +152,15 @@ def _monkeypatch_engine_fluid_if_needed(adapter):
             patched.append("mu_o")
         if patched:
             print(f"[PVT patch] Injected Fluid methods: {patched}")
-    except Exception as _e:
-        # Silent; patch is only a safety net. We don't want to fail UI if the import path differs.
+    except Exception:
+        # Best-effort safety net only.
         pass
+
+def _pvt_from_state(state):
+    """Build adapter and ensure any legacy Fluid callers are satisfied via monkey-patch."""
+    adapter = _build_pvt_payload_from_state(state)
+    _monkeypatch_engine_fluid_if_needed(adapter)
+    return adapter
 
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     def g(val, label, suffix, color, vmax):
@@ -255,6 +231,22 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
             segs.append([x_ft, y_ft, z0, x_ft, y_ft, z1])
     return np.array(segs, float) if segs else None
 
+def is_location_valid(x_heel_ft, y_heel_ft, state):
+    """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
+    x_max = state['nx'] * state['dx'] - state['L_ft']
+    y_max = state['ny'] * state['dy']
+    if not (0 <= x_heel_ft <= x_max and 0 <= y_heel_ft <= y_max):
+        return False
+    if state.get('use_fault'):
+        plane = state.get('fault_plane', 'i-plane (vertical)')
+        if 'i-plane' in plane:
+            fault_x = state['fault_index'] * state['dx']
+            return abs(x_heel_ft - fault_x) > 2 * state['dx']
+        else:
+            fault_y = state['fault_index'] * state['dy']
+            return abs(y_heel_ft - fault_y) > 2 * state['dy']
+    return True
+
 def _get_sim_preview():
     if 'state' in globals():
         tmp = state.copy()
@@ -264,7 +256,6 @@ def _get_sim_preview():
     return fallback_fast_solver(tmp, rng_preview)
 
 # --- (2) Engine wrapper: use adapter + monkey-patch; NO BlackOilPVT/Fluid conversions here ---
-# === PATCH 3: Engine wrapper using PVT adapter ===
 def run_simulation_engine(state):
     t0 = time.time()
 
@@ -355,7 +346,6 @@ with st.sidebar:
             ))
         st.session_state.sim, st.session_state.apply_preset_payload = None, payload
         _safe_rerun()
-
 
     st.markdown("### Grid (ft)")
     c1, c2, c3 = st.columns(3)
@@ -632,7 +622,6 @@ elif selected_tab == "PVT (Black-Oil)":
     st.plotly_chart(f4, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
         st.markdown("**Gas Viscosity (μg)** is the measure of gas's resistance to flow and is a key input for flow calculations.")
-
 elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
     try:
@@ -705,9 +694,11 @@ elif selected_tab == "RTA":
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
-    
-       st.markdown("This is the **log-log derivative** plot, a core RTA diagnostic tool. The slope indicates the dominant flow regime:\n- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n- **Slope → 0**: Suggests **boundary-dominated flow**.")
-
+        st.markdown(
+            "This is the **log-log derivative** plot, a core RTA diagnostic tool. The slope indicates the dominant flow regime:\n"
+            "- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n"
+            "- **Slope → 0**: Suggests **boundary-dominated flow**."
+        )
 
 elif selected_tab == "Results":
     st.header("Simulation Results")
@@ -811,10 +802,9 @@ elif selected_tab == "Results":
         st.info("Click **Run simulation** to compute and display the full 3D results.")
 
 # ===== end Results =====
-
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
-      sim_data = st.session_state.get("sim")
+    sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
     else:
@@ -1001,10 +991,9 @@ elif selected_tab == "QA / Material Balance":
                 st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
                 with st.expander("Click for details"):
                     st.markdown(
-                        "This is a **Havlena-Odeh** material balance plot for oil reservoirs. It linearizes the complex MBE for solution-gas drive reservoirs.\n"
-                        "- **Theory**: A plot of the total underground withdrawal (F) versus the total fluid and rock expansion (Et) should form a straight line passing through the origin.\n"
-                        "- **Interpretation**: The slope of this line is a direct, independent estimate of the Original Oil In Place (OOIP).\n"
-                        "- **Validation**: The OOIP from this plot is compared to the simulator's results. The **Implied Recovery Factor** is then calculated by dividing the simulator's EUR by the MBE-derived OOIP, providing a critical check on the forecast's plausibility."
+                        "This is a **Havlena-Odeh** material balance plot for solution-gas drive reservoirs.\n"
+                        "- The slope gives an independent **OOIP** estimate.\n"
+                        "- Compare to simulator EUR to sanity-check recovery."
                     )
             else:
                 st.warning("Could not create plots. Pressure and time data have mismatched lengths.")
@@ -1032,7 +1021,6 @@ elif selected_tab == "Economics":
         df = pd.DataFrame({'days': days, 'oil': qo, 'gas_mcfd': qg})
         df['year'] = (df['days'] / 365.25).astype(int)
 
-        # Calculate average daily rate for each year to get yearly volume
         yearly_prod = df.groupby('year')[['oil', 'gas_mcfd']].mean()
         yearly_prod['yearly_oil'] = yearly_prod['oil'] * 365.25
         yearly_prod['yearly_gas_mcf'] = yearly_prod['gas_mcfd'] * 365.25
