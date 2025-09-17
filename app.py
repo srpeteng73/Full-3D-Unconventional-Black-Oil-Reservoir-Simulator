@@ -146,6 +146,7 @@ def _build_pvt_payload_from_state(state):
         include_RsP=bool(state.get('include_RsP', True)),
         pb_psi=pb
     )
+
 # --- Defensive monkey-patch: if engine's Fluid class lacks methods, inject thin wrappers ---
 def _monkeypatch_engine_fluid_if_needed(adapter):
     """
@@ -251,7 +252,7 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
             segs.append([x_ft, y_ft, z0, x_ft, y_ft, z1])
     return np.array(segs, float) if segs else None
 
-def is_location_valid(x_heel_ft, y_heel_ft, state):
+def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
     """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
     x_max = state['nx'] * state['dx'] - state['L_ft']
     y_max = state['ny'] * state['dy']
@@ -1314,11 +1315,12 @@ elif selected_tab == "Well Placement Optimization":
 
         for i in range(iterations):
             # propose a random heel location and check feasibility
-            is_valid = False
-            while not is_valid:
-                x_heel_ft = rng_opt.uniform(0, x_max)
-                y_heel_ft = rng_opt.uniform(50, y_max - 50)
-                is_valid = is_location_valid(x_heel_ft, y_heel_ft, base_state)
+is_valid = False
+while not is_valid:
+    x_heel_ft = rng_opt.uniform(0, x_max)
+    y_heel_ft = rng_opt.uniform(50, y_max - 50)
+    is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)  # <-- renamed
+
 
             temp_state = base_state.copy()
             x_norm = x_heel_ft / (base_state['nx'] * base_state['dx'])
@@ -1425,10 +1427,10 @@ elif selected_tab == "Solver & Profiling":
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-# ---------------- DFN Viewer ----------------
 elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
+
     if segs is None or len(segs) == 0:
         st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
     else:
@@ -1439,15 +1441,20 @@ elif selected_tab == "DFN Viewer":
                 mode="lines", line=dict(width=4, color="red"),
                 name="DFN" if i == 0 else None, showlegend=(i == 0)
             ))
+
         figd.update_layout(
             template="plotly_white",
             scene=dict(xaxis_title="x (ft)", yaxis_title="y (ft)", zaxis_title="z (ft)"),
-            height=640, margin=dict(l=0, r=0, t=40, b=0)
+            height=640, margin=dict(l=0, r=0, t=40, b=0),
+            title="<b>DFN Segments</b>",
         )
         st.plotly_chart(figd, use_container_width=True, theme="streamlit")
+
         with st.expander("Click for details"):
-            st.markdown("""
-            This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
-            - Each **red line** represents an individual natural fracture defined in the input file.
-            - This view is critical for Quality Control (QC) to ensure that the fractures have been loaded correctly and are in the expected location and orientation within the reservoir model.
-            """)
+            st.markdown(
+                """
+                This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
+                - Each **red line** represents an individual natural fracture defined in the input file.
+                - Use this for QC to verify locations/orientations inside the reservoir model.
+                """
+            )
