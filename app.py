@@ -1270,9 +1270,16 @@ elif selected_tab == "Well Placement Optimization":
     st.markdown("#### 1. General Parameters")
     c1_opt, c2_opt, c3_opt = st.columns(3)
     with c1_opt:
-        objective = st.selectbox("Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective")
+        objective = st.selectbox(
+            "Objective Property",
+            ["Maximize Oil EUR", "Maximize Gas EUR"],
+            key="opt_objective"
+        )
     with c2_opt:
-        iterations = st.number_input("Number of optimization steps", 5, 1000, 100, 10)
+        iterations = st.number_input(
+            "Number of optimization steps",
+            min_value=5, max_value=1000, value=100, step=10
+        )
     with c3_opt:
         st.selectbox(
             "Forbidden Zone",
@@ -1284,13 +1291,15 @@ elif selected_tab == "Well Placement Optimization":
     c1_well, c2_well = st.columns(2)
     with c1_well:
         num_wells = st.number_input(
-            "Number of wells to place", 1, 1, 1, disabled=True,
+            "Number of wells to place",
+            min_value=1, max_value=1, value=1,
+            disabled=True,
             help="Currently supports optimizing a single well location."
         )
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
 
-    # Button OUTSIDE the column blocks
+    # Button outside the column blocks
     launch_opt = st.button("🚀 Launch Optimization", use_container_width=True, type="primary")
 
     if launch_opt:
@@ -1313,11 +1322,13 @@ elif selected_tab == "Well Placement Optimization":
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
 
-        for i in range(int(iterations)):
-            # propose a random heel location and check feasibility
+        # Use while-loop to avoid any stray indentation/tab issues around for-loops
+        i = 0
+        while i < int(iterations):
+            # Propose a random heel location and check feasibility
             is_valid = False
             guard = 0
-            while not is_valid and guard < 10000:
+            while (not is_valid) and (guard < 10000):
                 x_heel_ft = rng_opt.uniform(0, x_max)
                 y_heel_ft = rng_opt.uniform(50, y_max - 50)
                 is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)
@@ -1345,6 +1356,8 @@ elif selected_tab == "Well Placement Optimization":
                 (i + 1) / int(iterations),
                 text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
             )
+
+            i += 1
 
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
