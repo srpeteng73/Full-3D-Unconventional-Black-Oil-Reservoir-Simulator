@@ -22,23 +22,20 @@ def _safe_rerun():
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
-def is_location_valid(x_ft, y_ft, state):
-    # Avoid near-fault zone if enabled
+def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
+    """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
+    x_max = state['nx'] * state['dx'] - state['L_ft']
+    y_max = state['ny'] * state['dy']
+    if not (0 <= x_heel_ft <= x_max and 0 <= y_heel_ft <= y_max):
+        return False
     if state.get('use_fault'):
         plane = state.get('fault_plane', 'i-plane (vertical)')
         if 'i-plane' in plane:
             fault_x = state['fault_index'] * state['dx']
-            if abs(x_ft - fault_x) < 2 * state['dx']:
-                return False
+            return abs(x_heel_ft - fault_x) > 2 * state['dx']
         else:
             fault_y = state['fault_index'] * state['dy']
-            if abs(y_ft - fault_y) < 2 * state['dy']:
-                return False
-    # Keep lateral fully inside the model box
-    if x_ft < 0 or (x_ft + state['L_ft']) > state['nx'] * state['dx']:
-        return False
-    if y_ft < 0 or y_ft > state['ny'] * state['dy']:
-        return False
+            return abs(y_heel_ft - fault_y) > 2 * state['dy']
     return True
 
 
@@ -157,25 +154,24 @@ def _monkeypatch_engine_fluid_if_needed(adapter):
         from core.blackoil_pvt1 import Fluid as EngineFluid  # optional; may not exist in all builds
         patched = []
         if not hasattr(EngineFluid, "Rs"):
-            EngineFluid.Rs   = lambda self, p: adapter.Rs(p)     # noqa: E731
+            EngineFluid.Rs   = lambda self, p: adapter.Rs(p)
             patched.append("Rs")
         if not hasattr(EngineFluid, "Bo"):
-            EngineFluid.Bo   = lambda self, p: adapter.Bo(p)     # noqa: E731
+            EngineFluid.Bo   = lambda self, p: adapter.Bo(p)
             patched.append("Bo")
         if not hasattr(EngineFluid, "Bg"):
-            EngineFluid.Bg   = lambda self, p: adapter.Bg(p)     # noqa: E731
+            EngineFluid.Bg   = lambda self, p: adapter.Bg(p)
             patched.append("Bg")
         if not hasattr(EngineFluid, "mu_g"):
-            EngineFluid.mu_g = lambda self, p: adapter.mu_g(p)   # noqa: E731
+            EngineFluid.mu_g = lambda self, p: adapter.mu_g(p)
             patched.append("mu_g")
         if not hasattr(EngineFluid, "mu_o"):
-            EngineFluid.mu_o = lambda self, p: adapter.mu_o(p)   # noqa: E731
+            EngineFluid.mu_o = lambda self, p: adapter.mu_o(p)
             patched.append("mu_o")
         if patched:
             print(f"[PVT patch] Injected Fluid methods: {patched}")
     except Exception:
-        # Swallow: this is just a safety net
-        pass
+        pass  # safety net
 
 # --- Public helper used by run_simulation_engine(...) ---
 def _pvt_from_state(state):
@@ -253,7 +249,6 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
     return np.array(segs, float) if segs else None
 
 def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
-    """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
     x_max = state['nx'] * state['dx'] - state['L_ft']
     y_max = state['ny'] * state['dy']
     if not (0 <= x_heel_ft <= x_max and 0 <= y_heel_ft <= y_max):
@@ -1283,13 +1278,19 @@ elif selected_tab == "Well Placement Optimization":
     with c2_opt:
         iterations = st.number_input("Number of optimization steps", 5, 1000, 100, 10)
     with c3_opt:
-        st.selectbox("Forbidden Zone", ["Numerical Faults"],
-                     help="The optimizer will avoid placing wells near the fault defined in the sidebar.")
+        st.selectbox(
+            "Forbidden Zone",
+            ["Numerical Faults"],
+            help="The optimizer will avoid placing wells near the fault defined in the sidebar."
+        )
+
     st.markdown("#### 2. Well Parameters")
     c1_well, c2_well = st.columns(2)
     with c1_well:
-        num_wells = st.number_input("Number of wells to place", 1, 1, 1, disabled=True,
-                                    help="Currently supports optimizing a single well location.")
+        num_wells = st.number_input(
+            "Number of wells to place", 1, 1, 1, disabled=True,
+            help="Currently supports optimizing a single well location."
+        )
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
 
@@ -1313,14 +1314,13 @@ elif selected_tab == "Well Placement Optimization":
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
 
-        for i in range(iterations):
+        for i in range(int(iterations)):
             # propose a random heel location and check feasibility
-is_valid = False
-while not is_valid:
-    x_heel_ft = rng_opt.uniform(0, x_max)
-    y_heel_ft = rng_opt.uniform(50, y_max - 50)
-    is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)  # <-- renamed
-
+            is_valid = False
+            while not is_valid:
+                x_heel_ft = rng_opt.uniform(0, x_max)
+                y_heel_ft = rng_opt.uniform(50, y_max - 50)
+                is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)
 
             temp_state = base_state.copy()
             x_norm = x_heel_ft / (base_state['nx'] * base_state['dx'])
@@ -1328,8 +1328,17 @@ while not is_valid:
 
             result = fallback_fast_solver(temp_state, rng_opt)
             score = result['EUR_o_MMBO'] if "Oil" in objective else result['EUR_g_BCF']
-            opt_results.append({"Step": i + 1, "x_ft": x_heel_ft, "y_ft": y_heel_ft, "Score": score})
-            progress_bar.progress((i + 1) / iterations, text=f"Step {i+1}/{iterations} | Score: {score:.3f}")
+
+            opt_results.append({
+                "Step": i + 1,
+                "x_ft": float(x_heel_ft),
+                "y_ft": float(y_heel_ft),
+                "Score": float(score),
+            })
+            progress_bar.progress(
+                (i + 1) / int(iterations),
+                text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
+            )
 
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
@@ -1337,6 +1346,7 @@ while not is_valid:
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
         df_results = st.session_state.opt_results
         best_run = df_results.loc[df_results['Score'].idxmax()]
+
         st.markdown("---")
         st.markdown("### Optimization Results")
         c1_res, c2_res = st.columns(2)
@@ -1345,20 +1355,26 @@ while not is_valid:
             score_unit = "MMBO" if "Oil" in st.session_state.get("opt_objective", "Maximize Oil EUR") else "BCF"
             st.metric(label=f"Best Score ({score_unit})", value=f"{best_run['Score']:.3f}")
             st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})")
-            st.write(f"Found at Step: {best_run['Step']}")
+            st.write(f"Found at Step: {int(best_run['Step'])}")
         with c2_res:
             st.markdown("##### Optimization Steps Log")
             st.dataframe(df_results.sort_values("Score", ascending=False).head(10), height=210)
 
         fig_opt = go.Figure()
-        phi_map = get_k_slice(st.session_state.get('phi', np.zeros((state['nz'], state['ny'], state['nx']))),
-                              state['nz'] // 2)
-        fig_opt.add_trace(go.Heatmap(z=phi_map, dx=state['dx'], dy=state['dy'],
-                                     colorscale='viridis', colorbar=dict(title='Porosity')))
+        phi_map = get_k_slice(
+            st.session_state.get('phi', np.zeros((state['nz'], state['ny'], state['nx']))),
+            state['nz'] // 2
+        )
+        fig_opt.add_trace(go.Heatmap(
+            z=phi_map, dx=state['dx'], dy=state['dy'],
+            colorscale='viridis', colorbar=dict(title='Porosity')
+        ))
         fig_opt.add_trace(go.Scatter(
             x=df_results['x_ft'], y=df_results['y_ft'], mode='markers',
-            marker=dict(color=df_results['Score'], colorscale='Reds', showscale=True,
-                        colorbar=dict(title='Score'), size=8, opacity=0.7),
+            marker=dict(
+                color=df_results['Score'], colorscale='Reds', showscale=True,
+                colorbar=dict(title='Score'), size=8, opacity=0.7
+            ),
             name='Tested Locations'
         ))
         fig_opt.add_trace(go.Scatter(
@@ -1369,11 +1385,15 @@ while not is_valid:
         if state.get('use_fault'):
             fault_x = [state['fault_index'] * state['dx'], state['fault_index'] * state['dx']]
             fault_y = [0, state['ny'] * state['dy']]
-            fig_opt.add_trace(go.Scatter(x=fault_x, y=fault_y, mode='lines',
-                                         line=dict(color='white', width=4, dash='dash'), name='Fault'))
-        fig_opt.update_layout(title="<b>Well Placement Optimization Map</b>",
-                              xaxis_title="X position (ft)", yaxis_title="Y position (ft)",
-                              template="plotly_white", height=600)
+            fig_opt.add_trace(go.Scatter(
+                x=fault_x, y=fault_y, mode='lines',
+                line=dict(color='white', width=4, dash='dash'), name='Fault'
+            ))
+        fig_opt.update_layout(
+            title="<b>Well Placement Optimization Map</b>",
+            xaxis_title="X position (ft)", yaxis_title="Y position (ft)",
+            template="plotly_white", height=600
+        )
         st.plotly_chart(fig_opt, use_container_width=True, theme="streamlit")
 
         with st.expander("Click for details"):
@@ -1412,13 +1432,18 @@ elif selected_tab == "Solver & Profiling":
     st.info("This tab shows numerical solver settings and performance of the last run.")
     st.markdown("### Current Numerical Solver Settings")
     solver_settings = {
-        "Parameter": ["Newton Tolerance", "Max Newton Iterations", "Threads", "Use OpenMP", "Use MKL", "Use PyAMG", "Use cuSPARSE"],
-        "Value": [f"{state['newton_tol']:.1e}", state['max_newton'],
-                  "Auto" if state['threads'] == 0 else state['threads'],
-                  "✅" if state['use_omp'] else "❌",
-                  "✅" if state['use_mkl'] else "❌",
-                  "✅" if state['use_pyamg'] else "❌",
-                  "✅" if state['use_cusparse'] else "❌"]
+        "Parameter": [
+            "Newton Tolerance", "Max Newton Iterations", "Threads",
+            "Use OpenMP", "Use MKL", "Use PyAMG", "Use cuSPARSE"
+        ],
+        "Value": [
+            f"{state['newton_tol']:.1e}", state['max_newton'],
+            "Auto" if state['threads'] == 0 else state['threads'],
+            "✅" if state['use_omp'] else "❌",
+            "✅" if state['use_mkl'] else "❌",
+            "✅" if state['use_pyamg'] else "❌",
+            "✅" if state['use_cusparse'] else "❌",
+        ],
     }
     st.table(pd.DataFrame(solver_settings))
     st.markdown("### Profiling")
@@ -1427,10 +1452,10 @@ elif selected_tab == "Solver & Profiling":
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
+# ---------------- DFN Viewer ----------------
 elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
-
     if segs is None or len(segs) == 0:
         st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
     else:
@@ -1441,7 +1466,6 @@ elif selected_tab == "DFN Viewer":
                 mode="lines", line=dict(width=4, color="red"),
                 name="DFN" if i == 0 else None, showlegend=(i == 0)
             ))
-
         figd.update_layout(
             template="plotly_white",
             scene=dict(xaxis_title="x (ft)", yaxis_title="y (ft)", zaxis_title="z (ft)"),
@@ -1449,7 +1473,6 @@ elif selected_tab == "DFN Viewer":
             title="<b>DFN Segments</b>",
         )
         st.plotly_chart(figd, use_container_width=True, theme="streamlit")
-
         with st.expander("Click for details"):
             st.markdown(
                 """
