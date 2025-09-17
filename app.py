@@ -1293,8 +1293,8 @@ elif selected_tab == "Well Placement Optimization":
         )
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
-
-    if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
+    
+        if st.button("🚀 Launch Optimization", use_container_width=True, type="primary"):
         opt_results = []
         base_state = state.copy()
         rng_opt = np.random.default_rng(st.session_state.rng_seed)
@@ -1335,6 +1335,7 @@ elif selected_tab == "Well Placement Optimization":
                 "y_ft": float(y_heel_ft),
                 "Score": float(score),
             })
+
             progress_bar.progress(
                 (i + 1) / int(iterations),
                 text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
@@ -1342,6 +1343,7 @@ elif selected_tab == "Well Placement Optimization":
 
         st.session_state.opt_results = pd.DataFrame(opt_results)
         progress_bar.empty()
+
 
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
         df_results = st.session_state.opt_results
