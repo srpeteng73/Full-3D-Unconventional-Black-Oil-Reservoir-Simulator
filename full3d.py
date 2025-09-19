@@ -1,20 +1,21 @@
 # core/full3d.py
 # -----------------------------------------------------------------------------
 # Minimal working proxy simulate() so the app runs end-to-end,
-# plus Phase 1 scaffolds:
+# plus Phase 1 scaffolds and a minimal implicit Newton driver:
 #   • Gravity + Peaceman WI helpers
 #   • Simple geomech k(p) multiplier
 #   • EDFM connectivity placeholder
 #   • Black-oil residual/Jacobian skeleton (P, Sw, Sg)
-#   • Implicit solver skeleton + analytical proxy/dispatch
+#   • Minimal implicit solver + analytical proxy/dispatch
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
 import numpy as np
 from scipy.sparse import lil_matrix
+from scipy.sparse.linalg import spsolve
 
 # ---------------------------- constants/options ------------------------------
-G_FT_S2 = 32.174  # ft/s^2 (used for gravity head)
+G_FT_S2 = 32.174  # ft/s^2 (gravity head)
 
 DEFAULT_OPTIONS = {
     "use_gravity": True,
@@ -470,30 +471,286 @@ def assemble_jacobian_and_residuals_blackoil(
     meta = {"note": "TPFA black-oil with gravity (vertical faces) + BHP Peaceman wells."}
     return A.tocsr(), R, meta
 
-# ===== BEGIN 3-PHASE IMPLICIT SKELETON =====
-# (kept minimal; raises NotImplementedError so the app still runs via proxy)
-
+# ===== SKELETON stubs kept (not used by driver below) =====
 def assemble_jacobian_and_residuals(state, grid, rock, fluid, schedule, options):
-    """
-    Build residuals (Rw, Ro, Rg) and the 3x3 Jacobian blocks for (p, Sw, Sg).
-    TODO (Phase 1):
-      - Loop faces (x, y, z), compute TPFA transmissibilities per face
-      - Upwind phase fluxes
-      - On z-faces, add hydrostatic term
-      - Accumulate residuals and fill Jacobian sub-blocks
-      - Add well contributions
-    """
     raise NotImplementedError("3-phase assembler pending")
 
 def newton_solve(state0, grid, rock, fluid, schedule, options):
-    """
-    Time-march with Newton iterations using assemble_jacobian_and_residuals.
-    TODO (Phase 1): implement driver, timestep control, convergence, outputs.
-    """
     raise NotImplementedError("Implicit Newton driver pending")
 
+# ===== Minimal implicit Newton driver (black-oil) + simulate() wiring =====
+
+# -- very simple PVT with mild pressure dependence (dev/testing) --
+class _SimplePVT:
+    def __init__(self, pb_psi=3000.0, Bo_pb=1.2, Rs_pb=600.0, mu_o_cp=1.2, mu_g_cp=0.02):
+        self.pb = float(pb_psi)
+        self.Bo_pb = float(Bo_pb)
+        self.Rs_pb = float(Rs_pb)
+        self.mu_o_cp = float(mu_o_cp)
+        self.mu_g_cp = float(mu_g_cp)
+
+    def Bo(self, P):
+        P = np.asarray(P, float)
+        c_o = 1.0e-5  # 1/psi
+        return self.Bo_pb * np.exp(c_o * (self.pb - P))
+
+    def Bg(self, P):
+        P = np.asarray(P, float)
+        c_g = 3.0e-4  # 1/psi
+        return 0.005 * np.exp(-c_g * (self.pb - P))  # ~ rb/scf (scaled)
+
+    def Rs(self, P):
+        P = np.asarray(P, float)
+        return np.minimum(self.Rs_pb, self.Rs_pb * np.clip(P / self.pb, 0.0, None))
+
+    def mu_o(self, P):
+        P = np.asarray(P, float)
+        return np.full_like(P, self.mu_o_cp)
+
+    def mu_g(self, P):
+        P = np.asarray(P, float)
+        return np.full_like(P, self.mu_g_cp)
+
+
+def _build_inputs_for_blackoil(inputs):
+    """
+    Create grid/rock/relperm/init/schedule/options/pvt and initial state from 'inputs'.
+    All arrays are shaped so assembler's reshape(N) lines work.
+    """
+    # --- grid ---
+    nx = int(inputs.get("nx", 10))
+    ny = int(inputs.get("ny", 10))
+    nz = int(inputs.get("nz", 5))
+    dx = float(inputs.get("dx", 100.0))
+    dy = float(inputs.get("dy", 100.0))
+    dz = float(inputs.get("dz", 50.0))
+    grid = {"nx": nx, "ny": ny, "nz": nz, "dx": dx, "dy": dy, "dz": dz}
+    N = nx * ny * nz
+
+    # --- rock ---
+    phi_val = float(inputs.get("phi", 0.08))
+    kx_val = float(inputs.get("kx_md", 100.0))
+    ky_val = float(inputs.get("ky_md", 100.0))
+    rock = {
+        "phi":   np.full(N, phi_val, dtype=float),
+        "kx_md": np.full(N, kx_val, dtype=float),
+        "ky_md": np.full(N, ky_val, dtype=float),
+    }
+
+    # --- initial conditions ---
+    p_init = float(inputs.get("p_init_psi", 5000.0))
+    Sw0 = float(inputs.get("Sw0", 0.20))
+    Sg0 = float(inputs.get("Sg0", 0.05))
+    P0  = np.full(N, p_init, dtype=float)
+    Sw  = np.full(N, Sw0, dtype=float)
+    Sg  = np.full(N, Sg0, dtype=float)
+    state0 = np.empty(3 * N, dtype=float)
+    state0[0::3] = P0
+    state0[1::3] = Sw
+    state0[2::3] = Sg
+    init = {"p_init_psi": p_init}
+
+    # --- relperm params ---
+    relperm = {
+        "nw":       float(inputs.get("nw", 2.0)),
+        "no":       float(inputs.get("no", 2.0)),
+        "krw_end":  float(inputs.get("krw_end", 0.6)),
+        "kro_end":  float(inputs.get("kro_end", 0.8)),
+    }
+
+    # --- schedule (BHP controlled) ---
+    schedule = {
+        "bhp_psi":     float(inputs.get("bhp_psi", 2500.0)),
+        "pad_bhp_psi": float(inputs.get("pad_bhp_psi", inputs.get("bhp_psi", 2500.0))),
+        # 'wells': [...] optional
+    }
+
+    # --- options / controls ---
+    options = {
+        "dt_days":    float(inputs.get("dt_days", 30.0)),   # 1-month step
+        "t_end_days": float(inputs.get("t_end_days", 3650.0)),
+        "use_gravity": bool(inputs.get("use_gravity", True)),
+        "rho_o_lbft3": float(inputs.get("rho_o_lbft3", DEFAULT_OPTIONS["rho_o_lbft3"])),
+        "rho_w_lbft3": float(inputs.get("rho_w_lbft3", DEFAULT_OPTIONS["rho_w_lbft3"])),
+        "rho_g_lbft3": float(inputs.get("rho_g_lbft3", DEFAULT_OPTIONS["rho_g_lbft3"])),
+        "kvkh":        float(inputs.get("kvkh", DEFAULT_OPTIONS["kvkh"])),
+        "geo_alpha":   float(inputs.get("geo_alpha", DEFAULT_OPTIONS["geo_alpha"])),
+    }
+
+    # --- simple PVT ---
+    pvt = _SimplePVT(
+        pb_psi=float(inputs.get("pb_psi", 3000.0)),
+        Bo_pb=float(inputs.get("Bo_pb_rb_stb", 1.2)),
+        Rs_pb=float(inputs.get("Rs_pb_scf_stb", 600.0)),
+        mu_o_cp=float(inputs.get("mu_o_cp", 1.2)),
+        mu_g_cp=float(inputs.get("mu_g_cp", 0.02)),
+    )
+
+    return state0, grid, rock, relperm, init, schedule, options, pvt
+
+
+def _compute_bhp_well_q(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
+                        grid, rock, relperm, schedule):
+    """
+    Recompute simple well oil & gas rates (positive = production) using the
+    same Peaceman + mobilities as apply_wells_blackoil().
+    """
+    nx, ny, nz = [int(grid[k]) for k in ("nx", "ny", "nz")]
+    dx, dy, dz = [float(grid[k]) for k in ("dx", "dy", "dz")]
+
+    def lin(i, j, k): return (k * ny + j) * nx + i
+
+    nw = float(relperm.get("nw", 2.0))
+    no = float(relperm.get("no", 2.0))
+    krw_end = float(relperm.get("krw_end", 0.6))
+    kro_end = float(relperm.get("kro_end", 0.8))
+
+    kx = np.asarray(rock.get("kx_md")).reshape(nz, ny, nx)
+    ky = np.asarray(rock.get("ky_md")).reshape(nz, ny, nx)
+
+    wells = schedule.get("wells")
+    if not wells:
+        pw = float(schedule.get("bhp_psi", 2500.0))
+        wells = [{"i": nx // 2, "j": ny // 2, "k": nz // 2, "bhp_psi": pw, "rw_ft": 0.35, "skin": 0.0}]
+
+    q_o, q_g = 0.0, 0.0
+    for w in wells:
+        i = int(w.get("i", nx // 2))
+        j = int(w.get("j", ny // 2))
+        k = int(w.get("k", nz // 2))
+        c = lin(i, j, k)
+        pw = float(w.get("bhp_psi", 2500.0))
+        rw = float(w.get("rw_ft", 0.35))
+        skin = float(w.get("skin", 0.0))
+
+        wi = peaceman_wi_cartesian(kx[k, j, i], ky[k, j, i], dz, dx, dy, rw_ft=rw, skin=skin)
+
+        muo = max(mu_o[c], 1e-12); mug = max(mu_g[c], 1e-12); muw = max(mu_w[c], 1e-12)
+        lam_o = max(0.0, kro_end * (So[c] ** no) / muo)
+        lam_w = max(0.0, krw_end * (Sw[c] ** nw) / muw)
+        lam_g = max(0.0, (Sg[c] ** 2) / mug)
+
+        dP = P[c] - pw
+        qo = wi * lam_o / max(Bo[c], 1e-12) * dP
+        qg = wi * (lam_g / max(Bg[c], 1e-12) * dP + (Rs[c] * lam_o) / max(Bo[c], 1e-12) * dP)
+
+        q_o += qo
+        q_g += qg
+
+    return q_o, q_g
+
+
+def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt):
+    """
+    Minimal time-marching Newton solver that calls
+    assemble_jacobian_and_residuals_blackoil(...) each iteration.
+    """
+    nx, ny, nz = int(grid["nx"]), int(grid["ny"]), int(grid["nz"])
+    N = nx * ny * nz
+    assert state0.size == 3 * N
+
+    # time controls
+    dt_days = float(options.get("dt_days", 30.0))
+    t_end   = float(options.get("t_end_days", 3650.0))
+    max_newton = int(options.get("max_newton", 10))
+    tol = float(options.get("newton_tol", 1e-6))
+
+    # outputs
+    t_hist = []
+    qo_hist = []
+    qg_hist = []
+
+    # previous (for accumulation) starts as state0
+    Pm = state0[0::3].copy()
+    Swm = state0[1::3].copy()
+    Sgm = state0[2::3].copy()
+
+    t = 0.0
+    state = state0.copy()
+
+    while t < t_end - 1e-9:
+        # freeze "prev" for this step
+        step_opts = dict(options)
+        step_opts["prev"] = {"P": Pm, "Sw": Swm, "Sg": Sgm}
+
+        # Newton loop
+        for _ in range(max_newton):
+            A, R, _ = assemble_jacobian_and_residuals_blackoil(
+                state, grid, rock, pvt, relperm, init, schedule, step_opts
+            )
+            normR = float(np.linalg.norm(R, ord=np.inf))
+            if normR < tol:
+                break
+
+            # Solve J dx = -R
+            try:
+                dx = spsolve(A, -R)
+            except Exception:
+                A = A.tolil()
+                diag_idx = np.arange(A.shape[0])
+                A[diag_idx, diag_idx] = A[diag_idx, diag_idx] + 1e-12
+                A = A.tocsr()
+                dx = spsolve(A, -R)
+
+            # Update with simple damping & saturation projection
+            new_state = state + dx
+
+            # project saturations to [eps, 1-eps] and renormalize So
+            eps = 1e-9
+            Pn  = new_state[0::3]
+            Swn = np.clip(new_state[1::3], eps, 1.0 - eps)
+            Sgn = np.clip(new_state[2::3], eps, 1.0 - eps)
+            Son = 1.0 - Swn - Sgn
+            bad = Son < eps
+            if np.any(bad):
+                total = Swn[bad] + Sgn[bad]
+                total = np.maximum(total, 1e-12)
+                scale = (1.0 - eps) / total
+                Swn[bad] *= scale
+                Sgn[bad] *= scale
+                Son = 1.0 - Swn - Sgn
+
+            # write back
+            state[0::3] = Pn
+            state[1::3] = Swn
+            state[2::3] = Sgn
+
+        # after Newton (converged or maxed), advance time and compute simple rates
+        P = state[0::3]; Sw = state[1::3]; Sg = state[2::3]; So = 1.0 - Sw - Sg
+
+        Bo = np.asarray(pvt.Bo(P))
+        Bg = np.asarray(pvt.Bg(P))
+        Rs = np.asarray(pvt.Rs(P))
+        mu_o = np.asarray(pvt.mu_o(P))
+        mu_g = np.asarray(pvt.mu_g(P))
+        mu_w = np.full_like(P, 0.5)
+        Bw = np.ones_like(P)
+
+        qo, qg = _compute_bhp_well_q(
+            P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
+            grid, rock, relperm, schedule
+        )
+
+        t += dt_days
+        t_hist.append(t)
+        qo_hist.append(qo)
+        qg_hist.append(qg)
+
+        # roll "prev" for next step
+        Pm, Swm, Sgm = P.copy(), Sw.copy(), Sg.copy()
+
+    return {
+        "t": np.asarray(t_hist, float),        # days
+        "qo": np.asarray(qo_hist, float),      # ~STB/day
+        "qg": np.asarray(qg_hist, float),      # ~Mscf/day
+        "press_matrix": None,
+        "pm_mid_psi": None,
+        "p_init_3d": init.get("p_init_psi", None),
+        "ooip_3d": None,
+    }
+
+# --- analytical proxy (kept so the app can still run fast) ---
 def _simulate_analytical_proxy(inputs: dict):
-    """Fast decline-proxy so the UI works while implicit solver is built."""
     t = np.linspace(1.0, 3650.0, 240)  # days (~10 years)
     qi_g, di_g = 8000.0, 0.80   # Mcf/d, 1/yr
     qi_o, di_o = 1000.0, 0.70   # stb/d, 1/yr
@@ -510,17 +767,17 @@ def _simulate_analytical_proxy(inputs: dict):
         "ooip_3d": None,
     }
 
+# --- simulate() dispatch: analytical vs implicit ---
 def simulate(inputs: dict):
     """
     Dispatch: analytical proxy OR implicit engine.
     Set inputs['engine'] to 'analytical' or 'implicit'.
     """
-    engine = inputs.get("engine", "analytical").lower()
+    engine = inputs.get("engine", "analytical").lower().strip()
     if engine == "analytical":
         return _simulate_analytical_proxy(inputs)
     elif engine == "implicit":
-        # TODO: build grid/rock/fluid/state/schedule/options and call newton_solve(...)
-        raise NotImplementedError("Implicit engine wiring pending")
+        state0, grid, rock, relperm, init, schedule, options, pvt = _build_inputs_for_blackoil(inputs)
+        return newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt)
     else:
         raise ValueError(f"Unknown engine '{engine}'")
-# ===== END 3-PHASE IMPLICIT SKELETON =====
