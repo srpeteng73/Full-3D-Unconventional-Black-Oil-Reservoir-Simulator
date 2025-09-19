@@ -587,7 +587,23 @@ if selected_tab == "Setup Preview":
                 "- **Facies Style**: The method used to generate geological heterogeneity.\n"
                 "- **Anisotropy**: The ratio of permeability in the X-direction (kx) to the Y-direction (ky)."
             )
-
+                with st.expander("Preset sanity check (debug)"):
+            st.write({
+                "Play selected": st.session_state.get("play_sel"),
+                "Model Type (sim_mode)": st.session_state.get("sim_mode"),
+                "fluid_model": st.session_state.get("fluid_model"),
+                "Engine Type": st.session_state.get("engine_type"),
+                # a few preset-driven values to verify
+                "L_ft": state.get("L_ft"),
+                "stage_spacing_ft": state.get("stage_spacing_ft"),
+                "xf_ft": state.get("xf_ft"),
+                "hf_ft": state.get("hf_ft"),
+                "pb_psi": state.get("pb_psi"),
+                "Rs_pb_scf_stb": state.get("Rs_pb_scf_stb"),
+                "Bo_pb_rb_stb": state.get("Bo_pb_rb_stb"),
+                "p_init_psi": state.get("p_init_psi"),
+            })
+ 
         st.markdown("#### Well & Frac Summary")
         well_data = {
             "Parameter": ["Laterals", "Lateral Length (ft)", "Frac Half-length (ft)", "Frac Height (ft)", "Stages", "Clusters/Stage"],
