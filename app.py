@@ -93,82 +93,78 @@ if st.session_state.apply_preset_payload is not None:
     st.session_state.apply_preset_payload = None
     _safe_rerun()
 
-# ------------------------ Presets ------------------------
+# ------------------------ PRESETS (US + Canada Shale Plays) ------------------------
+# Typical, rounded values for quick-start modeling. Tune as needed per asset.
 PLAY_PRESETS = {
-    # --- United States ---
-    "Permian – Wolfcamp (Midland)": dict(
+    # --- UNITED STATES ---
+    "Permian – Midland (Oil)": dict(
         L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
         Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0
     ),
-    "Permian – Bone Spring (Delaware)": dict(
-        L_ft=9500.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=170.0,
-        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.33, p_init_psi=6000.0
+    "Permian – Delaware (Oil/Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=200.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6000.0
     ),
-    "Eagle Ford – Oil Window": dict(
+    "Eagle Ford (Oil Window)": dict(
         L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
         Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0
     ),
-    "Eagle Ford – Gas/Condensate": dict(
-        L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=320.0, hf_ft=170.0,
-        Rs_pb_scf_stb=900.0, pb_psi=5200.0, Bo_pb_rb_stb=1.25, p_init_psi=6000.0
+    "Eagle Ford (Condensate)": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=300.0, hf_ft=160.0,
+        Rs_pb_scf_stb=900.0, pb_psi=5600.0, Bo_pb_rb_stb=1.30, p_init_psi=5800.0
     ),
-    "Bakken – Middle Bakken": dict(
-        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=250.0, hf_ft=120.0,
-        Rs_pb_scf_stb=450.0, pb_psi=4300.0, Bo_pb_rb_stb=1.40, p_init_psi=4800.0
+    "Bakken / Three Forks (Oil)": dict(
+        L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=280.0, hf_ft=160.0,
+        Rs_pb_scf_stb=350.0, pb_psi=4300.0, Bo_pb_rb_stb=1.20, p_init_psi=4700.0
     ),
-    "Haynesville – Dry Gas": dict(
-        L_ft=10000.0, stage_spacing_ft=180.0, xf_ft=350.0, hf_ft=200.0,
-        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8000.0
+    "Haynesville (Dry Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=200.0, xf_ft=350.0, hf_ft=180.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7000.0
     ),
-    "Marcellus – NE PA (Dry Gas)": dict(
-        L_ft=8500.0, stage_spacing_ft=200.0, xf_ft=300.0, hf_ft=160.0,
-        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0
+    "Marcellus (Dry Gas)": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=300.0, hf_ft=150.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5200.0
     ),
-    "Utica – Liquids Rich (OH/PA)": dict(
-        L_ft=9000.0, stage_spacing_ft=220.0, xf_ft=320.0, hf_ft=170.0,
-        Rs_pb_scf_stb=600.0, pb_psi=5200.0, Bo_pb_rb_stb=1.30, p_init_psi=6200.0
+    "Utica (Liquids-Rich)": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=180.0,
+        Rs_pb_scf_stb=400.0, pb_psi=5000.0, Bo_pb_rb_stb=1.22, p_init_psi=5500.0
     ),
-    "Niobrara (DJ) – Oil": dict(
-        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=260.0, hf_ft=140.0,
-        Rs_pb_scf_stb=500.0, pb_psi=4000.0, Bo_pb_rb_stb=1.38, p_init_psi=4500.0
-    ),
-    "Barnett – Core (Gas)": dict(
-        L_ft=8000.0, stage_spacing_ft=180.0, xf_ft=250.0, hf_ft=120.0,
-        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5000.0
-    ),
-    "Anadarko – Woodford": dict(
-        L_ft=9500.0, stage_spacing_ft=220.0, xf_ft=300.0, hf_ft=160.0,
-        Rs_pb_scf_stb=300.0, pb_psi=4500.0, Bo_pb_rb_stb=1.25, p_init_psi=5200.0
-    ),
-    "Granite Wash (TX/OK)": dict(
-        L_ft=8500.0, stage_spacing_ft=220.0, xf_ft=280.0, hf_ft=150.0,
-        Rs_pb_scf_stb=200.0, pb_psi=4200.0, Bo_pb_rb_stb=1.20, p_init_psi=5200.0
-    ),
-    "Fayetteville (AR) – Gas": dict(
-        L_ft=7000.0, stage_spacing_ft=180.0, xf_ft=220.0, hf_ft=110.0,
+    "Barnett (Gas)": dict(
+        L_ft=6500.0, stage_spacing_ft=200.0, xf_ft=250.0, hf_ft=120.0,
         Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=4200.0
     ),
-
-    # --- Canada ---
-    "Montney (BC/AB) – Liquids Rich": dict(
-        L_ft=10000.0, stage_spacing_ft=210.0, xf_ft=350.0, hf_ft=180.0,
-        Rs_pb_scf_stb=800.0, pb_psi=5200.0, Bo_pb_rb_stb=1.27, p_init_psi=7000.0
+    "Niobrara / DJ (Oil)": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=140.0,
+        Rs_pb_scf_stb=250.0, pb_psi=3800.0, Bo_pb_rb_stb=1.18, p_init_psi=4200.0
     ),
-    "Duvernay (AB) – Condensate": dict(
-        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=170.0,
-        Rs_pb_scf_stb=850.0, pb_psi=5400.0, Bo_pb_rb_stb=1.28, p_init_psi=6800.0
+    "Anadarko – Woodford": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=300.0, hf_ft=160.0,
+        Rs_pb_scf_stb=300.0, pb_psi=4600.0, Bo_pb_rb_stb=1.20, p_init_psi=5000.0
     ),
-    "Horn River (BC) – Dry Gas": dict(
-        L_ft=9000.0, stage_spacing_ft=200.0, xf_ft=320.0, hf_ft=180.0,
-        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7500.0
+    "Granite Wash": dict(
+        L_ft=8000.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=150.0,
+        Rs_pb_scf_stb=200.0, pb_psi=4200.0, Bo_pb_rb_stb=1.15, p_init_psi=4600.0
     ),
-    "Viking (AB/SK) – Light Oil": dict(
-        L_ft=7000.0, stage_spacing_ft=200.0, xf_ft=220.0, hf_ft=110.0,
-        Rs_pb_scf_stb=300.0, pb_psi=3800.0, Bo_pb_rb_stb=1.32, p_init_psi=4200.0
+    "Fayetteville (Gas)": dict(
+        L_ft=6000.0, stage_spacing_ft=200.0, xf_ft=240.0, hf_ft=120.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=3500.0
     ),
-    "Cardium (AB) – Light Oil": dict(
-        L_ft=8000.0, stage_spacing_ft=220.0, xf_ft=240.0, hf_ft=120.0,
-        Rs_pb_scf_stb=350.0, pb_psi=4000.0, Bo_pb_rb_stb=1.33, p_init_psi=4600.0
+    "Tuscaloosa Marine (Oil)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=160.0,
+        Rs_pb_scf_stb=450.0, pb_psi=5000.0, Bo_pb_rb_stb=1.25, p_init_psi=5400.0
+    ),
+    # --- CANADA ---
+    "Montney (Condensate-Rich)": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=330.0, hf_ft=180.0,
+        Rs_pb_scf_stb=600.0, pb_psi=5200.0, Bo_pb_rb_stb=1.28, p_init_psi=5600.0
+    ),
+    "Duvernay (Liquids)": dict(
+        L_ft=9500.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=180.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.32, p_init_psi=5800.0
+    ),
+    "Horn River (Dry Gas)": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=170.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0
     ),
 }
 
@@ -434,7 +430,37 @@ with st.sidebar:
     st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
 
     # Shale play presets
+   # --- Shale Play preset (with tiny resource tag next to selector) ---
+c_play, c_tag = st.columns([4, 1])
+with c_play:
     play = st.selectbox("Shale Play Preset", PLAY_LIST, index=0, key="play_sel")
+
+with c_tag:
+    def _resource_label(name: str) -> str:
+        s = name.lower()
+        if "dry gas" in s or ("gas" in s and "oil" not in s and "condensate" not in s and "liquids" not in s):
+            return "Gas"
+        if "condensate" in s:
+            return "Condensate"
+        if "liquids" in s:
+            return "Liquids"
+        if "oil" in s:
+            return "Oil"
+        return "Mixed"
+
+    res = _resource_label(play)
+    st.markdown(
+        f"""
+        <div style="margin-top: 28px; text-align:center;">
+            <span style="
+                display:inline-block; padding:2px 8px; border-radius:999px;
+                background:#eef6ff; border:1px solid #b6d4fe; font-size:12px;
+                color:#0b5ed7; white-space:nowrap;">{res}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
     # Apply preset
     if st.button("Apply Preset", use_container_width=True):
