@@ -7,6 +7,7 @@
 #   • EDFM connectivity placeholder
 #   • Black-oil residual/Jacobian skeleton (P, Sw, Sg)
 #   • Minimal implicit solver + analytical proxy/dispatch
+#   • BHP or RATE-controlled wells (gas/oil/liquid) via equivalent BHP
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -68,7 +69,51 @@ def build_edfm_connectivity(grid: dict, dfn_segments: np.ndarray | None):
         return {"mf_T": [], "ff_T": [], "frac_cells": None}
     return {"mf_T": [], "ff_T": [], "frac_cells": None}
 
-# ---------------------- BHP-controlled Peaceman wells ------------------------
+# ---------- helper: pick equivalent pw for BHP or RATE-controlled wells ------
+def _effective_pw_for_control(ctrl, Pcell, co, cw, cg, w, schedule):
+    """
+    Return an equivalent BHP 'pw' for the requested control, using current
+    cell coefficients co/cw/cg (ΔP → component rates). This makes RATE controls
+    behave like a BHP well that hits the target rate.
+    """
+    ctrl = (ctrl or "").upper()
+
+    def _bhp_default():
+        return float(
+            w.get(
+                "bhp_psi",
+                schedule.get("bhp_psi", schedule.get("pad_bhp_psi", 2500.0)),
+            )
+        )
+
+    if ctrl == "BHP":
+        return _bhp_default()
+
+    if ctrl == "RATE_GAS_MSCFD":
+        q_tgt = float(
+            w.get(
+                "rate_mscfd",
+                schedule.get("rate_mscfd", schedule.get("pad_rate_mscfd", 0.0)),
+            )
+        )
+        dP_req = q_tgt / max(cg, 1e-30)
+        return Pcell - dP_req
+
+    if ctrl == "RATE_OIL_STBD":
+        q_tgt = float(w.get("rate_stbd", schedule.get("rate_stbd", 0.0)))
+        dP_req = q_tgt / max(co, 1e-30)
+        return Pcell - dP_req
+
+    if ctrl == "RATE_LIQ_STBD":
+        q_tgt = float(w.get("rate_stbd", schedule.get("rate_stbd", 0.0)))
+        cl = co + cw
+        dP_req = q_tgt / max(cl, 1e-30)
+        return Pcell - dP_req
+
+    # unknown → fallback to BHP
+    return _bhp_default()
+
+# ---------------------- BHP/RATE-controlled Peaceman wells -------------------
 def apply_wells_blackoil(
     A, R,
     grid, rock,
@@ -79,12 +124,15 @@ def apply_wells_blackoil(
     schedule, options,
 ):
     """
-    Adds BHP-controlled well source terms (Peaceman WI).
-    Component residuals:
-      oil:  + q_o_comp =  WI * lam_o/Bo * (P - pw)
-      wat:  + q_w_comp =  WI * lam_w/Bw * (P - pw)
-      gas:  + q_g_comp =  WI * [lam_g/Bg*(P - pw) + Rs*lam_o/Bo*(P - pw)]
-    lam = kr/mu evaluated in the completed cell (upstream/frozen for Jacobian).
+    Adds BHP or RATE-controlled well source terms (Peaceman WI).
+    Controls supported (case-insensitive):
+      - 'BHP'                 → use w['bhp_psi'] (or schedule['bhp_psi'])
+      - 'RATE_GAS_MSCFD'      → match total gas component rate (free + Rs*oil)
+      - 'RATE_OIL_STBD'       → match oil component rate
+      - 'RATE_LIQ_STBD'       → match liquid (oil + water) component rate
+
+    RATE modes compute an equivalent BHP 'pw' from current co/cw/cg to hit
+    the target rate. Jacobian treatment matches BHP (frozen props).
     """
     nx, ny, nz = [int(grid[k]) for k in ("nx", "ny", "nz")]
     dx, dy, dz = [float(grid[k]) for k in ("dx", "dy", "dz")]
@@ -107,10 +155,14 @@ def apply_wells_blackoil(
     # wells spec
     wells = schedule.get("wells")
     if not wells:
-        pw = float(schedule.get("bhp_psi", 2500.0))
+        ctrl = str(schedule.get("control", schedule.get("pad_ctrl", "BHP"))).upper()
         wells = [{
             "i": nx // 2, "j": ny // 2, "k": nz // 2,
-            "bhp_psi": pw, "rw_ft": 0.35, "skin": 0.0,
+            "control": ctrl,
+            "bhp_psi": float(schedule.get("bhp_psi", schedule.get("pad_bhp_psi", 2500.0))),
+            "rate_mscfd": float(schedule.get("rate_mscfd", schedule.get("pad_rate_mscfd", 0.0))),
+            "rate_stbd":  float(schedule.get("rate_stbd",  schedule.get("pad_rate_stbd",  0.0))),
+            "rw_ft": 0.35, "skin": 0.0,
         }]
 
     kx = np.asarray(rock.get("kx_md", 100.0)).reshape(nz, ny, nx)
@@ -121,7 +173,8 @@ def apply_wells_blackoil(
         j = int(w.get("j", ny // 2))
         k = int(w.get("k", nz // 2))
         c = lin(i, j, k)
-        pw = float(w.get("bhp_psi", 2500.0))
+
+        ctrl = str(w.get("control", schedule.get("control", schedule.get("pad_ctrl", "BHP")))).upper()
         rw = float(w.get("rw_ft", 0.35))
         skin = float(w.get("skin", 0.0))
 
@@ -129,39 +182,47 @@ def apply_wells_blackoil(
 
         # local props (completed cell)
         muo = max(mu_o[c], 1e-12); mug = max(mu_g[c], 1e-12); muw = max(mu_w[c], 1e-12)
-        lam_o = np.maximum(0.0, (kro_end * ((So[c]) ** no)) / muo)
-        lam_w = np.maximum(0.0, (krw_end * ((Sw[c]) ** nw)) / muw)
-        lam_g = np.maximum(0.0, (Sg[c] ** 2) / mug)  # default gas kr ~ s^2
+        lam_o = np.maximum(0.0, (kro_end * (So[c] ** no)) / muo)
+        lam_w = np.maximum(0.0, (krw_end * (Sw[c] ** nw)) / muw)
+        lam_g = np.maximum(0.0, (Sg[c] ** 2) / mug)
 
-        co = wi * lam_o / max(Bo[c], 1e-12)
-        cw = wi * lam_w / max(Bw[c], 1e-12)
-        cg = wi * (lam_g / max(Bg[c], 1e-12) + (Rs[c] * lam_o) / max(Bo[c], 1e-12))
+        Bo_c = max(Bo[c], 1e-12)
+        Bw_c = max(Bw[c], 1e-12)
+        Bg_c = max(Bg[c], 1e-12)
+        Rs_c = Rs[c]
 
-        dP = P[c] - pw
+        # coefficients mapping ΔP → component rates at the well cell
+        co = wi * lam_o / Bo_c
+        cw = wi * lam_w / Bw_c
+        cg = wi * (lam_g / Bg_c + (Rs_c * lam_o) / Bo_c)
+
+        # find equivalent pw for the chosen control
+        pw = _effective_pw_for_control(ctrl, P[c], co, cw, cg, w, schedule)
+        dP = P[c] - pw  # positive for production (outflow)
 
         # residual (outflow from cell is positive)
-        R[3 * c + 0] += co * dP  # oil comp
-        R[3 * c + 1] += cw * dP  # water comp
-        R[3 * c + 2] += cg * dP  # gas comp
+        R[3 * c + 0] += co * dP  # oil component
+        R[3 * c + 1] += cw * dP  # water component
+        R[3 * c + 2] += cg * dP  # gas component
 
-        # Jacobian wrt P(c)
+        # Jacobian wrt P(c) (frozen props)
         A[3 * c + 0, 3 * c + 0] += co
         A[3 * c + 1, 3 * c + 0] += cw
         A[3 * c + 2, 3 * c + 0] += cg
 
-        # Saturation derivatives via lam’s
+        # Saturation derivatives via lam’s (frozen at cell)
         dlamo_dSo = dkro_dSo(So[c]) / muo
         dlamo_dSw = -dlamo_dSo
         dlamo_dSg = -dlamo_dSo
         dlamw_dSw = dkrw_dSw(Sw[c]) / muw
         dlamg_dSg = 2.0 * np.maximum(Sg[c], 0.0) / mug
 
-        dco_dSw = wi * (dlamo_dSw / max(Bo[c], 1e-12))
-        dco_dSg = wi * (dlamo_dSg / max(Bo[c], 1e-12))
-        dcw_dSw = wi * (dlamw_dSw / max(Bw[c], 1e-12))
-        dcg_dSg = wi * (dlamg_dSg / max(Bg[c], 1e-12))
-        dcg_dSw = wi * ((Rs[c] * dlamo_dSw) / max(Bo[c], 1e-12))
-        dcg_dSg2 = wi * ((Rs[c] * dlamo_dSg) / max(Bo[c], 1e-12))
+        dco_dSw = wi * (dlamo_dSw / Bo_c)
+        dco_dSg = wi * (dlamo_dSg / Bo_c)
+        dcw_dSw = wi * (dlamw_dSw / Bw_c)
+        dcg_dSg = wi * (dlamg_dSg / Bg_c)
+        dcg_dSw = wi * ((Rs_c * dlamo_dSw) / Bo_c)
+        dcg_dSg2 = wi * ((Rs_c * dlamo_dSg) / Bo_c)
 
         # apply on residual rows (multiply by dP)
         A[3 * c + 0, 3 * c + 1] += dco_dSw * dP
@@ -186,7 +247,7 @@ def assemble_jacobian_and_residuals_blackoil(
       • Accumulation (implicit) + derivatives wrt P/Sw/Sg
       • Flux upwinding
       • Gravity term on vertical faces: ΔΦ = ΔP − ρ_up * g * Δz (phase-wise)
-      • Peaceman WI wells (BHP-controlled)
+      • Peaceman WI wells (BHP-controlled or RATE via equivalent BHP)
     """
     # ---- index helpers ----
     def iP(i):  return 3 * i
@@ -459,7 +520,7 @@ def assemble_jacobian_and_residuals_blackoil(
                     T = (harm(kz[c], kz[n]) * (dx * dy)) / max(dz, 1e-30)
                     add_face(c, n, T, dz_ft=(Zc[c] - Zc[n]))
 
-    # ---- wells (BHP-controlled, Peaceman WI) ----
+    # ---- wells (BHP/RATE via equivalent BHP) ----
     apply_wells_blackoil(
         A, R, grid, rock,
         P, Sw, Sg, So,
@@ -468,7 +529,7 @@ def assemble_jacobian_and_residuals_blackoil(
         relperm, schedule, options
     )
 
-    meta = {"note": "TPFA black-oil with gravity (vertical faces) + BHP Peaceman wells."}
+    meta = {"note": "TPFA black-oil with gravity (vertical faces) + Peaceman wells (BHP or RATE)."}
     return A.tocsr(), R, meta
 
 # ===== SKELETON stubs kept (not used by driver below) =====
@@ -558,11 +619,17 @@ def _build_inputs_for_blackoil(inputs):
         "kro_end":  float(inputs.get("kro_end", 0.8)),
     }
 
-    # --- schedule (BHP controlled) ---
+    # --- schedule (BHP or RATE controlled) ---
     schedule = {
-        "bhp_psi":     float(inputs.get("bhp_psi", 2500.0)),
-        "pad_bhp_psi": float(inputs.get("pad_bhp_psi", inputs.get("bhp_psi", 2500.0))),
-        # 'wells': [...] optional
+        "control":        str(inputs.get("control", "BHP")),
+        "bhp_psi":        float(inputs.get("bhp_psi", 2500.0)),
+        "pad_bhp_psi":    float(inputs.get("pad_bhp_psi", inputs.get("bhp_psi", 2500.0))),
+        # Optional RATE targets:
+        "rate_mscfd":     float(inputs.get("rate_mscfd", 0.0)),  # for RATE_GAS_MSCFD
+        "pad_rate_mscfd": float(inputs.get("pad_rate_mscfd", inputs.get("rate_mscfd", 0.0))),
+        "rate_stbd":      float(inputs.get("rate_stbd", 0.0)),   # for RATE_OIL_STBD / RATE_LIQ_STBD
+        "pad_rate_stbd":  float(inputs.get("pad_rate_stbd", inputs.get("rate_stbd", 0.0))),
+        # "wells": [...]  # optional explicit completions
     }
 
     # --- options / controls ---
@@ -592,8 +659,9 @@ def _build_inputs_for_blackoil(inputs):
 def _compute_bhp_well_q(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
                         grid, rock, relperm, schedule):
     """
-    Recompute simple well oil & gas rates (positive = production) using the
-    same Peaceman + mobilities as apply_wells_blackoil().
+    Compute oil & gas component rates (positive = production) using the same
+    Peaceman WI + mobilities and the same control logic (BHP or RATE) as
+    apply_wells_blackoil(). Ensures reported rates reflect the active control.
     """
     nx, ny, nz = [int(grid[k]) for k in ("nx", "ny", "nz")]
     dx, dy, dz = [float(grid[k]) for k in ("dx", "dy", "dz")]
@@ -605,13 +673,20 @@ def _compute_bhp_well_q(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
     krw_end = float(relperm.get("krw_end", 0.6))
     kro_end = float(relperm.get("kro_end", 0.8))
 
-    kx = np.asarray(rock.get("kx_md")).reshape(nz, ny, nx)
-    ky = np.asarray(rock.get("ky_md")).reshape(nz, ny, nx)
+    kx = np.asarray(rock.get("kx_md", 100.0)).reshape(nz, ny, nx)
+    ky = np.asarray(rock.get("ky_md", 100.0)).reshape(nz, ny, nx)
 
     wells = schedule.get("wells")
     if not wells:
-        pw = float(schedule.get("bhp_psi", 2500.0))
-        wells = [{"i": nx // 2, "j": ny // 2, "k": nz // 2, "bhp_psi": pw, "rw_ft": 0.35, "skin": 0.0}]
+        ctrl = str(schedule.get("control", schedule.get("pad_ctrl", "BHP"))).upper()
+        wells = [{
+            "i": nx // 2, "j": ny // 2, "k": nz // 2,
+            "control": ctrl,
+            "bhp_psi": float(schedule.get("bhp_psi", schedule.get("pad_bhp_psi", 2500.0))),
+            "rate_mscfd": float(schedule.get("rate_mscfd", schedule.get("pad_rate_mscfd", 0.0))),
+            "rate_stbd":  float(schedule.get("rate_stbd",  schedule.get("pad_rate_stbd",  0.0))),
+            "rw_ft": 0.35, "skin": 0.0,
+        }]
 
     q_o, q_g = 0.0, 0.0
     for w in wells:
@@ -619,20 +694,33 @@ def _compute_bhp_well_q(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
         j = int(w.get("j", ny // 2))
         k = int(w.get("k", nz // 2))
         c = lin(i, j, k)
-        pw = float(w.get("bhp_psi", 2500.0))
+
+        ctrl = str(w.get("control", schedule.get("control", schedule.get("pad_ctrl", "BHP")))).upper()
         rw = float(w.get("rw_ft", 0.35))
         skin = float(w.get("skin", 0.0))
 
         wi = peaceman_wi_cartesian(kx[k, j, i], ky[k, j, i], dz, dx, dy, rw_ft=rw, skin=skin)
 
-        muo = max(mu_o[c], 1e-12); mug = max(mu_g[c], 1e-12); muw = max(mu_w[c], 1e-12)
+        muo = max(mu_o[c], 1e-12); mug = max(mu_g[c], 1e-12)
+        muw = max(mu_w[c], 1e-12)
         lam_o = max(0.0, kro_end * (So[c] ** no) / muo)
         lam_w = max(0.0, krw_end * (Sw[c] ** nw) / muw)
         lam_g = max(0.0, (Sg[c] ** 2) / mug)
 
+        Bo_c = max(Bo[c], 1e-12)
+        Bw_c = max(Bw[c], 1e-12)
+        Bg_c = max(Bg[c], 1e-12)
+        Rs_c = Rs[c]
+
+        co = wi * lam_o / Bo_c
+        cw = wi * lam_w / Bw_c
+        cg = wi * (lam_g / Bg_c + (Rs_c * lam_o) / Bo_c)
+
+        pw = _effective_pw_for_control(ctrl, P[c], co, cw, cg, w, schedule)
         dP = P[c] - pw
-        qo = wi * lam_o / max(Bo[c], 1e-12) * dP
-        qg = wi * (lam_g / max(Bg[c], 1e-12) * dP + (Rs[c] * lam_o) / max(Bo[c], 1e-12) * dP)
+
+        qo = co * dP
+        qg = cg * dP
 
         q_o += qo
         q_g += qg
