@@ -95,38 +95,84 @@ if st.session_state.apply_preset_payload is not None:
 
 # ------------------------ Presets ------------------------
 PLAY_PRESETS = {
-    # --- USA ---
-    "Permian Basin (Midland)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
-                                    Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0),
-    "Permian Basin (Delaware)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=320.0, hf_ft=190.0,
-                                     Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6000.0),
-    "Eagle Ford (Oil Window)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
-                                    Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
-    "Eagle Ford (Gas/Condensate)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=300.0, hf_ft=160.0,
-                                        Rs_pb_scf_stb=900.0, pb_psi=6000.0, Bo_pb_rb_stb=1.30, p_init_psi=6200.0),
-    "Bakken (Williston)": dict(L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=290.0, hf_ft=160.0,
-                               Rs_pb_scf_stb=500.0, pb_psi=4800.0, Bo_pb_rb_stb=1.32, p_init_psi=5200.0),
-    "Haynesville": dict(L_ft=9500.0, stage_spacing_ft=200.0, xf_ft=350.0, hf_ft=200.0,
-                        Rs_pb_scf_stb=200.0, pb_psi=3000.0, Bo_pb_rb_stb=1.15, p_init_psi=8500.0),
-    "Marcellus": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=340.0, hf_ft=180.0,
-                      Rs_pb_scf_stb=150.0, pb_psi=2800.0, Bo_pb_rb_stb=1.10, p_init_psi=7000.0),
-    "Utica": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=170.0,
-                  Rs_pb_scf_stb=250.0, pb_psi=3500.0, Bo_pb_rb_stb=1.18, p_init_psi=7500.0),
-    "DJ Basin (Niobrara)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=260.0, hf_ft=150.0,
-                                Rs_pb_scf_stb=600.0, pb_psi=5000.0, Bo_pb_rb_stb=1.33, p_init_psi=5300.0),
-    "Barnett": dict(L_ft=8000.0, stage_spacing_ft=200.0, xf_ft=280.0, hf_ft=150.0,
-                    Rs_pb_scf_stb=180.0, pb_psi=3000.0, Bo_pb_rb_stb=1.12, p_init_psi=5000.0),
+    # --- United States ---
+    "Permian – Wolfcamp (Midland)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
+        Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0
+    ),
+    "Permian – Bone Spring (Delaware)": dict(
+        L_ft=9500.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=170.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.33, p_init_psi=6000.0
+    ),
+    "Eagle Ford – Oil Window": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0
+    ),
+    "Eagle Ford – Gas/Condensate": dict(
+        L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=320.0, hf_ft=170.0,
+        Rs_pb_scf_stb=900.0, pb_psi=5200.0, Bo_pb_rb_stb=1.25, p_init_psi=6000.0
+    ),
+    "Bakken – Middle Bakken": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=250.0, hf_ft=120.0,
+        Rs_pb_scf_stb=450.0, pb_psi=4300.0, Bo_pb_rb_stb=1.40, p_init_psi=4800.0
+    ),
+    "Haynesville – Dry Gas": dict(
+        L_ft=10000.0, stage_spacing_ft=180.0, xf_ft=350.0, hf_ft=200.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=8000.0
+    ),
+    "Marcellus – NE PA (Dry Gas)": dict(
+        L_ft=8500.0, stage_spacing_ft=200.0, xf_ft=300.0, hf_ft=160.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0
+    ),
+    "Utica – Liquids Rich (OH/PA)": dict(
+        L_ft=9000.0, stage_spacing_ft=220.0, xf_ft=320.0, hf_ft=170.0,
+        Rs_pb_scf_stb=600.0, pb_psi=5200.0, Bo_pb_rb_stb=1.30, p_init_psi=6200.0
+    ),
+    "Niobrara (DJ) – Oil": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=260.0, hf_ft=140.0,
+        Rs_pb_scf_stb=500.0, pb_psi=4000.0, Bo_pb_rb_stb=1.38, p_init_psi=4500.0
+    ),
+    "Barnett – Core (Gas)": dict(
+        L_ft=8000.0, stage_spacing_ft=180.0, xf_ft=250.0, hf_ft=120.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=5000.0
+    ),
+    "Anadarko – Woodford": dict(
+        L_ft=9500.0, stage_spacing_ft=220.0, xf_ft=300.0, hf_ft=160.0,
+        Rs_pb_scf_stb=300.0, pb_psi=4500.0, Bo_pb_rb_stb=1.25, p_init_psi=5200.0
+    ),
+    "Granite Wash (TX/OK)": dict(
+        L_ft=8500.0, stage_spacing_ft=220.0, xf_ft=280.0, hf_ft=150.0,
+        Rs_pb_scf_stb=200.0, pb_psi=4200.0, Bo_pb_rb_stb=1.20, p_init_psi=5200.0
+    ),
+    "Fayetteville (AR) – Gas": dict(
+        L_ft=7000.0, stage_spacing_ft=180.0, xf_ft=220.0, hf_ft=110.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=4200.0
+    ),
 
     # --- Canada ---
-    "Montney": dict(L_ft=9000.0, stage_spacing_ft=210.0, xf_ft=330.0, hf_ft=170.0,
-                    Rs_pb_scf_stb=300.0, pb_psi=4000.0, Bo_pb_rb_stb=1.20, p_init_psi=7000.0),
-    "Duvernay": dict(L_ft=9500.0, stage_spacing_ft=220.0, xf_ft=310.0, hf_ft=170.0,
-                     Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.34, p_init_psi=6000.0),
-    "Horn River": dict(L_ft=9000.0, stage_spacing_ft=200.0, xf_ft=340.0, hf_ft=190.0,
-                       Rs_pb_scf_stb=120.0, pb_psi=2600.0, Bo_pb_rb_stb=1.08, p_init_psi=7500.0),
+    "Montney (BC/AB) – Liquids Rich": dict(
+        L_ft=10000.0, stage_spacing_ft=210.0, xf_ft=350.0, hf_ft=180.0,
+        Rs_pb_scf_stb=800.0, pb_psi=5200.0, Bo_pb_rb_stb=1.27, p_init_psi=7000.0
+    ),
+    "Duvernay (AB) – Condensate": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=170.0,
+        Rs_pb_scf_stb=850.0, pb_psi=5400.0, Bo_pb_rb_stb=1.28, p_init_psi=6800.0
+    ),
+    "Horn River (BC) – Dry Gas": dict(
+        L_ft=9000.0, stage_spacing_ft=200.0, xf_ft=320.0, hf_ft=180.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7500.0
+    ),
+    "Viking (AB/SK) – Light Oil": dict(
+        L_ft=7000.0, stage_spacing_ft=200.0, xf_ft=220.0, hf_ft=110.0,
+        Rs_pb_scf_stb=300.0, pb_psi=3800.0, Bo_pb_rb_stb=1.32, p_init_psi=4200.0
+    ),
+    "Cardium (AB) – Light Oil": dict(
+        L_ft=8000.0, stage_spacing_ft=220.0, xf_ft=240.0, hf_ft=120.0,
+        Rs_pb_scf_stb=350.0, pb_psi=4000.0, Bo_pb_rb_stb=1.33, p_init_psi=4600.0
+    ),
 }
-PLAY_LIST = list(PLAY_PRESETS.keys())
 
+PLAY_LIST = list(PLAY_PRESETS.keys())
 
 # ------------------------ HELPER FUNCTIONS ------------------------
 def Rs_of_p(p, pb, Rs_pb):
@@ -225,32 +271,37 @@ def _pvt_from_state(state):
 
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     import plotly.graph_objects as go
+    import numpy as np
+
     def g(val, label, suffix, color, vmax):
-        ind = go.Indicator(
+        fig = go.Figure(go.Indicator(
             mode="gauge+number",
             value=float(val),
-            number={"suffix": f" {suffix}", "font": {"size": 44, "color": "#0b2545"}},
-            title={"text": f"<b>{label}</b>", "font": {"size": 22, "color": "#0b2545"}},
-            gauge=dict(
-                shape="angular",
-                axis=dict(range=[0, vmax], tickwidth=1.2, tickcolor="#0b2545"),
-                bar=dict(color=color, thickness=0.28),
-                bgcolor="white", borderwidth=1, bordercolor="#cfe0ff",
-                steps=[
-                    dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.04)"),
-                    dict(range=[0.6 * vmax, 0.85 * vmax], color="rgba(0,0,0,0.07)"),
+            number={'suffix': f" {suffix}", 'font': {'size': 44, 'color': '#0b2545'}},
+            title={'text': f"<b>{label}</b>", 'font': {'size': 22, 'color': '#0b2545'}},
+            gauge={
+                'shape': 'angular',
+                'axis': {'range': [0, vmax], 'tickwidth': 1.2, 'tickcolor': '#0b2545'},
+                'bar': {'color': color, 'thickness': 0.28},
+                'bgcolor': 'white',
+                'borderwidth': 1,
+                'bordercolor': '#cfe0ff',
+                # moved inside gauge:
+                'steps': [
+                    {'range': [0, 0.6 * vmax], 'color': 'rgba(0,0,0,0.04)'},
+                    {'range': [0.6 * vmax, 0.85 * vmax], 'color': 'rgba(0,0,0,0.07)'}
                 ],
-                threshold=dict(
-                    line=dict(color="green" if color == "#d62728" else "red", width=4),
-                    thickness=0.9, value=float(val)
-                ),
-            ),
-        )
-        fig = go.Figure(ind)
+                'threshold': {
+                    'line': {'color': 'green' if color == '#d62728' else 'red', 'width': 4},
+                    'thickness': 0.9, 'value': float(val)
+                },
+            },
+        ))
         fig.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor="#ffffff")
         return fig
-    gmax = max(1.0, np.ceil(max(EUR_g_BCF, 1e-9) / 5.0) * 5.0)
-    omax = max(0.5, np.ceil(max(EUR_o_MMBO, 1e-9) / 0.5) * 0.5)
+
+    gmax = max(1.0, np.ceil(EUR_g_BCF / 5.0) * 5.0)
+    omax = max(0.5, np.ceil(EUR_o_MMBO / 0.5) * 0.5)
     return g(EUR_g_BCF, "EUR Gas", "BCF", "#d62728", gmax), g(EUR_o_MMBO, "EUR Oil", "MMBO", "#2ca02c", omax)
 
 def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
