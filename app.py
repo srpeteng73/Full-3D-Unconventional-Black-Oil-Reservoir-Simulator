@@ -651,7 +651,58 @@ if selected_tab == "Setup Preview":
                 "Bo_pb_rb_stb": state.get("Bo_pb_rb_stb"),
                 "p_init_psi": state.get("p_init_psi"),
             })
+# --- Well Control ---
+with st.expander("Well Control", expanded=True):
+    control = st.selectbox(
+        "Control mode",
+        ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
+        index=0,
+        help="BHP sets bottomhole pressure. RATE_* hits a target rate via equivalent BHP."
+    )
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        bhp_psi = st.number_input(
+            "Target BHP (psi)",
+            min_value=300.0, max_value=15000.0, value=2500.0, step=50.0,
+            disabled=(control != "BHP")
+        )
+    with col2:
+        rate_mscfd = st.number_input(
+            "Gas rate (Mscf/d)",
+            min_value=0.0, max_value=1_000_000.0, value=5000.0, step=100.0,
+            disabled=(control != "RATE_GAS_MSCFD")
+        )
+    with col3:
+        rate_stbd = st.number_input(
+            "Oil/Liquid rate (STB/d)",
+            min_value=0.0, max_value=100_000.0, value=800.0, step=10.0,
+            disabled=(control not in ("RATE_OIL_STBD", "RATE_LIQ_STBD"))
+        )
 
+# --- Physics / Numerics ---
+with st.expander("Physics & Numerics", expanded=False):
+    use_gravity = st.checkbox("Enable gravity", value=True)
+    kvkh = st.number_input("kv/kh (vertical anisotropy)", min_value=0.01, max_value=1.0, value=0.10, step=0.01)
+    geo_alpha = st.number_input("Geomech α (1/psi, k multiplier)", min_value=0.0, max_value=0.001, value=0.0, step=0.00001, format="%.5f")
+    colA, colB = st.columns(2)
+    with colA:
+        dt_days = st.number_input("Time step (days)", min_value=1.0, max_value=180.0, value=30.0, step=1.0)
+    with colB:
+        t_end_days = st.number_input("End time (days)", min_value=30.0, max_value=3650.0, value=3650.0, step=30.0)
+
+    st.caption("Fluid densities (for gravity head):")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        rho_o = st.number_input("Oil, lb/ft³", min_value=30.0, max_value=70.0, value=53.0, step=0.5)
+    with c2:
+        rho_w = st.number_input("Water, lb/ft³", min_value=55.0, max_value=70.0, value=62.4, step=0.5)
+    with c3:
+        rho_g = st.number_input("Gas, lb/ft³", min_value=0.01, max_value=0.20, value=0.06, step=0.01)
+
+
+
+
+        
         st.markdown("#### Well & Frac Summary")
         well_data = {
             "Parameter": [
@@ -912,44 +963,79 @@ elif selected_tab == "RTA":
             "- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n"
             "- **Slope → 0**: Suggests **boundary-dominated flow**."
         )
-# ==== BEGIN RESULTS BLOCK ====
+from core import full3d
+
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
+    # Decide engine based on your Engine Type selector
+    engine_str = st.session_state.get("engine_type", "Analytical Model (Fast Proxy)")
+    engine = "analytical" if "Analytical" in engine_str else "implicit"
+
+    def _inputs_from_state(state) -> dict:
+        # --- grid ---
+        nx = int(state.get("nx", 10)); ny = int(state.get("ny", 10)); nz = int(state.get("nz", 5))
+        dx = float(state.get("dx_ft", 100.0)); dy = float(state.get("dy_ft", 100.0)); dz = float(state.get("dz_ft", 50.0))
+
+        # --- rock ---
+        phi = float(state.get("phi", 0.08))
+        kx_md = float(state.get("kx_md", 100.0))
+        ky_md = float(state.get("ky_md", 100.0))
+
+        # --- initial ---
+        p_init_psi = float(state.get("p_init_psi", 5000.0))
+        Sw0 = float(state.get("Sw0", 0.20))
+        Sg0 = float(state.get("Sg0", 0.05))
+
+        # --- PVT (pull from your existing fields if present) ---
+        pb_psi = float(state.get("pb_psi", 3000.0))
+        Bo_pb_rb_stb = float(state.get("Bo_pb_rb_stb", 1.2))
+        Rs_pb_scf_stb = float(state.get("Rs_pb_scf_stb", 600.0))
+        mu_o_cp = float(state.get("mu_o_cp", 1.2))
+        mu_g_cp = float(state.get("mu_g_cp", 0.02))
+
+        # Use the controls you just added above (in session scope)
+        return {
+            "engine": engine,
+            "nx": nx, "ny": ny, "nz": nz, "dx": dx, "dy": dy, "dz": dz,
+            "phi": phi, "kx_md": kx_md, "ky_md": ky_md,
+            "p_init_psi": p_init_psi, "Sw0": Sw0, "Sg0": Sg0,
+            "pb_psi": pb_psi, "Bo_pb_rb_stb": Bo_pb_rb_stb, "Rs_pb_scf_stb": Rs_pb_scf_stb,
+            "mu_o_cp": mu_o_cp, "mu_g_cp": mu_g_cp,
+
+            # Well control (BHP / RATE*)
+            "control": control,
+            "bhp_psi": bhp_psi,
+            "rate_mscfd": rate_mscfd,
+            "rate_stbd": rate_stbd,
+
+            # Physics / numerics
+            "dt_days": dt_days, "t_end_days": t_end_days,
+            "use_gravity": use_gravity,
+            "kvkh": kvkh, "geo_alpha": geo_alpha,
+            "rho_o_lbft3": rho_o, "rho_w_lbft3": rho_w, "rho_g_lbft3": rho_g,
+        }
+
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
-        with st.spinner("Running simulation..."):
-            from core import full3d  # local import keeps top tidy
-
-            # Decide engine from the sidebar selectbox
-            engine_str = st.session_state.get("engine_type", "Analytical Model (Fast Proxy)")
-            engine = "analytical" if "Analytical" in engine_str else "implicit"
-
-            # Build inputs for the engine call. If you already have a dict named `inputs`,
-            # use that instead of `state`.
-            sim_inputs = {**state, "engine": engine}
-
-            try:
-                sim_out = full3d.simulate(sim_inputs)
-            except Exception as e:
-                sim_out = None
-                st.error("Simulation failed with an exception:")
-                st.exception(e)
-
-        if sim_out is None:
-            st.session_state.sim = None
-        else:
-            st.session_state.sim = sim_out
+        with st.spinner(f"Running {engine_str}..."):
+            inputs = _inputs_from_state(state)
+            sim_out = full3d.simulate(inputs)
+        st.session_state.sim = sim_out
 
     sim_data = st.session_state.get("sim")
-
     if sim_data is None:
-        st.info("Click **Run simulation** to compute and display the results.")
+        st.info("Click **Run simulation** to compute and display results.")
     else:
-        runtime_s = float(sim_data.get("runtime_s", 0.0))
-        st.success(f"Simulation complete in {runtime_s:.2f} seconds.")
-        # (render your charts/metrics below using `sim_data`)
-# ==== END RESULTS BLOCK ====
+        st.success("Simulation complete.")
+        # quick plot (replace with your nicer plots if you already have them)
+        import pandas as pd
+        df = pd.DataFrame({
+            "Day": sim_data["t"],
+            "Oil rate (STB/d)": sim_data["qo"],
+            "Gas rate (Mscf/d)": sim_data["qg"],
+        })
+        st.line_chart(df.set_index("Day"))
 
         # --- EUR gauges ---
         st.markdown("### EUR (30-year forecast)")
