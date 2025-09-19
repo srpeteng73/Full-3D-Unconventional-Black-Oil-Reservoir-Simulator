@@ -10,6 +10,64 @@
 
 from __future__ import annotations
 import numpy as np
+# ---------------- Gravity & Well helpers ----------------
+DEFAULT_OPTIONS = {
+    "use_gravity": True,
+    "rho_o_lbft3": 53.0,
+    "rho_w_lbft3": 62.4,
+    "rho_g_lbft3": 0.06,
+    "kvkh": 0.10,       # vertical anisotropy (kv/kh) default
+    "geo_alpha": 0.0,   # simple geomech k-multiplier (0 = off)
+}
+
+def _z_centers(nz, dz):
+    # cell-center depths (ft). k=0 is shallowest if you use top-down indexing.
+    return (np.arange(nz, dtype=float) + 0.5) * float(dz)
+
+def _peaceman_WI(kx_md, ky_md, dx, dy, dz, rw_ft=0.328, skin=0.0):
+    """
+    Peaceman Well Index (field units).
+    kx/ky in mD, dx/dy/dz in ft, rw in ft.
+    Returns WI consistent with transmissibility: includes 0.001127 factor.
+    """
+    kx = float(max(kx_md, 1.0e-8))
+    ky = float(max(ky_md, 1.0e-8))
+    dx = float(dx); dy = float(dy); dz = float(dz)
+    k_eff = np.sqrt(kx * ky)          # mD
+    # anisotropic equivalent radius
+    re = 0.28 * np.sqrt((dx**2) * np.sqrt(ky/kx) + (dy**2) * np.sqrt(kx/ky))
+    denom = np.log(max(re / max(rw_ft, 1.0e-6), 1.0)) + skin
+    denom = max(denom, 1.0e-8)
+    WI = 0.001127 * 2.0 * np.pi * k_eff * dz / denom   # (md*ft)→ rb/day/psi with 0.001127
+    return WI
+
+def _build_single_well(grid, rock, schedule):
+    """
+    Builds a single well centered in the model (safe default) using Peaceman WI.
+    Uses schedule['control'] in {'BHP','RATE'} and bhp_psi/rate_mscfd if present.
+    """
+    nx, ny, nz = int(grid["nx"]), int(grid["ny"]), int(grid["nz"])
+    dx, dy, dz = float(grid["dx"]), float(grid["dy"]), float(grid["dz"])
+    i = nx // 2
+    j = ny // 2
+    k = nz // 2
+
+    kx = float(rock.get("kx_md")[k, j, i]) if rock.get("kx_md") is not None else 0.05
+    ky = float(rock.get("ky_md")[k, j, i]) if rock.get("ky_md") is not None else 0.05
+    WI = _peaceman_WI(kx, ky, dx, dy, dz)
+
+    ctrl = (schedule.get("control") or schedule.get("pad_ctrl") or "BHP").upper()
+    bhp = float(schedule.get("bhp_psi") or schedule.get("pad_bhp_psi") or 3000.0)
+    rate_mscfd = float(schedule.get("rate_mscfd") or schedule.get("pad_rate_mscfd") or 0.0)
+
+    return {
+        "indices": [(k, j, i)],
+        "WI": [WI],
+        "control": ctrl,
+        "bhp_psi": bhp,
+        "rate_mscfd": rate_mscfd,
+    }
+
 from scipy.sparse import lil_matrix
 from scipy.sparse import lil_matrix
 
