@@ -594,15 +594,25 @@ selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 if selected_tab == "Setup Preview":
     st.header("Setup Preview")
     c1, c2 = st.columns([1, 1])
+
+    # ----- LEFT COLUMN -----
     with c1:
         st.markdown("#### Grid & Rock Summary")
         grid_data = {
-            "Parameter": ["Grid Dimensions (nx, ny, nz)", "Cell Size (dx, dy, dz) (ft)", "Total Volume (MM-ft³)",
-                          "Facies Style", "Permeability Anisotropy (kx/ky)"],
-            "Value": [f"{state['nx']} x {state['ny']} x {state['nz']}",
-                      f"{state['dx']} x {state['dy']} x {state['dz']}",
-                      f"{state['nx']*state['ny']*state['nz']*state['dx']*state['dy']*state['dz']/1e6:.1f}",
-                      state['facies_style'], f"{state['anis_kxky']:.2f}"]
+            "Parameter": [
+                "Grid Dimensions (nx, ny, nz)",
+                "Cell Size (dx, dy, dz) (ft)",
+                "Total Volume (MM-ft³)",
+                "Facies Style",
+                "Permeability Anisotropy (kx/ky)",
+            ],
+            "Value": [
+                f"{state['nx']} x {state['ny']} x {state['nz']}",
+                f"{state['dx']} x {state['dy']} x {state['dz']}",
+                f"{state['nx']*state['ny']*state['nz']*state['dx']*state['dy']*state['dz']/1e6:.1f}",
+                state['facies_style'],
+                f"{state['anis_kxky']:.2f}",
+            ],
         }
         st.table(pd.DataFrame(grid_data))
         with st.expander("Click for details"):
@@ -611,9 +621,11 @@ if selected_tab == "Setup Preview":
                 "- **Cell Size**: The physical size of each grid cell in feet.\n"
                 "- **Total Volume**: The total bulk volume of the reservoir model.\n"
                 "- **Facies Style**: The method used to generate geological heterogeneity.\n"
-                "- **Anisotropy**: The ratio of permeability in the X-direction (kx) to the Y-direction (ky)."
+                "- **Anisotropy**: The ratio of permeability in X (kx) to Y (ky)."
             )
-                with st.expander("Preset sanity check (debug)"):
+
+        # ----- DEBUG EXPANDER (safe to remove later) -----
+        with st.expander("Preset sanity check (debug)"):
             st.write({
                 "Play selected": st.session_state.get("play_sel"),
                 "Model Type (sim_mode)": st.session_state.get("sim_mode"),
@@ -629,49 +641,85 @@ if selected_tab == "Setup Preview":
                 "Bo_pb_rb_stb": state.get("Bo_pb_rb_stb"),
                 "p_init_psi": state.get("p_init_psi"),
             })
- 
+
         st.markdown("#### Well & Frac Summary")
         well_data = {
-            "Parameter": ["Laterals", "Lateral Length (ft)", "Frac Half-length (ft)", "Frac Height (ft)", "Stages", "Clusters/Stage"],
-            "Value": [state['n_laterals'], state['L_ft'], state['xf_ft'], state['hf_ft'],
-                      int(state['L_ft'] / state['stage_spacing_ft']), state['clusters_per_stage']]
+            "Parameter": [
+                "Laterals",
+                "Lateral Length (ft)",
+                "Frac Half-length (ft)",
+                "Frac Height (ft)",
+                "Stages",
+                "Clusters/Stage",
+            ],
+            "Value": [
+                state['n_laterals'],
+                state['L_ft'],
+                state['xf_ft'],
+                state['hf_ft'],
+                int(state['L_ft'] / state['stage_spacing_ft']),
+                state['clusters_per_stage'],
+            ],
         }
         st.table(pd.DataFrame(well_data))
         with st.expander("Click for details"):
             st.markdown(
-                "- **Laterals**: The number of horizontal wells in the pad.\n"
-                "- **Lateral Length**: The length of each horizontal wellbore.\n"
-                "- **Frac Half-length (xf)**: The distance a hydraulic fracture extends from the wellbore.\n"
-                "- **Frac Height (hf)**: The vertical extent of the hydraulic fractures.\n"
-                "- **Stages**: The number of separate hydraulic fracturing treatments.\n"
-                "- **Clusters/Stage**: The number of perforation clusters within each stage."
+                "- **Laterals**: Number of horizontal wells in the pad.\n"
+                "- **Lateral Length**: Length of each horizontal wellbore.\n"
+                "- **Frac Half-length (xf)**: Distance a hydraulic fracture extends from the wellbore.\n"
+                "- **Frac Height (hf)**: Vertical extent of the hydraulic fractures.\n"
+                "- **Stages**: Number of fracturing treatments.\n"
+                "- **Clusters/Stage**: Perforation clusters within each stage."
             )
+
+    # ----- RIGHT COLUMN -----
     with c2:
         st.markdown("#### Top-Down Schematic")
         fig = go.Figure()
         nx, ny, dx, dy = state['nx'], state['ny'], state['dx'], state['dy']
         L_ft, xf_ft, ss_ft, n_lats = state['L_ft'], state['xf_ft'], state['stage_spacing_ft'], state['n_laterals']
-        fig.add_shape(type="rect", x0=0, y0=0, x1=nx*dx, y1=ny*dy, line=dict(color="RoyalBlue"), fillcolor="lightskyblue", opacity=0.3)
+        fig.add_shape(
+            type="rect",
+            x0=0, y0=0, x1=nx*dx, y1=ny*dy,
+            line=dict(color="RoyalBlue"),
+            fillcolor="lightskyblue",
+            opacity=0.3,
+        )
         lat_rows_y = [ny*dy/3, 2*ny*dy/3] if n_lats >= 2 else [ny*dy/2]
         n_stages = max(1, int(L_ft / max(ss_ft, 1.0)))
         for i, y_lat in enumerate(lat_rows_y):
-            fig.add_trace(go.Scatter(x=[0, L_ft], y=[y_lat, y_lat], mode='lines', line=dict(color='black', width=3),
-                                     name='Lateral', showlegend=(i == 0)))
+            fig.add_trace(go.Scatter(
+                x=[0, L_ft], y=[y_lat, y_lat],
+                mode='lines',
+                line=dict(color='black', width=3),
+                name='Lateral',
+                showlegend=(i == 0),
+            ))
             for j in range(n_stages):
                 x_stage = (j + 0.5) * ss_ft
                 if x_stage > L_ft:
                     continue
-                fig.add_trace(go.Scatter(x=[x_stage, x_stage], y=[y_lat - xf_ft, y_lat + xf_ft], mode='lines',
-                                         line=dict(color='red', width=2), name='Frac', showlegend=(i == 0 and j == 0)))
-        fig.update_layout(title="<b>Well and Fracture Geometry</b>", xaxis_title="X (ft)", yaxis_title="Y (ft)", yaxis_range=[-0.1*ny*dy, 1.1*ny*dy])
+                fig.add_trace(go.Scatter(
+                    x=[x_stage, x_stage], y=[y_lat - xf_ft, y_lat + xf_ft],
+                    mode='lines',
+                    line=dict(color='red', width=2),
+                    name='Frac',
+                    showlegend=(i == 0 and j == 0),
+                ))
+        fig.update_layout(
+            title="<b>Well and Fracture Geometry</b>",
+            xaxis_title="X (ft)",
+            yaxis_title="Y (ft)",
+            yaxis_range=[-0.1 * ny * dy, 1.1 * ny * dy],
+        )
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
         with st.expander("Click for details"):
             st.markdown(
-                "This plot provides a bird's-eye view of the simulation model.\n"
-                "- The **light blue rectangle** is the reservoir boundary.\n"
-                "- The **black line(s)** are the horizontal well laterals.\n"
-                "- The **red lines** are the hydraulic fractures."
+                "Bird's-eye view of the simulation model:\n"
+                "- **Light blue** = reservoir boundary\n"
+                "- **Black** = horizontal well laterals\n"
+                "- **Red** = hydraulic fractures"
             )
 
     st.markdown("---")
@@ -689,7 +737,9 @@ if selected_tab == "Setup Preview":
         fig_o.update_layout(**semi_log_layout("Oil Production Preview", yaxis="Oil Rate (STB/d)"))
         st.plotly_chart(fig_o, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
-        st.markdown("These charts show a rapid forecast based on a simplified analytical model (Arps decline curve). They are for quick iteration before running the full 3D simulation.")
+        st.markdown(
+            "These charts use a simplified analytical model for quick iteration before running the full 3D simulation."
+        )
 
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
