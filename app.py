@@ -918,20 +918,38 @@ elif selected_tab == "Results":
 
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
-        with st.spinner("Running full 3D simulation..."):
-            sim_out = run_simulation_engine(state)
+        with st.spinner("Running simulation..."):
+            from core import full3d  # local import keeps top tidy
+
+            # Decide engine from the sidebar selectbox
+            engine_str = st.session_state.get("engine_type", "Analytical Model (Fast Proxy)")
+            engine = "analytical" if "Analytical" in engine_str else "implicit"
+
+            # Build inputs for the engine call. If you already have a dict named `inputs`,
+            # use that instead of `state`.
+            sim_inputs = {**state, "engine": engine}
+
+            try:
+                sim_out = full3d.simulate(sim_inputs)
+            except Exception as e:
+                sim_out = None
+                st.error("Simulation failed with an exception:")
+                st.exception(e)
+
         if sim_out is None:
             st.session_state.sim = None
-            st.error("Simulation failed. Showing results from fast preview solver.")
         else:
             st.session_state.sim = sim_out
 
     sim_data = st.session_state.get("sim")
 
     if sim_data is None:
-        st.info("Click **Run simulation** to compute and display the full 3D results.")
+        st.info("Click **Run simulation** to compute and display the results.")
     else:
-        st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
+        runtime_s = float(sim_data.get("runtime_s", 0.0))
+        st.success(f"Simulation complete in {runtime_s:.2f} seconds.")
+        # (render your charts/metrics below using `sim_data`)
+# ==== END RESULTS BLOCK ====
 
         # --- EUR gauges ---
         st.markdown("### EUR (30-year forecast)")
