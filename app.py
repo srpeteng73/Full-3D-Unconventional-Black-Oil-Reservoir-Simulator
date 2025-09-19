@@ -411,63 +411,73 @@ def run_simulation_engine(state):
     engine_results['EUR_o_MMBO'] = EUR_o_MMBO
     return engine_results
 
-# ------------------------ SIDEBAR AND MAIN APP LAYOUT ------------------------
+# ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
     st.markdown("### Engine & Presets")
 
-    # Engine Type (Phase 1a / 1b restored)
+    # Engine Type
     engine_type_ui = st.selectbox(
         "Engine Type",
         ENGINE_TYPES,
         key="engine_type_ui",
-        help="Choose the calculation engine. Phase 1a/1b are developing implicit engines; the analytical model is a fast proxy."
+        help="Choose the calculation engine. Phase 1a/1b are the developing implicit engines; the analytical model is a fast proxy."
     )
-    st.session_state["engine_type"] = engine_type_ui  # canonical key used elsewhere
+    st.session_state["engine_type"] = engine_type_ui
 
     # Model Type
     model_choice = st.selectbox("Model Type", VALID_MODEL_TYPES, key="sim_mode")
-    st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
-
-    # Shale play presets
-   # --- Shale Play preset (with tiny resource tag next to selector) ---
-c_play, c_tag = st.columns([4, 1])
-with c_play:
-    play = st.selectbox("Shale Play Preset", PLAY_LIST, index=0, key="play_sel")
-
-with c_tag:
-    def _resource_label(name: str) -> str:
-        s = name.lower()
-        if "dry gas" in s or ("gas" in s and "oil" not in s and "condensate" not in s and "liquids" not in s):
-            return "Gas"
-        if "condensate" in s:
-            return "Condensate"
-        if "liquids" in s:
-            return "Liquids"
-        if "oil" in s:
-            return "Oil"
-        return "Mixed"
-
-    res = _resource_label(play)
-    st.markdown(
-        f"""
-        <div style="margin-top: 28px; text-align:center;">
-            <span style="
-                display:inline-block; padding:2px 8px; border-radius:999px;
-                background:#eef6ff; border:1px solid #b6d4fe; font-size:12px;
-                color:#0b5ed7; white-space:nowrap;">{res}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.session_state.fluid_model = (
+        "black_oil" if "Black Oil" in model_choice else "unconventional"
     )
 
+    # ---- Shale play selector with tiny resource tag on the right ----
+    st.markdown("Shale Play Preset")
+    sel_col, tag_col = st.columns([0.78, 0.22])
 
-    # Apply preset
-    if st.button("Apply Preset", use_container_width=True):
+    with sel_col:
+        # hide the inner label to keep the row compact
+        play = st.selectbox(
+            "play_selector",
+            PLAY_LIST,
+            index=0,
+            key="play_sel",
+            label_visibility="collapsed",
+        )
+
+    with tag_col:
+        def _resource_label(name: str) -> str:
+            s = name.lower()
+            if "dry gas" in s or ("gas" in s and "oil" not in s and "condensate" not in s and "liquids" not in s):
+                return "Gas"
+            if "condensate" in s:
+                return "Condensate"
+            if "liquids" in s:
+                return "Liquids"
+            if "oil" in s:
+                return "Oil"
+            return "Mixed"
+
+        res = _resource_label(play)
+        st.markdown(
+            f"""
+            <div style="margin-top:6px; text-align:right;">
+              <span style="
+                display:inline-block; padding:2px 8px; border-radius:999px;
+                background:#eef6ff; border:1px solid #b6d4fe; font-size:11px;
+                color:#0b5ed7; white-space:nowrap;">{res}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Apply preset button (full width)
+    apply_clicked = st.button("Apply Preset", use_container_width=True, type="primary")
+    if apply_clicked:
         payload = defaults.copy()
         payload.update(PLAY_PRESETS[st.session_state.play_sel])
 
-        # Black-oil friendly tweaks if that model is selected
+        # Nudge to black-oil friendly defaults if needed
         if st.session_state.fluid_model == "black_oil":
             payload.update(dict(
                 Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, mug_pb_cp=0.020, a_g=0.15,
