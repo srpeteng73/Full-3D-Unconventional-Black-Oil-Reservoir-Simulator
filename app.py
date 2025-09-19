@@ -85,13 +85,57 @@ if st.session_state.apply_preset_payload is not None:
     _safe_rerun()
 
 # ------------------------ Presets ------------------------
+# Engine types shown in the sidebar
+ENGINE_TYPES = [
+    "Analytical Model (Fast Proxy)",
+    "3D Unconventional Reservoir Simulator (Phase 1a)",
+    "3D Three-Phase Implicit (Phase 1b)",
+]
+
+# Model Type options (must match the sidebar selectbox)
+VALID_MODEL_TYPES = ["Unconventional Reservoir", "Black Oil Reservoir"]
+
+# Shale play presets (you can tweak numbers as needed)
 PLAY_PRESETS = {
-    "Permian Basin (Wolfcamp)": dict(L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
-                                     Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0),
-    "Eagle Ford (Oil Window)": dict(L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
-                                    Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0),
+    "Permian Basin (Wolfcamp)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
+        Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0
+    ),
+    "Eagle Ford (Oil Window)": dict(
+        L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0
+    ),
+    "Eagle Ford (Gas Window)": dict(
+        L_ft=9500.0, stage_spacing_ft=250.0, xf_ft=320.0, hf_ft=170.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6200.0
+    ),
+    "Bakken (Middle Member)": dict(
+        L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=260.0, hf_ft=160.0,
+        Rs_pb_scf_stb=500.0, pb_psi=4300.0, Bo_pb_rb_stb=1.30, p_init_psi=5000.0
+    ),
+    "Marcellus (Dry Gas)": dict(
+        L_ft=8500.0, stage_spacing_ft=200.0, xf_ft=350.0, hf_ft=200.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0
+    ),
+    "Haynesville (Dry Gas)": dict(
+        L_ft=9000.0, stage_spacing_ft=200.0, xf_ft=380.0, hf_ft=220.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=9000.0
+    ),
+    "Barnett Shale (Gas)": dict(
+        L_ft=7000.0, stage_spacing_ft=180.0, xf_ft=260.0, hf_ft=150.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=4500.0
+    ),
+    "Niobrara (DJ Basin)": dict(
+        L_ft=8000.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=160.0,
+        Rs_pb_scf_stb=600.0, pb_psi=4800.0, Bo_pb_rb_stb=1.32, p_init_psi=5200.0
+    ),
+    "Utica (Condensate)": dict(
+        L_ft=9000.0, stage_spacing_ft=220.0, xf_ft=300.0, hf_ft=180.0,
+        Rs_pb_scf_stb=300.0, pb_psi=3800.0, Bo_pb_rb_stb=1.25, p_init_psi=7000.0
+    ),
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
+
 
 # ------------------------ HELPER FUNCTIONS ------------------------
 def Rs_of_p(p, pb, Rs_pb):
@@ -325,22 +369,30 @@ with st.sidebar:
     st.markdown("## Simulation Setup")
     st.markdown("### Engine & Presets")
 
-    # Unique UI key; mirror into canonical key used in code
+    # Engine Type (now includes Phase 1a and 1b)
     engine_type_ui = st.selectbox(
         "Engine Type",
-        ["Analytical Model (Fast Proxy)", "3D Three-Phase Implicit (Phase 1b)"],
+        ENGINE_TYPES,
         key="engine_type_ui",
-        help="Select the core calculation engine. The implicit model is in development, while the analytical model is a stable, fast approximation.",
+        help="Choose the calculation engine. Phase 1a/1b are the developing implicit engines; the analytical model is a fast proxy."
     )
+    # keep a canonical key for the rest of the app
     st.session_state["engine_type"] = engine_type_ui
 
-   model_choice = st.selectbox("Model Type", VALID_MODEL_TYPES, key="sim_mode")
-st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
+    # Model Type
+    model_choice = st.selectbox("Model Type", VALID_MODEL_TYPES, key="sim_mode")
+    st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
 
+    # Shale Play preset
     play = st.selectbox("Shale Play Preset", PLAY_LIST, index=0, key="play_sel")
+
+    # Apply preset
     if st.button("Apply Preset", use_container_width=True):
+        # start from defaults and overlay the play
         payload = defaults.copy()
         payload.update(PLAY_PRESETS[st.session_state.play_sel])
+
+        # If user picked Black Oil model, coerce to black-oil friendly defaults
         if st.session_state.fluid_model == "black_oil":
             payload.update(dict(
                 Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, mug_pb_cp=0.020, a_g=0.15,
@@ -348,8 +400,12 @@ st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "
                 pad_ctrl="BHP",
                 pad_bhp_psi=min(float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0),
             ))
-        st.session_state.sim, st.session_state.apply_preset_payload = None, payload
+
+        # apply after rerender
+        st.session_state.sim = None
+        st.session_state.apply_preset_payload = payload
         _safe_rerun()
+
 
     st.markdown("### Grid (ft)")
     c1, c2, c3 = st.columns(3)
