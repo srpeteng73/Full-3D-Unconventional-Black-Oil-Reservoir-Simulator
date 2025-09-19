@@ -85,55 +85,108 @@ if st.session_state.apply_preset_payload is not None:
     _safe_rerun()
 
 # ------------------------ Presets ------------------------
-# Engine types shown in the sidebar
-ENGINE_TYPES = [
-    "Analytical Model (Fast Proxy)",
-    "3D Unconventional Reservoir Simulator (Phase 1a)",
-    "3D Three-Phase Implicit (Phase 1b)",
-]
-
-# Model Type options (must match the sidebar selectbox)
-VALID_MODEL_TYPES = ["Unconventional Reservoir", "Black Oil Reservoir"]
-
-# Shale play presets (you can tweak numbers as needed)
 PLAY_PRESETS = {
-    "Permian Basin (Wolfcamp)": dict(
+    # ==== United States ====
+    "Permian – Midland (Oil)": dict(
         L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=180.0,
         Rs_pb_scf_stb=650.0, pb_psi=5200.0, Bo_pb_rb_stb=1.35, p_init_psi=5800.0
+    ),
+    "Permian – Delaware (Oil/Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=200.0,
+        Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.36, p_init_psi=6000.0
     ),
     "Eagle Ford (Oil Window)": dict(
         L_ft=9000.0, stage_spacing_ft=225.0, xf_ft=270.0, hf_ft=150.0,
         Rs_pb_scf_stb=700.0, pb_psi=5400.0, Bo_pb_rb_stb=1.34, p_init_psi=5600.0
     ),
-    "Eagle Ford (Gas Window)": dict(
-        L_ft=9500.0, stage_spacing_ft=250.0, xf_ft=320.0, hf_ft=170.0,
-        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6200.0
+    "Bakken": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=280.0, hf_ft=160.0,
+        Rs_pb_scf_stb=450.0, pb_psi=4300.0, Bo_pb_rb_stb=1.25, p_init_psi=5000.0
     ),
-    "Bakken (Middle Member)": dict(
-        L_ft=10000.0, stage_spacing_ft=240.0, xf_ft=260.0, hf_ft=160.0,
-        Rs_pb_scf_stb=500.0, pb_psi=4300.0, Bo_pb_rb_stb=1.30, p_init_psi=5000.0
-    ),
-    "Marcellus (Dry Gas)": dict(
-        L_ft=8500.0, stage_spacing_ft=200.0, xf_ft=350.0, hf_ft=200.0,
+    "Marcellus (Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=400.0, hf_ft=180.0,
         Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0
     ),
-    "Haynesville (Dry Gas)": dict(
-        L_ft=9000.0, stage_spacing_ft=200.0, xf_ft=380.0, hf_ft=220.0,
-        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=9000.0
+    "Utica (Oil/Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=350.0, hf_ft=180.0,
+        Rs_pb_scf_stb=200.0, pb_psi=3800.0, Bo_pb_rb_stb=1.20, p_init_psi=5200.0
     ),
-    "Barnett Shale (Gas)": dict(
-        L_ft=7000.0, stage_spacing_ft=180.0, xf_ft=260.0, hf_ft=150.0,
+    "Haynesville (Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=450.0, hf_ft=200.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7500.0
+    ),
+    "Barnett (Gas)": dict(
+        L_ft=8000.0, stage_spacing_ft=300.0, xf_ft=300.0, hf_ft=150.0,
         Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=4500.0
     ),
-    "Niobrara (DJ Basin)": dict(
-        L_ft=8000.0, stage_spacing_ft=225.0, xf_ft=280.0, hf_ft=160.0,
-        Rs_pb_scf_stb=600.0, pb_psi=4800.0, Bo_pb_rb_stb=1.32, p_init_psi=5200.0
+    "Niobrara / DJ (Oil/Gas)": dict(
+        L_ft=9000.0, stage_spacing_ft=250.0, xf_ft=280.0, hf_ft=150.0,
+        Rs_pb_scf_stb=400.0, pb_psi=3500.0, Bo_pb_rb_stb=1.20, p_init_psi=4200.0
     ),
-    "Utica (Condensate)": dict(
-        L_ft=9000.0, stage_spacing_ft=220.0, xf_ft=300.0, hf_ft=180.0,
-        Rs_pb_scf_stb=300.0, pb_psi=3800.0, Bo_pb_rb_stb=1.25, p_init_psi=7000.0
+    "Anadarko – Woodford": dict(
+        L_ft=10000.0, stage_spacing_ft=225.0, xf_ft=320.0, hf_ft=170.0,
+        Rs_pb_scf_stb=250.0, pb_psi=4000.0, Bo_pb_rb_stb=1.22, p_init_psi=5200.0
+    ),
+    "Granite Wash": dict(
+        L_ft=9000.0, stage_spacing_ft=250.0, xf_ft=300.0, hf_ft=160.0,
+        Rs_pb_scf_stb=200.0, pb_psi=3500.0, Bo_pb_rb_stb=1.18, p_init_psi=4800.0
+    ),
+    "Fayetteville (Gas)": dict(
+        L_ft=7000.0, stage_spacing_ft=300.0, xf_ft=250.0, hf_ft=140.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=3800.0
+    ),
+    "Tuscaloosa Marine (Oil)": dict(
+        L_ft=9000.0, stage_spacing_ft=275.0, xf_ft=280.0, hf_ft=160.0,
+        Rs_pb_scf_stb=500.0, pb_psi=4800.0, Bo_pb_rb_stb=1.28, p_init_psi=5400.0
+    ),
+    "Monterey (Oil, complex)": dict(
+        L_ft=8000.0, stage_spacing_ft=300.0, xf_ft=220.0, hf_ft=120.0,
+        Rs_pb_scf_stb=350.0, pb_psi=3200.0, Bo_pb_rb_stb=1.18, p_init_psi=3900.0
+    ),
+
+    # ==== Canada ====
+    "Montney (Gas/Condensate)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=400.0, hf_ft=200.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=6500.0
+    ),
+    "Duvernay (Oil/Cond.)": dict(
+        L_ft=10000.0, stage_spacing_ft=250.0, xf_ft=320.0, hf_ft=180.0,
+        Rs_pb_scf_stb=600.0, pb_psi=5200.0, Bo_pb_rb_stb=1.33, p_init_psi=6200.0
+    ),
+    "Horn River (Gas)": dict(
+        L_ft=10000.0, stage_spacing_ft=275.0, xf_ft=450.0, hf_ft=220.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7200.0
+    ),
+    "Liard (Gas)": dict(
+        L_ft=9500.0, stage_spacing_ft=275.0, xf_ft=420.0, hf_ft=220.0,
+        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00, p_init_psi=7000.0
+    ),
+    "Alberta Deep Basin (Gas/Liq.)": dict(
+        L_ft=9000.0, stage_spacing_ft=250.0, xf_ft=350.0, hf_ft=180.0,
+        Rs_pb_scf_stb=150.0, pb_psi=3000.0, Bo_pb_rb_stb=1.15, p_init_psi=5000.0
+    ),
+    "Clearwater (Heavy Oil)": dict(
+        L_ft=6000.0, stage_spacing_ft=300.0, xf_ft=180.0, hf_ft=100.0,
+        Rs_pb_scf_stb=100.0, pb_psi=2200.0, Bo_pb_rb_stb=1.10, p_init_psi=2800.0
+    ),
+    "Cardium (Light Oil)": dict(
+        L_ft=8000.0, stage_spacing_ft=275.0, xf_ft=220.0, hf_ft=130.0,
+        Rs_pb_scf_stb=250.0, pb_psi=2800.0, Bo_pb_rb_stb=1.16, p_init_psi=3600.0
+    ),
+    "Shaunavon (Oil)": dict(
+        L_ft=7000.0, stage_spacing_ft=300.0, xf_ft=200.0, hf_ft=120.0,
+        Rs_pb_scf_stb=200.0, pb_psi=2600.0, Bo_pb_rb_stb=1.14, p_init_psi=3400.0
+    ),
+    "Viking (Light Oil)": dict(
+        L_ft=7000.0, stage_spacing_ft=300.0, xf_ft=200.0, hf_ft=120.0,
+        Rs_pb_scf_stb=180.0, pb_psi=2500.0, Bo_pb_rb_stb=1.12, p_init_psi=3300.0
+    ),
+    "Canol (Oil, underexplored)": dict(
+        L_ft=7000.0, stage_spacing_ft=325.0, xf_ft=220.0, hf_ft=130.0,
+        Rs_pb_scf_stb=220.0, pb_psi=3000.0, Bo_pb_rb_stb=1.15, p_init_psi=3800.0
     ),
 }
+
 PLAY_LIST = list(PLAY_PRESETS.keys())
 
 
@@ -240,31 +293,27 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
                 value=float(val),
                 number={"suffix": f" {suffix}", "font": {"size": 44, "color": "#0b2545"}},
                 title={"text": f"<b>{label}</b>", "font": {"size": 22, "color": "#0b2545"}},
-                gauge={
-                    "shape": "angular",
-                    "axis": {"range": [0, vmax], "tickwidth": 1.2, "tickcolor": "#0b2545"},
-                    "bar": {"color": color, "thickness": 0.28},
-                    "bgcolor": "white",
-                    "borderwidth": 1,
-                    "bordercolor": "#cfe0ff",
-                    # ⬇️ steps & threshold MUST be inside "gauge"
-                    "steps": [
-                        {"range": [0, 0.6 * vmax], "color": "rgba(0,0,0,0.04)"},
-                        {"range": [0.6 * vmax, 0.85 * vmax], "color": "rgba(0,0,0,0.07)"},
-                    ],
-                    "threshold": {
-                        "line": {"color": "green" if color == "#d62728" else "red", "width": 4},
-                        "thickness": 0.9,
-                        "value": float(val),
-                    },
-                },
+                gauge=dict(
+                    shape="angular",
+                    axis=dict(range=[0, float(vmax)], tickwidth=1.2, tickcolor="#0b2545"),
+                    bar=dict(color=color, thickness=0.28),
+                    bgcolor="white",
+                    borderwidth=1,
+                    bordercolor="#cfe0ff",
+                    # keep threshold inside gauge (supported across versions)
+                    threshold=dict(
+                        line=dict(color=("green" if color == "#d62728" else "red"), width=4),
+                        thickness=0.9,
+                        value=float(val),
+                    ),
+                ),
             )
         )
         fig.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor="#ffffff")
         return fig
 
-    gmax = max(1.0, float(np.ceil(EUR_g_BCF / 5.0) * 5.0))
-    omax = max(0.5, float(np.ceil(EUR_o_MMBO / 0.5) * 0.5))
+    gmax = max(1.0, float(np.ceil(float(EUR_g_BCF) / 5.0) * 5.0))
+    omax = max(0.5, float(np.ceil(float(EUR_o_MMBO) / 0.5) * 0.5))
     return g(EUR_g_BCF, "EUR Gas", "BCF", "#d62728", gmax), g(EUR_o_MMBO, "EUR Oil", "MMBO", "#2ca02c", omax)
 
 def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
