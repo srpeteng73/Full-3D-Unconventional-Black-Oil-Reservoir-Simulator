@@ -1075,42 +1075,84 @@ elif selected_tab == "Economics":
         st.markdown("#### Economic Inputs")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            oil_price = st.number_input("Oil Price ($/bbl)", 0.0, 200.0, 75.0, 1.0)
+            oil_price = st.number_input("Oil Price ($/bbl)", 0.0, 300.0, 75.0, 1.0)
+            royalty   = st.number_input("Royalty (%)", 0.0, 100.0, 20.0, 0.5) / 100.0
         with c2:
-            gas_price = st.number_input("Gas Price ($/Mcf)", 0.0, 20.0, 3.50, 0.10)
+            gas_price = st.number_input("Gas Price ($/Mcf)", 0.0, 50.0, 3.50, 0.10)
+            tax_rate  = st.number_input("Severance/Production Tax (%)", 0.0, 100.0, 6.0, 0.5) / 100.0
         with c3:
-            discount_rate = st.number_input("Discount Rate (%)", 0.0, 25.0, 10.0, 0.5) / 100.0
+            opex_boe  = st.number_input("OPEX ($/BOE)", 0.0, 100.0, 8.0, 0.5)
+            escal     = st.number_input("OPEX Escalation (%/yr)", 0.0, 50.0, 2.0, 0.5) / 100.0
         with c4:
-            capex = st.number_input("CAPEX ($MM)", 0.0, 50.0, 10.0, 0.5) * 1e6
+            capex     = st.number_input("CAPEX ($MM)", 0.0, 1000.0, 10.0, 0.5) * 1e6
+            disc_rate = st.number_input("Discount Rate (%/yr)", 0.0, 40.0, 10.0, 0.5) / 100.0
 
-        days = sim_data['t']; qo = sim_data['qo']; qg = sim_data['qg']
-        df = pd.DataFrame({'days': days, 'oil': qo, 'gas_mcfd': qg})
-        df['year'] = (df['days'] / 365.25).astype(int)
+        # Build yearly table
+        days = np.asarray(sim_data['t'])
+        qo   = np.asarray(sim_data['qo'])           # STB/d
+        qg   = np.asarray(sim_data['qg'])           # Mscf/d
 
-        yearly_prod = df.groupby('year')[['oil', 'gas_mcfd']].mean()
-        yearly_prod['yearly_oil'] = yearly_prod['oil'] * 365.25
-        yearly_prod['yearly_gas_mcf'] = yearly_prod['gas_mcfd'] * 365.25
+        df = pd.DataFrame({'day': days, 'oil_stbd': qo, 'gas_mscfd': qg})
+        df['year'] = (df['day'] / 365.25).astype(int)
 
-        yearly_prod['revenue'] = (yearly_prod['yearly_oil'] * oil_price) + (yearly_prod['yearly_gas_mcf'] * gas_price)
-        cash_flow = [-capex] + yearly_prod['revenue'].tolist()
+        yearly = df.groupby('year', as_index=False).mean()
+        yearly['oil_bbl']  = yearly['oil_stbd']   * 365.25
+        yearly['gas_mcf']  = yearly['gas_mscfd']  * 365.25
 
-        npv = npf.npv(discount_rate, cash_flow)
-        irr = npf.irr(cash_flow) * 100 if npv > 0 else 0
-        cumulative_cash_flow = np.cumsum(cash_flow)
-        payout_year = "N/A"
-        if np.any(cumulative_cash_flow > 0):
-            payout_year = np.argmax(cumulative_cash_flow > 0)
+        # Revenue before royalty/tax
+        yearly['revenue']  = yearly['oil_bbl'] * oil_price + yearly['gas_mcf'] * gas_price
+
+        # Royalty
+        yearly['royalty']  = royalty * yearly['revenue']
+        # OPEX (convert to BOE rough: 1 bbl oil = 1 boe; 6000 scf ≈ 1 boe → mcf/6 ≈ boe)
+        boe = yearly['oil_bbl'] + yearly['gas_mcf'] / 6.0
+        yearly['opex'] = 0.0
+        if len(boe) > 0:
+            base_opex = opex_boe * boe.iloc[0]
+            yearly.loc[0, 'opex'] = base_opex
+            for i in range(1, len(yearly)):
+                yearly.loc[i, 'opex'] = opex_boe * boe.iloc[i] * ((1.0 + escal) ** i)
+
+        # Taxes on gross revenue (simple model)
+        yearly['tax'] = tax_rate * yearly['revenue']
+
+        # Net cash flow by year
+        yearly['net_cf'] = yearly['revenue'] - yearly['royalty'] - yearly['opex'] - yearly['tax']
+
+        # Add CAPEX at year 0
+        cash_flow = [-capex] + yearly['net_cf'].tolist()
+
+        import numpy_financial as npf
+        npv = npf.npv(disc_rate, cash_flow)
+        try:
+            irr = float(npf.irr(cash_flow)) * 100.0
+        except Exception:
+            irr = float('nan')
+
+        cum_cf = np.cumsum(cash_flow)
+        payout_year = next((i for i, v in enumerate(cum_cf) if v > 0), None)
+        payout_year = "N/A" if payout_year is None else payout_year
 
         st.markdown("---"); st.markdown("#### Key Financial Metrics")
         m1, m2, m3 = st.columns(3)
-        m1.metric("Net Present Value (NPV)", f"${npv/1e6:.2f} MM")
-        m2.metric("Internal Rate of Return (IRR)", f"{irr:.1f}%")
+        m1.metric("NPV", f"${npv/1e6:.2f} MM")
+        m2.metric("IRR", f"{irr:.1f}%" if np.isfinite(irr) else "N/A")
         m3.metric("Payout (Year)", f"{payout_year}")
 
-        st.markdown("---"); st.markdown("#### Cash Flow Analysis")
+        st.markdown("---"); st.markdown("#### Yearly Cash Flow")
+        show_df = yearly[['year','oil_bbl','gas_mcf','revenue','royalty','opex','tax','net_cf']].copy()
+        show_df.columns = ["Year","Oil (bbl)","Gas (Mcf)","Revenue","Royalty","OPEX","Tax","Net CF"]
+        st.dataframe(show_df, use_container_width=True, hide_index=True)
+
         fig_cf = go.Figure()
-        fig_cf.add_trace(go.Bar(x=list(range(len(cumulative_cash_flow))), y=cumulative_cash_flow, name='Cumulative Cash Flow'))
-        fig_cf.update_layout(title="<b>Cumulative Cash Flow Over Time</b>", xaxis_title="Year", yaxis_title="Cumulative Cash Flow ($)", template="plotly_white")
+        fig_cf.add_trace(go.Bar(x=show_df["Year"], y=show_df["Net CF"], name="Net CF"))
+        fig_cf.add_trace(go.Scatter(x=list(range(len(cash_flow))), y=np.cumsum(cash_flow),
+                                    name="Cumulative CF", mode="lines+markers", yaxis="y2"))
+        fig_cf.update_layout(
+            title="<b>Cash Flow</b>", template="plotly_white",
+            yaxis=dict(title="Yearly Net CF ($)"),
+            yaxis2=dict(title="Cumulative CF ($)", overlaying="y", side="right")
+        )
         st.plotly_chart(fig_cf, use_container_width=True, theme="streamlit")
 
 elif selected_tab == "EUR vs Lateral Length":
@@ -1212,6 +1254,86 @@ elif selected_tab == "Field Match (CSV)":
             )
     elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
         st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+elif selected_tab == "Automated Match":
+    st.header("Automated History Matching")
+
+    if st.session_state.get("field_data_match") is None:
+        st.info("Load field data on the 'Field Match (CSV)' tab first.")
+    else:
+        field_data = st.session_state.field_data_match
+        st.markdown("#### Parameters to Match")
+        candidates = ["k_stdev", "xf_ft", "pad_interf"]
+        to_vary = st.multiselect("Choose parameters to vary:", candidates, default=["k_stdev","xf_ft"])
+
+        bounds = {}
+        if "k_stdev" in to_vary:
+            b1, b2 = st.columns(2)
+            with b1:
+                kmin = st.number_input("k_stdev min", 0.0, 0.5, 0.01, 0.005)
+            with b2:
+                kmax = st.number_input("k_stdev max", 0.0, 0.5, 0.15, 0.005)
+            bounds["k_stdev"] = (kmin, kmax)
+        if "xf_ft" in to_vary:
+            b1, b2 = st.columns(2)
+            with b1:
+                xmin = st.number_input("xf_ft min", 50.0, 1000.0, 150.0, 10.0)
+            with b2:
+                xmax = st.number_input("xf_ft max", 50.0, 1000.0, 450.0, 10.0)
+            bounds["xf_ft"] = (xmin, xmax)
+        if "pad_interf" in to_vary:
+            b1, b2 = st.columns(2)
+            with b1:
+                imin = st.number_input("pad_interf min", 0.0, 0.8, 0.0, 0.01)
+            with b2:
+                imax = st.number_input("pad_interf max", 0.0, 0.8, 0.5, 0.01)
+            bounds["pad_interf"] = (imin, imax)
+
+        algo = st.selectbox("Optimizer", ["Differential Evolution", "Nelder-Mead"], index=0)
+        max_iter = st.number_input("Max iterations", 5, 200, 25, 5)
+
+        if st.button("Run Automated Match", type="primary"):
+            from scipy.optimize import differential_evolution, minimize
+            base_state = state.copy()
+
+            # Helper: misfit between sim and field
+            def misfit(x):
+                s = base_state.copy()
+                # map x → parameters
+                idx = 0
+                for name in to_vary:
+                    lo, hi = bounds[name]
+                    s[name] = float(lo + (hi - lo) * x[idx]) if algo == "Differential Evolution" else float(x[idx])
+                    idx += 1
+                # use fast proxy for speed (can switch to full engine later)
+                rng = np.random.default_rng(st.session_state.rng_seed + 2024)
+                res = fallback_fast_solver(s, rng)
+                # align in time and compute MSE on gas (and oil if present)
+                sim_t, sim_qg = res["t"], res["qg"]
+                mse = 0.0
+                if {"Day", "Gas_Rate_Mscfd"}.issubset(field_data.columns):
+                    fd = field_data.dropna(subset=["Day","Gas_Rate_Mscfd"])
+                    # simple nearest-neighbor time alignment
+                    idxs = np.clip(np.searchsorted(sim_t, fd["Day"].values), 0, len(sim_t)-1)
+                    mse += np.mean((sim_qg[idxs] - fd["Gas_Rate_Mscfd"].values)**2)
+                if {"Day", "Oil_Rate_STBpd"}.issubset(field_data.columns):
+                    fd = field_data.dropna(subset=["Day","Oil_Rate_STBpd"])
+                    idxs = np.clip(np.searchsorted(res["t"], fd["Day"].values), 0, len(res["t"])-1)
+                    mse += np.mean((res["qo"][idxs] - fd["Oil_Rate_STBpd"].values)**2)
+                return mse
+
+            if algo == "Differential Evolution":
+                de_bounds = [ (0.0,1.0) for _ in to_vary ]  # we scale inside misfit
+                result = differential_evolution(misfit, de_bounds, maxiter=int(max_iter), polish=True)
+                st.success(f"Best misfit: {result.fun:.4g}")
+                st.write("Scaled decision vector:", result.x.tolist())
+            else:
+                # Nelder-Mead needs starting guess; use mids of bounds
+                x0 = [0.5*(lo+hi) for (lo,hi) in (bounds[n] for n in to_vary)]
+                result = minimize(misfit, x0, method="Nelder-Mead", options={"maxiter": int(max_iter)})
+                st.success(f"Best misfit: {result.fun:.4g}")
+                st.write("Best params:", result.x.tolist())
+
+
 
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
