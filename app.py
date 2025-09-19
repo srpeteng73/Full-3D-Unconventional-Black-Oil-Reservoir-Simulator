@@ -44,13 +44,15 @@ st.set_page_config(page_title="3D Unconventional / Black-Oil Reservoir Simulator
 _setdefault("apply_preset_payload", None)
 _setdefault("sim", None)
 _setdefault("rng_seed", 1234)
-_setdefault("sim_mode", "3D Unconventional Reservoir Simulator — Implicit Engine Ready")
+# --- Model Type options (must match the sidebar selectbox) ---
+VALID_MODEL_TYPES = ["Unconventional Reservoir", "Black Oil Reservoir"]
+# Default to the first allowed value
+_setdefault("sim_mode", VALID_MODEL_TYPES[0])
 _setdefault("dfn_segments", None)
 _setdefault("use_dfn_sink", True)
 _setdefault("use_auto_dfn", True)
 _setdefault("vol_downsample", 2)
 _setdefault("iso_value_rel", 0.5)
-
 defaults = dict(
     nx=300, ny=60, nz=12,
     dx=40.0, dy=40.0, dz=15.0,
@@ -332,12 +334,8 @@ with st.sidebar:
     )
     st.session_state["engine_type"] = engine_type_ui
 
-    model_choice = st.selectbox(
-        "Model Type",
-        ["Unconventional Reservoir", "Black Oil Reservoir"],
-        key="sim_mode"
-    )
-    st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
+   model_choice = st.selectbox("Model Type", VALID_MODEL_TYPES, key="sim_mode")
+st.session_state.fluid_model = "black_oil" if "Black Oil" in model_choice else "unconventional"
 
     play = st.selectbox("Shale Play Preset", PLAY_LIST, index=0, key="play_sel")
     if st.button("Apply Preset", use_container_width=True):
