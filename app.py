@@ -224,34 +224,33 @@ def _pvt_from_state(state):
     return adapter
 
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
+    import plotly.graph_objects as go
     def g(val, label, suffix, color, vmax):
-        fig = go.Figure(go.Indicator(
+        ind = go.Indicator(
             mode="gauge+number",
             value=float(val),
-            number={'suffix': f" {suffix}", 'font': {'size': 44, 'color': '#0b2545'}},
-            title={'text': f"<b>{label}</b>", 'font': {'size': 22, 'color': '#0b2545'}},
+            number={"suffix": f" {suffix}", "font": {"size": 44, "color": "#0b2545"}},
+            title={"text": f"<b>{label}</b>", "font": {"size": 22, "color": "#0b2545"}},
             gauge=dict(
-                shape='angular',
-                axis={'range': [0, vmax], 'tickwidth': 1.2, 'tickcolor': '#0b2545'},
-                bar={'color': color, 'thickness': 0.28},
-                bgcolor='white', borderwidth=1, bordercolor='#cfe0ff',
-                # ✅ steps & threshold belong inside gauge (not top-level)
+                shape="angular",
+                axis=dict(range=[0, vmax], tickwidth=1.2, tickcolor="#0b2545"),
+                bar=dict(color=color, thickness=0.28),
+                bgcolor="white", borderwidth=1, bordercolor="#cfe0ff",
                 steps=[
-                    {'range': [0, 0.6 * vmax], 'color': 'rgba(0,0,0,0.04)'},
-                    {'range': [0.6 * vmax, 0.85 * vmax], 'color': 'rgba(0,0,0,0.07)'},
+                    dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.04)"),
+                    dict(range=[0.6 * vmax, 0.85 * vmax], color="rgba(0,0,0,0.07)"),
                 ],
-                threshold={
-                    'line': {'color': 'green' if color == '#d62728' else 'red', 'width': 4},
-                    'thickness': 0.9,
-                    'value': float(val),
-                },
+                threshold=dict(
+                    line=dict(color="green" if color == "#d62728" else "red", width=4),
+                    thickness=0.9, value=float(val)
+                ),
             ),
-        ))
+        )
+        fig = go.Figure(ind)
         fig.update_layout(height=260, margin=dict(l=10, r=10, t=60, b=10), paper_bgcolor="#ffffff")
         return fig
-
-    gmax = max(1.0, np.ceil(float(EUR_g_BCF) / 5.0) * 5.0)
-    omax = max(0.5, np.ceil(float(EUR_o_MMBO) / 0.5) * 0.5)
+    gmax = max(1.0, np.ceil(max(EUR_g_BCF, 1e-9) / 5.0) * 5.0)
+    omax = max(0.5, np.ceil(max(EUR_o_MMBO, 1e-9) / 0.5) * 0.5)
     return g(EUR_g_BCF, "EUR Gas", "BCF", "#d62728", gmax), g(EUR_o_MMBO, "EUR Oil", "MMBO", "#2ca02c", omax)
 
 def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
