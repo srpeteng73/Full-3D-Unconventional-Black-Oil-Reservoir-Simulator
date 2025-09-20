@@ -804,7 +804,6 @@ elif selected_tab == "Control Panel":
     c1, c2 = st.columns(2)
 
     with c1:
-        # CORRECTED: The `key` argument handles the assignment to st.session_state.control.
         st.selectbox(
             "Well control",
             ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
@@ -816,19 +815,15 @@ elif selected_tab == "Control Panel":
         )
 
         if st.session_state.control == "BHP":
-            # CORRECTED: Removed direct assignment.
             st.number_input(
                 "BHP (psi)", min_value=500.0, max_value=15000.0,
                 value=float(st.session_state.get("bhp_psi", 2500.0)),
                 step=50.0, key="bhp_psi"
             )
-            # These assignments are correct because they are not creating widgets.
-            # They are logic to reset other state variables.
             st.session_state.rate_mscfd = st.session_state.get("rate_mscfd", 0.0)
             st.session_state.rate_stbd  = st.session_state.get("rate_stbd", 0.0)
 
         elif st.session_state.control == "RATE_GAS_MSCFD":
-            # CORRECTED: Removed direct assignment.
             st.number_input(
                 "Gas rate target (Mscf/d)", min_value=0.0, max_value=500000.0,
                 value=float(st.session_state.get("rate_mscfd", 5000.0)),
@@ -836,7 +831,6 @@ elif selected_tab == "Control Panel":
             )
 
         elif st.session_state.control == "RATE_OIL_STBD":
-            # CORRECTED: Removed direct assignment.
             st.number_input(
                 "Oil rate target (STB/d)", min_value=0.0, max_value=20000.0,
                 value=float(st.session_state.get("rate_stbd", 800.0)),
@@ -844,7 +838,6 @@ elif selected_tab == "Control Panel":
             )
 
         elif st.session_state.control == "RATE_LIQ_STBD":
-            # CORRECTED: Removed direct assignment.
             st.number_input(
                 "Liquid (oil+water) rate target (STB/d)", min_value=0.0, max_value=40000.0,
                 value=float(st.session_state.get("rate_stbd", 1200.0)),
@@ -852,18 +845,15 @@ elif selected_tab == "Control Panel":
             )
 
     with c2:
-        # CORRECTED: Removed direct assignment.
         st.checkbox(
             "Use gravity", value=bool(st.session_state.get("use_gravity", True)),
             key="use_gravity"
         )
-        # CORRECTED: Removed direct assignment.
         st.number_input(
             "kv/kh", min_value=0.01, max_value=1.0,
             value=float(st.session_state.get("kvkh", 0.10)),
             step=0.01, format="%.2f", key="kvkh"
         )
-        # CORRECTED: Removed direct assignment.
         st.number_input(
             "Geomech α (1/psi)", min_value=0.0, max_value=1e-3,
             value=float(st.session_state.get("geo_alpha", 0.0)),
@@ -871,7 +861,6 @@ elif selected_tab == "Control Panel":
         )
 
     st.markdown("#### Well & Frac Summary")
-    # This section is correct as it only reads from session state.
     summary = {
         "Control": st.session_state.get("control"),
         "BHP (psi)": st.session_state.get("bhp_psi"),
@@ -881,7 +870,6 @@ elif selected_tab == "Control Panel":
         "kv/kh": st.session_state.get("kvkh"),
         "Geomech α (1/psi)": st.session_state.get("geo_alpha"),
     }
-    # Include frac bits from your state if present
     try:
         summary.update({
             "xf_ft": state.get("xf_ft"),
@@ -891,22 +879,18 @@ elif selected_tab == "Control Panel":
     except Exception:
         pass
     st.write(summary)
+
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("Use this tab to (re)generate φ/k grids based on the parameters set in the sidebar.")
 
-    # Button to clear and re-generate
     if st.button("Generate New Property Volumes", use_container_width=True, type="primary"):
-        # Call the newly defined helper function
         generate_property_volumes(state)
-        # A rerun is implicitly handled by Streamlit's execution flow after a button press
         
     st.markdown("---")
     
-    # Display plots IF the volumes exist in session state
     if st.session_state.get('kx') is not None:
         st.markdown("### Mid-Layer Property Maps")
-        # Get the middle slice for visualization
         kx_display = get_k_slice(st.session_state.kx, state['nz'] // 2)
         ky_display = get_k_slice(st.session_state.ky, state['nz'] // 2)
         phi_display = get_k_slice(st.session_state.phi, state['nz'] // 2)
@@ -934,6 +918,7 @@ elif selected_tab == "Generate 3D property volumes":
             st.markdown("**Porosity (ϕ)** is the void space in the rock where fluids are stored.\n- **High values (yellow/white)** indicate more storage capacity.")
     else:
         st.info("Click the button above to generate the initial property volumes.")
+
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000, state["p_min_bhp_psi"]), max(2000, state["p_init_psi"] + 1000), 120)
@@ -1058,7 +1043,6 @@ elif selected_tab == "Results":
 
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
-        # Before running, generate properties if they don't exist to prevent errors.
         if 'kx' not in st.session_state:
             st.info("Rock properties not found. Generating them first...")
             generate_property_volumes(state)
@@ -1083,28 +1067,23 @@ elif selected_tab == "Results":
         t = sim_data.get("t")
         qo = sim_data.get("qo")
         qg = sim_data.get("qg")
-        qw = sim_data.get("qw") # Check for water data
+        qw = sim_data.get("qw")
 
         if t is not None and (qo is not None or qg is not None):
             fig_rate = go.Figure()
             
-            # Add Gas Trace (Red)
             if qg is not None:
                 fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)",
                                               line=dict(color="red"), yaxis="y1"))
             
-            # Add Oil Trace (Green)
             if qo is not None:
                 fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil Rate (STB/d)",
                                               line=dict(color="green"), yaxis="y2"))
 
-            # Add Water Trace (Blue) - if available
             if qw is not None:
                 fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
                                               line=dict(color="blue"), yaxis="y2"))
             
-            # --- FIX: Consolidated all layout updates into a single dictionary ---
-            # This is the most robust way to update a Plotly layout and avoids argument conflicts.
             layout_updates = {
                 "title": {"text": "<b>Production Rate vs. Time</b>"},
                 "xaxis": {"title": "Time (days)"},
@@ -1131,25 +1110,26 @@ elif selected_tab == "Results":
         else:
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
 
-        # Optional EUR gauges remain
         if "eur_gauges" in globals():
             try:
                 eur_g = sim_data.get("EUR_g_BCF")
                 eur_o = sim_data.get("EUR_o_MMBO")
                 if eur_g is not None and eur_o is not None:
+                    gfig, ofig = eur_gauges(eur_g, eur_o)
                     c1, c2 = st.columns(2)
                     with c1:
                         st.plotly_chart(gfig, use_container_width=True)
                     with c2:
                         st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not display EUR gauges. Error: {e}")elif selected_tab == "3D Viewer":
-   
+                st.warning(f"Could not display EUR gauges. Error: {e}")
+
+elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
 
     if sim_data is None and st.session_state.get('kx') is None:
-        st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the 3D viewer.")
+        st.warning("Please generate rock properties or run a simulation to enable the 3D viewer.")
     else:
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
         if sim_data:
@@ -1216,13 +1196,12 @@ elif selected_tab == "Results":
                         st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects points of equal value.")
         else:
             st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
-# ==== END 3D VIEWER BLOCK ====
 
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
-        st.warning("Please generate rock properties on Tab 2 or run a simulation on Tab 5 to enable the slice viewer.")
+        st.warning("Please generate rock properties or run a simulation to enable the slice viewer.")
     else:
         slice_prop_list = ['Permeability (kx)', 'Permeability (ky)', 'Porosity (ϕ)']
         if sim_data and sim_data.get('press_matrix') is not None:
@@ -1269,6 +1248,7 @@ elif selected_tab == "Slice Viewer":
                 )
         else:
             st.warning(f"Data for '{prop_slice}' not found.")
+
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     sim_data = st.session_state.get("sim")
@@ -1352,7 +1332,6 @@ elif selected_tab == "QA / Material Balance":
 
 elif selected_tab == "Economics":
     st.header("Economics")
-    # Call your economics panel if you have one
     if "econ_panel" in globals():
         econ_panel()
     else:
@@ -1457,6 +1436,7 @@ elif selected_tab == "Field Match (CSV)":
             )
     elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
         st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+
 elif selected_tab == "Automated Match":
     st.header("Automated History Matching")
 
@@ -1498,24 +1478,19 @@ elif selected_tab == "Automated Match":
             from scipy.optimize import differential_evolution, minimize
             base_state = state.copy()
 
-            # Helper: misfit between sim and field
             def misfit(x):
                 s = base_state.copy()
-                # map x → parameters
                 idx = 0
                 for name in to_vary:
                     lo, hi = bounds[name]
                     s[name] = float(lo + (hi - lo) * x[idx]) if algo == "Differential Evolution" else float(x[idx])
                     idx += 1
-                # use fast proxy for speed (can switch to full engine later)
                 rng = np.random.default_rng(st.session_state.rng_seed + 2024)
                 res = fallback_fast_solver(s, rng)
-                # align in time and compute MSE on gas (and oil if present)
                 sim_t, sim_qg = res["t"], res["qg"]
                 mse = 0.0
                 if {"Day", "Gas_Rate_Mscfd"}.issubset(field_data.columns):
                     fd = field_data.dropna(subset=["Day","Gas_Rate_Mscfd"])
-                    # simple nearest-neighbor time alignment
                     idxs = np.clip(np.searchsorted(sim_t, fd["Day"].values), 0, len(sim_t)-1)
                     mse += np.mean((sim_qg[idxs] - fd["Gas_Rate_Mscfd"].values)**2)
                 if {"Day", "Oil_Rate_STBpd"}.issubset(field_data.columns):
@@ -1525,18 +1500,15 @@ elif selected_tab == "Automated Match":
                 return mse
 
             if algo == "Differential Evolution":
-                de_bounds = [ (0.0,1.0) for _ in to_vary ]  # we scale inside misfit
+                de_bounds = [ (0.0,1.0) for _ in to_vary ]
                 result = differential_evolution(misfit, de_bounds, maxiter=int(max_iter), polish=True)
                 st.success(f"Best misfit: {result.fun:.4g}")
                 st.write("Scaled decision vector:", result.x.tolist())
             else:
-                # Nelder-Mead needs starting guess; use mids of bounds
                 x0 = [0.5*(lo+hi) for (lo,hi) in (bounds[n] for n in to_vary)]
                 result = minimize(misfit, x0, method="Nelder-Mead", options={"maxiter": int(max_iter)})
                 st.success(f"Best misfit: {result.fun:.4g}")
                 st.write("Best params:", result.x.tolist())
-
-
 
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
@@ -1639,7 +1611,6 @@ elif selected_tab == "Uncertainty & Monte Carlo":
                 "shaded area shows P10–P90 envelope. Histograms summarize EUR distributions."
             )
 
-# ---------------- Well Placement Optimization ----------------
 elif selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
 
@@ -1675,7 +1646,6 @@ elif selected_tab == "Well Placement Optimization":
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
 
-    # Button outside the column blocks
     launch_opt = st.button("🚀 Launch Optimization", use_container_width=True, type="primary")
 
     if launch_opt:
@@ -1698,9 +1668,7 @@ elif selected_tab == "Well Placement Optimization":
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
 
-        # ---- Main loop (FOR) ----
         for i in range(int(iterations)):
-            # Propose a random heel location and check feasibility
             is_valid = False
             guard = 0
             while (not is_valid) and (guard < 10000):
@@ -1794,7 +1762,6 @@ elif selected_tab == "Well Placement Optimization":
                 "and the fault (white dashed) if enabled."
             )
 
-# ---------------- User’s Manual ----------------
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
@@ -1807,7 +1774,7 @@ elif selected_tab == "User’s Manual":
     st.markdown("""
     ### 2. Quick Start
     1) Pick a **Preset** in the sidebar and click **Apply Preset**  
-    2) Optional: **Generate 3D property volumes** (Tab 2)  
+    2) **Generate 3D property volumes** (Tab: "Generate 3D property volumes")  
     3) Run **Results → Run simulation**  
     4) Review plots; iterate parameters as needed
     """)
@@ -1818,7 +1785,6 @@ elif selected_tab == "User’s Manual":
     simulated rates align with measured points.
     """)
 
-# ---------------- Solver & Profiling ----------------
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
@@ -1844,7 +1810,6 @@ elif selected_tab == "Solver & Profiling":
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-# ---------------- DFN Viewer ----------------
 elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
