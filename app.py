@@ -428,6 +428,7 @@ def run_simulation_engine(state):
     t  = _pick(engine_results, 't',  't_days', 'time_days')
     qg = _pick(engine_results, 'qg', 'qg_Mscfd', 'qg_mscfd')
     qo = _pick(engine_results, 'qo', 'qo_STBpd', 'qo_stbpd')
+    qw = _pick(engine_results, 'qw', 'qw_STBpd', 'qw_stbpd') # FIX: Also pick water rate if available
 
     if t is None or qg is None or qo is None:
         st.error("Engine missing required arrays (t/qg/qo).")
@@ -436,14 +437,26 @@ def run_simulation_engine(state):
     EUR_g_BCF  = np.trapz(qg, t) / 1e6
     EUR_o_MMBO = np.trapz(qo, t) / 1e6
 
-    engine_results['t'] = t
-    engine_results['qg'] = qg
-    engine_results['qo'] = qo
-    engine_results['runtime_s'] = time.time() - t0
-    engine_results['EUR_g_BCF'] = EUR_g_BCF
-    engine_results['EUR_o_MMBO'] = EUR_o_MMBO
-    return engine_results
+    # FIX: Explicitly add all required keys to the final dictionary
+    # This ensures both timeseries and 3D arrays are passed to the UI.
+    final_results = {
+        't': t,
+        'qg': qg,
+        'qo': qo,
+        'runtime_s': time.time() - t0,
+        'EUR_g_BCF': EUR_g_BCF,
+        'EUR_o_MMBO': EUR_o_MMBO
+    }
+    
+    if qw is not None:
+        final_results['qw'] = qw
 
+    # Pass through optional 3D matrices for the viewer if they exist
+    for key in ['press_matrix', 'p_init_3d', 'ooip_3d']:
+        if key in engine_results:
+            final_results[key] = engine_results[key]
+            
+    return final_results
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
@@ -1045,11 +1058,17 @@ elif selected_tab == "Results":
 
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
+        # Before running, generate properties if they don't exist to prevent errors.
+        if 'kx' not in st.session_state:
+            st.info("Rock properties not found. Generating them first...")
+            generate_property_volumes(state)
+            
         with st.spinner("Running full 3D simulation..."):
-            sim_out = run_simulation_engine(state)  # keep your existing engine wrapper
+            sim_out = run_simulation_engine(state)
+        
         if sim_out is None:
             st.session_state.sim = None
-            st.error("Simulation failed. Showing results from fast preview solver.")
+            st.error("Simulation failed. Check sidebar parameters and logs.")
         else:
             st.session_state.sim = sim_out
 
@@ -1059,32 +1078,71 @@ elif selected_tab == "Results":
     else:
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
 
-        # Timeseries plots if present
-        try:
-            import pandas as pd
-            t = sim_data.get("t")
-            qo = sim_data.get("qo")
-            qg = sim_data.get("qg")
-            if t is not None and (qo is not None or qg is not None):
-                df = pd.DataFrame({"t_days": t})
-                if qo is not None: df["Oil_STB_d"] = qo
-                if qg is not None: df["Gas_Mscf_d"] = qg
-                st.line_chart(df.set_index("t_days"))
-        except Exception:
-            st.write({k: sim_data.get(k) for k in ("t", "qo", "qg")})
+        st.markdown("### Production Profiles")
+        
+        # --- FIX: Replaced st.line_chart with a more customizable Plotly chart ---
+        t = sim_data.get("t")
+        qo = sim_data.get("qo")
+        qg = sim_data.get("qg")
+        qw = sim_data.get("qw") # Check for water data
 
-        # Optional EUR gauges if your eur_gauges(...) helper exists
+        if t is not None and (qo is not None or qg is not None):
+            fig_rate = go.Figure()
+            
+            # Add Gas Trace (Red)
+            if qg is not None:
+                fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)",
+                                              line=dict(color="red"), yaxis="y1"))
+            
+            # Add Oil Trace (Green)
+            if qo is not None:
+                fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil Rate (STB/d)",
+                                              line=dict(color="green"), yaxis="y2"))
+
+            # Add Water Trace (Blue) - if available
+            if qw is not None:
+                fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
+                                              line=dict(color="blue"), yaxis="y2"))
+            
+            # Configure layout with dual axes for different scales
+            fig_rate.update_layout(
+                title_text="<b>Production Rate vs. Time</b>",
+                xaxis_title="Time (days)",
+                template="plotly_white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                yaxis=dict(
+                    title="Gas Rate (Mscf/d)", 
+                    titlefont=dict(color="red"),
+                    tickfont=dict(color="red"),
+                    side="left"
+                ),
+                yaxis2=dict(
+                    title="Liquid Rate (STB/d)", 
+                    titlefont=dict(color="green"), # Main color for this axis
+                    tickfont=dict(color="green"),
+                    overlaying="y", 
+                    side="right",
+                    showgrid=False
+                )
+            )
+            st.plotly_chart(fig_rate, use_container_width=True)
+        else:
+            st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
+
+        # Optional EUR gauges remain
         if "eur_gauges" in globals():
             try:
-                eur_g = sim_data.get("EUR_g_BCF") or sim_data.get("eur_g_bcf")
-                eur_o = sim_data.get("EUR_o_MMBO") or sim_data.get("eur_o_mmbo")
+                eur_g = sim_data.get("EUR_g_BCF")
+                eur_o = sim_data.get("EUR_o_MMBO")
                 if eur_g is not None and eur_o is not None:
                     gfig, ofig = eur_gauges(eur_g, eur_o)
-                    st.plotly_chart(gfig, use_container_width=True)
-                    st.plotly_chart(ofig, use_container_width=True)
-            except Exception:
-                pass
-
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.plotly_chart(gfig, use_container_width=True)
+                    with c2:
+                        st.plotly_chart(ofig, use_container_width=True)
+            except Exception as e:
+                st.warning(f"Could not display EUR gauges. Error: {e}")
 # ==== BEGIN 3D VIEWER BLOCK ====
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
