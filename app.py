@@ -1043,6 +1043,7 @@ elif selected_tab == "Results":
 
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
+        # Before running, generate properties if they don't exist to prevent errors.
         if 'kx' not in st.session_state:
             st.info("Rock properties not found. Generating them first...")
             generate_property_volumes(state)
@@ -1067,11 +1068,37 @@ elif selected_tab == "Results":
         t = sim_data.get("t")
         qo = sim_data.get("qo")
         qg = sim_data.get("qg")
-        qw = sim_data.get("qw")
+        qw = sim_data.get("qw") # Check for water data
 
         if t is not None and (qo is not None or qg is not None):
-            fig_rate = go.Figure()
             
+            # --- FIX: Define the layout as an object FIRST ---
+            # This is the most stable way to configure a complex Plotly layout.
+            figure_layout = go.Layout(
+                title={"text": "<b>Production Rate vs. Time</b>"},
+                xaxis={"title": "Time (days)"},
+                template="plotly_white",
+                legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+                yaxis={
+                    "title": "Gas Rate (Mscf/d)",
+                    "titlefont": {"color": "red"},
+                    "tickfont": {"color": "red"},
+                    "side": "left"
+                },
+                yaxis2={
+                    "title": "Liquid Rate (STB/d)",
+                    "titlefont": {"color": "green"},
+                    "tickfont": {"color": "green"},
+                    "overlaying": "y",
+                    "side": "right",
+                    "showgrid": False
+                }
+            )
+
+            # --- Create the figure WITH the layout pre-defined ---
+            fig_rate = go.Figure(layout=figure_layout)
+            
+            # Now, add the traces to the pre-configured figure
             if qg is not None:
                 fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)",
                                               line=dict(color="red"), yaxis="y1"))
@@ -1084,32 +1111,11 @@ elif selected_tab == "Results":
                 fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
                                               line=dict(color="blue"), yaxis="y2"))
             
-            layout_updates = {
-                "title": {"text": "<b>Production Rate vs. Time</b>"},
-                "xaxis": {"title": "Time (days)"},
-                "template": "plotly_white",
-                "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-                "yaxis": {
-                    "title": "Gas Rate (Mscf/d)",
-                    "titlefont": {"color": "red"},
-                    "tickfont": {"color": "red"},
-                    "side": "left"
-                },
-                "yaxis2": {
-                    "title": "Liquid Rate (STB/d)",
-                    "titlefont": {"color": "green"},
-                    "tickfont": {"color": "green"},
-                    "overlaying": "y",
-                    "side": "right",
-                    "showgrid": False
-                }
-            }
-            fig_rate.update_layout(layout_updates)
-            
             st.plotly_chart(fig_rate, use_container_width=True)
         else:
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
 
+        # Optional EUR gauges remain
         if "eur_gauges" in globals():
             try:
                 eur_g = sim_data.get("EUR_g_BCF")
@@ -1123,7 +1129,6 @@ elif selected_tab == "Results":
                         st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
                 st.warning(f"Could not display EUR gauges. Error: {e}")
-
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
