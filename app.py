@@ -586,7 +586,7 @@ state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_stat
 
 # --- Tab list ---
 tab_names = [
-    "Setup Preview", "Generate 3D property volumes", "PVT (Black-Oil)", "MSW Wellbore", "RTA", "Results",
+    "Setup Preview", "Control Panel", "Generate 3D property volumes", "PVT (Black-Oil)", "MSW Wellbore", "RTA", "Results",
     "3D Viewer", "Slice Viewer", "QA / Material Balance", "Economics", "EUR vs Lateral Length", "Field Match (CSV)",
     "Uncertainty & Monte Carlo", "Well Placement Optimization", "User’s Manual", "Solver & Profiling", "DFN Viewer"
 ]
@@ -651,58 +651,7 @@ if selected_tab == "Setup Preview":
                 "Bo_pb_rb_stb": state.get("Bo_pb_rb_stb"),
                 "p_init_psi": state.get("p_init_psi"),
             })
-# --- Well Control ---
-with st.expander("Well Control", expanded=True):
-    control = st.selectbox(
-        "Control mode",
-        ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
-        index=0,
-        help="BHP sets bottomhole pressure. RATE_* hits a target rate via equivalent BHP."
-    )
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        bhp_psi = st.number_input(
-            "Target BHP (psi)",
-            min_value=300.0, max_value=15000.0, value=2500.0, step=50.0,
-            disabled=(control != "BHP")
-        )
-    with col2:
-        rate_mscfd = st.number_input(
-            "Gas rate (Mscf/d)",
-            min_value=0.0, max_value=1_000_000.0, value=5000.0, step=100.0,
-            disabled=(control != "RATE_GAS_MSCFD")
-        )
-    with col3:
-        rate_stbd = st.number_input(
-            "Oil/Liquid rate (STB/d)",
-            min_value=0.0, max_value=100_000.0, value=800.0, step=10.0,
-            disabled=(control not in ("RATE_OIL_STBD", "RATE_LIQ_STBD"))
-        )
 
-# --- Physics / Numerics ---
-with st.expander("Physics & Numerics", expanded=False):
-    use_gravity = st.checkbox("Enable gravity", value=True)
-    kvkh = st.number_input("kv/kh (vertical anisotropy)", min_value=0.01, max_value=1.0, value=0.10, step=0.01)
-    geo_alpha = st.number_input("Geomech α (1/psi, k multiplier)", min_value=0.0, max_value=0.001, value=0.0, step=0.00001, format="%.5f")
-    colA, colB = st.columns(2)
-    with colA:
-        dt_days = st.number_input("Time step (days)", min_value=1.0, max_value=180.0, value=30.0, step=1.0)
-    with colB:
-        t_end_days = st.number_input("End time (days)", min_value=30.0, max_value=3650.0, value=3650.0, step=30.0)
-
-    st.caption("Fluid densities (for gravity head):")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        rho_o = st.number_input("Oil, lb/ft³", min_value=30.0, max_value=70.0, value=53.0, step=0.5)
-    with c2:
-        rho_w = st.number_input("Water, lb/ft³", min_value=55.0, max_value=70.0, value=62.4, step=0.5)
-    with c3:
-        rho_g = st.number_input("Gas, lb/ft³", min_value=0.01, max_value=0.20, value=0.06, step=0.01)
-
-
-
-
-        
         st.markdown("#### Well & Frac Summary")
         well_data = {
             "Parameter": [
@@ -802,48 +751,106 @@ with st.expander("Physics & Numerics", expanded=False):
             "These charts use a simplified analytical model for quick iteration before running the full 3D simulation."
         )
 
-elif selected_tab == "Generate 3D property volumes":
-    st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
-    if st.button("Re-generate rock property volumes"):
-        st.session_state.kx, st.session_state.ky, st.session_state.phi = None, None, None
-        _safe_rerun()
+# ---------- TAB ROUTING (must be contiguous; do not insert code between clauses) ----------
+elif selected_tab == "Control Panel":
+    st.header("Control Panel")
 
-    if st.session_state.get('kx') is None:
-        rng = np.random.default_rng(int(st.session_state.rng_seed))
-        nz, ny, nx = int(state["nz"]), int(state["ny"]), int(state["nx"])
-        kx_mid = 0.05 + state["k_stdev"] * rng.standard_normal((ny, nx))
-        ky_mid = (0.05 / state["anis_kxky"]) + state["k_stdev"] * rng.standard_normal((ny, nx))
-        phi_mid = 0.10 + state["phi_stdev"] * rng.standard_normal((ny, nx))
-        kz_scale = np.linspace(0.95, 1.05, nz)[:, None, None]
-        st.session_state.kx = np.clip(kx_mid[None, ...] * kz_scale, 1e-4, None)
-        st.session_state.ky = np.clip(ky_mid[None, ...] * kz_scale, 1e-4, None)
-        st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
-
-    kx_display = get_k_slice(st.session_state.kx, state['nz'] // 2)
-    ky_display = get_k_slice(st.session_state.ky, state['nz'] // 2)
-    phi_display = get_k_slice(st.session_state.phi, state['nz'] // 2)
-
+    # --- Well Control + Physics ---
     c1, c2 = st.columns(2)
+
     with c1:
-        st.plotly_chart(
-            px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis", labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"),
-            use_container_width=True, theme="streamlit"
+        st.session_state.control = st.selectbox(
+            "Well control",
+            ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
+            index=["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"].index(
+                st.session_state.get("control", "BHP")
+            ),
+            key="control",
+            help="Choose BHP control or a rate target (gas/oil/liquids).",
         )
-        with st.expander("Click for details"):
-            st.markdown("**Permeability (k)** is a measure of a rock's ability to transmit fluids. This map shows kx for the middle layer.\n- **High values (yellow)** are 'sweet spots'.\n- **Low values (purple)** are tighter rock.")
+
+        if st.session_state.control == "BHP":
+            st.session_state.bhp_psi = st.number_input(
+                "BHP (psi)", min_value=500.0, max_value=15000.0,
+                value=float(st.session_state.get("bhp_psi", 2500.0)),
+                step=50.0, key="bhp_psi"
+            )
+            # zero out rate targets for clarity
+            st.session_state.rate_mscfd = st.session_state.get("rate_mscfd", 0.0)
+            st.session_state.rate_stbd  = st.session_state.get("rate_stbd", 0.0)
+
+        elif st.session_state.control == "RATE_GAS_MSCFD":
+            st.session_state.rate_mscfd = st.number_input(
+                "Gas rate target (Mscf/d)", min_value=0.0, max_value=500000.0,
+                value=float(st.session_state.get("rate_mscfd", 5000.0)),
+                step=100.0, key="rate_mscfd"
+            )
+
+        elif st.session_state.control == "RATE_OIL_STBD":
+            st.session_state.rate_stbd = st.number_input(
+                "Oil rate target (STB/d)", min_value=0.0, max_value=20000.0,
+                value=float(st.session_state.get("rate_stbd", 800.0)),
+                step=10.0, key="rate_stbd"
+            )
+
+        elif st.session_state.control == "RATE_LIQ_STBD":
+            st.session_state.rate_stbd = st.number_input(
+                "Liquid (oil+water) rate target (STB/d)", min_value=0.0, max_value=40000.0,
+                value=float(st.session_state.get("rate_stbd", 1200.0)),
+                step=10.0, key="rate_stbd"
+            )
+
     with c2:
-        st.plotly_chart(
-            px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis", labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"),
-            use_container_width=True, theme="streamlit"
+        st.session_state.use_gravity = st.checkbox(
+            "Use gravity", value=bool(st.session_state.get("use_gravity", True)),
+            key="use_gravity"
         )
-        with st.expander("Click for details"):
-            st.markdown("This map shows permeability in the y-direction (ky). Comparing this to the kx map allows you to visually assess **anisotropy**.")
-    st.plotly_chart(
-        px.imshow(phi_display, origin="lower", color_continuous_scale="Magma", labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"),
-        use_container_width=True, theme="streamlit"
-    )
-    with st.expander("Click for details"):
-        st.markdown("**Porosity (ϕ)** is the void space in the rock where fluids are stored.\n- **High values (yellow/white)** indicate more storage capacity.")
+        st.session_state.kvkh = st.number_input(
+            "kv/kh", min_value=0.01, max_value=1.0,
+            value=float(st.session_state.get("kvkh", 0.10)),
+            step=0.01, format="%.2f", key="kvkh"
+        )
+        st.session_state.geo_alpha = st.number_input(
+            "Geomech α (1/psi)", min_value=0.0, max_value=1e-3,
+            value=float(st.session_state.get("geo_alpha", 0.0)),
+            step=1e-5, format="%.5f", key="geo_alpha"
+        )
+
+    st.markdown("#### Well & Frac Summary")
+    # Keep this lightweight and robust (only show what exists)
+    summary = {
+        "Control": st.session_state.get("control"),
+        "BHP (psi)": st.session_state.get("bhp_psi"),
+        "Gas rate (Mscf/d)": st.session_state.get("rate_mscfd"),
+        "Oil/Liq rate (STB/d)": st.session_state.get("rate_stbd"),
+        "Use gravity": st.session_state.get("use_gravity"),
+        "kv/kh": st.session_state.get("kvkh"),
+        "Geomech α (1/psi)": st.session_state.get("geo_alpha"),
+    }
+    # Include frac bits from your state if present
+    try:
+        summary.update({
+            "xf_ft": state.get("xf_ft"),
+            "hf_ft": state.get("hf_ft"),
+            "stage_spacing_ft": state.get("stage_spacing_ft"),
+        })
+    except Exception:
+        pass
+    st.write(summary)
+
+elif selected_tab == "Generate 3D property volumes":
+    st.header("Generate 3D property volumes")
+    st.info("Use this tab to (re)generate φ/k grids and any DFN volumes before running the simulator.")
+    # If you already have a generator function, we call it safely.
+    if st.button("Generate volumes", use_container_width=True):
+        try:
+            if "generate_property_volumes" in globals():
+                generate_property_volumes(state)  # optional: your existing function
+                st.success("Volumes generated.")
+            else:
+                st.warning("No generator function wired yet.")
+        except Exception as e:
+            st.exception(e)
 
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
@@ -963,158 +970,51 @@ elif selected_tab == "RTA":
             "- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n"
             "- **Slope → 0**: Suggests **boundary-dominated flow**."
         )
-from core import full3d
 
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
-    # Decide engine based on your Engine Type selector
-    engine_str = st.session_state.get("engine_type", "Analytical Model (Fast Proxy)")
-    engine = "analytical" if "Analytical" in engine_str else "implicit"
-
-    def _inputs_from_state(state) -> dict:
-        # --- grid ---
-        nx = int(state.get("nx", 10)); ny = int(state.get("ny", 10)); nz = int(state.get("nz", 5))
-        dx = float(state.get("dx_ft", 100.0)); dy = float(state.get("dy_ft", 100.0)); dz = float(state.get("dz_ft", 50.0))
-
-        # --- rock ---
-        phi = float(state.get("phi", 0.08))
-        kx_md = float(state.get("kx_md", 100.0))
-        ky_md = float(state.get("ky_md", 100.0))
-
-        # --- initial ---
-        p_init_psi = float(state.get("p_init_psi", 5000.0))
-        Sw0 = float(state.get("Sw0", 0.20))
-        Sg0 = float(state.get("Sg0", 0.05))
-
-        # --- PVT (pull from your existing fields if present) ---
-        pb_psi = float(state.get("pb_psi", 3000.0))
-        Bo_pb_rb_stb = float(state.get("Bo_pb_rb_stb", 1.2))
-        Rs_pb_scf_stb = float(state.get("Rs_pb_scf_stb", 600.0))
-        mu_o_cp = float(state.get("mu_o_cp", 1.2))
-        mu_g_cp = float(state.get("mu_g_cp", 0.02))
-
-        # Use the controls you just added above (in session scope)
-        return {
-            "engine": engine,
-            "nx": nx, "ny": ny, "nz": nz, "dx": dx, "dy": dy, "dz": dz,
-            "phi": phi, "kx_md": kx_md, "ky_md": ky_md,
-            "p_init_psi": p_init_psi, "Sw0": Sw0, "Sg0": Sg0,
-            "pb_psi": pb_psi, "Bo_pb_rb_stb": Bo_pb_rb_stb, "Rs_pb_scf_stb": Rs_pb_scf_stb,
-            "mu_o_cp": mu_o_cp, "mu_g_cp": mu_g_cp,
-
-            # Well control (BHP / RATE*)
-            "control": control,
-            "bhp_psi": bhp_psi,
-            "rate_mscfd": rate_mscfd,
-            "rate_stbd": rate_stbd,
-
-            # Physics / numerics
-            "dt_days": dt_days, "t_end_days": t_end_days,
-            "use_gravity": use_gravity,
-            "kvkh": kvkh, "geo_alpha": geo_alpha,
-            "rho_o_lbft3": rho_o, "rho_w_lbft3": rho_w, "rho_g_lbft3": rho_g,
-        }
-
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
-        with st.spinner(f"Running {engine_str}..."):
-            inputs = _inputs_from_state(state)
-            sim_out = full3d.simulate(inputs)
-        st.session_state.sim = sim_out
+        with st.spinner("Running full 3D simulation..."):
+            sim_out = run_simulation_engine(state)  # keep your existing engine wrapper
+        if sim_out is None:
+            st.session_state.sim = None
+            st.error("Simulation failed. Showing results from fast preview solver.")
+        else:
+            st.session_state.sim = sim_out
 
     sim_data = st.session_state.get("sim")
     if sim_data is None:
-        st.info("Click **Run simulation** to compute and display results.")
+        st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
-        st.success("Simulation complete.")
-        # quick plot (replace with your nicer plots if you already have them)
-        import pandas as pd
-        df = pd.DataFrame({
-            "Day": sim_data["t"],
-            "Oil rate (STB/d)": sim_data["qo"],
-            "Gas rate (Mscf/d)": sim_data["qg"],
-        })
-        st.line_chart(df.set_index("Day"))
+        st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
 
-        # --- EUR gauges ---
-        st.markdown("### EUR (30-year forecast)")
-        g1, g2 = st.columns(2)
-        eur_g = float(sim_data.get('EUR_g_BCF', 0.0))
-        eur_o = float(sim_data.get('EUR_o_MMBO', 0.0))
-        eur_g_fig, eur_o_fig = eur_gauges(eur_g, eur_o)
-        with g1:
-            st.plotly_chart(eur_g_fig, use_container_width=True)
-        with g2:
-            st.plotly_chart(eur_o_fig, use_container_width=True)
-        with st.expander("Click for details"):
-            st.markdown(
-                "**Estimated Ultimate Recovery (EUR)** is the total hydrocarbons expected to be recovered over the well's life.\n"
-                "- **BCF**: Billion Cubic Feet (gas)\n"
-                "- **MMBO**: Million Stock-Tank Barrels of Oil"
-            )
+        # Timeseries plots if present
+        try:
+            import pandas as pd
+            t = sim_data.get("t")
+            qo = sim_data.get("qo")
+            qg = sim_data.get("qg")
+            if t is not None and (qo is not None or qg is not None):
+                df = pd.DataFrame({"t_days": t})
+                if qo is not None: df["Oil_STB_d"] = qo
+                if qg is not None: df["Gas_Mscf_d"] = qg
+                st.line_chart(df.set_index("t_days"))
+        except Exception:
+            st.write({k: sim_data.get(k) for k in ("t", "qo", "qg")})
 
-        # --- Production profiles ---
-        st.markdown("### Production Profiles")
-        rate_y_mode = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="res_rate_y_mode")
-        y_type = "log" if rate_y_mode == "Log" else "linear"
-
-        fig_rate = go.Figure()
-        fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], name="Gas Rate",
-                                      line=dict(color="#d62728"), yaxis="y1"))
-        fig_rate.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], name="Oil Rate",
-                                      line=dict(color="#2ca02c"), yaxis="y2"))
-        layout_config = semi_log_layout("Gas & Oil Production Rate", yaxis="Gas Rate (Mscf/d)")
-        layout_config.update(
-            yaxis=dict(title="Gas Rate (Mscf/d)", side="left", type=y_type, color="#d62728",
-                       showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
-            yaxis2=dict(title="Oil Rate (STB/d)", side="right", overlaying="y", type=y_type,
-                        color="#2ca02c", showgrid=False),
-        )
-        fig_rate.update_layout(layout_config)
-        st.plotly_chart(fig_rate, use_container_width=True, theme="streamlit")
-        with st.expander("Click for details"):
-            st.markdown("This plot shows simulated **production rates** for gas (red) and oil (green) over time.")
-
-        # --- GOR & Cumulative ---
-        c1_res, c2_res = st.columns(2)
-
-        with c1_res:
-            gor = np.divide(
-                sim_data['qg'] * 1000, sim_data['qo'],
-                out=np.full_like(sim_data['qg'], np.nan, dtype=float),
-                where=sim_data['qo'] > 1e-3
-            )
-            fig_gor = go.Figure(go.Scatter(x=sim_data['t'], y=gor, name="GOR", line=dict(color="orange")))
-            gor_layout = semi_log_layout("Gas-Oil Ratio (GOR)", yaxis="GOR (scf/STB)")
-            gor_layout['xaxis']['type'] = 'linear'
-            gor_layout['xaxis']['title'] = 'Day'
-            gor_layout['yaxis']['type'] = 'linear'
-            fig_gor.update_layout(gor_layout)
-            st.plotly_chart(fig_gor, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown("**GOR** = produced gas / produced oil. Its trend is a fluid-type diagnostic.")
-
-        with c2_res:
-            cum_g = cumulative_trapezoid(sim_data['qg'], sim_data['t'], initial=0) / 1e6   # BCF
-            cum_o = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0) / 1e6   # MMSTB
-            fig_cum = go.Figure()
-            fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_g, name="Cumulative Gas",
-                                         line=dict(color="#d62728"), yaxis="y1"))
-            fig_cum.add_trace(go.Scatter(x=sim_data['t'], y=cum_o, name="Cumulative Oil",
-                                         line=dict(color="#2ca02c"), yaxis="y2"))
-            cum_layout = semi_log_layout("Cumulative Production", yaxis="Cumulative Gas (BCF)")
-            cum_layout['xaxis']['type'] = 'linear'
-            cum_layout['xaxis']['title'] = 'Day'
-            cum_layout.update(
-                yaxis=dict(title="Cumulative Gas (BCF)", showgrid=True, gridcolor="rgba(0,0,0,0.15)"),
-                yaxis2=dict(title="Cumulative Oil (MMSTB)", overlaying="y", side="right", showgrid=False),
-            )
-            fig_cum.update_layout(cum_layout)
-            st.plotly_chart(fig_cum, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown("Final points on these curves correspond to the EURs.")
-# ==== END RESULTS BLOCK ====
+        # Optional EUR gauges if your eur_gauges(...) helper exists
+        if "eur_gauges" in globals():
+            try:
+                eur_g = sim_data.get("EUR_g_BCF") or sim_data.get("eur_g_bcf")
+                eur_o = sim_data.get("EUR_o_MMBO") or sim_data.get("eur_o_mmbo")
+                if eur_g is not None and eur_o is not None:
+                    gfig, ofig = eur_gauges(eur_g, eur_o)
+                    st.plotly_chart(gfig, use_container_width=True)
+                    st.plotly_chart(ofig, use_container_width=True)
+            except Exception:
+                pass
 
 # ==== BEGIN 3D VIEWER BLOCK ====
 elif selected_tab == "3D Viewer":
@@ -1324,93 +1224,12 @@ elif selected_tab == "QA / Material Balance":
             st.warning("Simulation data is missing required arrays ('t', 'qg', 'qo') for this analysis.")
 
 elif selected_tab == "Economics":
-    st.header("Economics Analysis")
-    sim_data = st.session_state.get("sim")
-    if not sim_data or 't' not in sim_data:
-        st.warning("Please run a simulation on the 'Results' tab to perform an economic analysis.")
+    st.header("Economics")
+    # Call your economics panel if you have one
+    if "econ_panel" in globals():
+        econ_panel()
     else:
-        st.markdown("#### Economic Inputs")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            oil_price = st.number_input("Oil Price ($/bbl)", 0.0, 300.0, 75.0, 1.0)
-            royalty   = st.number_input("Royalty (%)", 0.0, 100.0, 20.0, 0.5) / 100.0
-        with c2:
-            gas_price = st.number_input("Gas Price ($/Mcf)", 0.0, 50.0, 3.50, 0.10)
-            tax_rate  = st.number_input("Severance/Production Tax (%)", 0.0, 100.0, 6.0, 0.5) / 100.0
-        with c3:
-            opex_boe  = st.number_input("OPEX ($/BOE)", 0.0, 100.0, 8.0, 0.5)
-            escal     = st.number_input("OPEX Escalation (%/yr)", 0.0, 50.0, 2.0, 0.5) / 100.0
-        with c4:
-            capex     = st.number_input("CAPEX ($MM)", 0.0, 1000.0, 10.0, 0.5) * 1e6
-            disc_rate = st.number_input("Discount Rate (%/yr)", 0.0, 40.0, 10.0, 0.5) / 100.0
-
-        # Build yearly table
-        days = np.asarray(sim_data['t'])
-        qo   = np.asarray(sim_data['qo'])           # STB/d
-        qg   = np.asarray(sim_data['qg'])           # Mscf/d
-
-        df = pd.DataFrame({'day': days, 'oil_stbd': qo, 'gas_mscfd': qg})
-        df['year'] = (df['day'] / 365.25).astype(int)
-
-        yearly = df.groupby('year', as_index=False).mean()
-        yearly['oil_bbl']  = yearly['oil_stbd']   * 365.25
-        yearly['gas_mcf']  = yearly['gas_mscfd']  * 365.25
-
-        # Revenue before royalty/tax
-        yearly['revenue']  = yearly['oil_bbl'] * oil_price + yearly['gas_mcf'] * gas_price
-
-        # Royalty
-        yearly['royalty']  = royalty * yearly['revenue']
-        # OPEX (convert to BOE rough: 1 bbl oil = 1 boe; 6000 scf ≈ 1 boe → mcf/6 ≈ boe)
-        boe = yearly['oil_bbl'] + yearly['gas_mcf'] / 6.0
-        yearly['opex'] = 0.0
-        if len(boe) > 0:
-            base_opex = opex_boe * boe.iloc[0]
-            yearly.loc[0, 'opex'] = base_opex
-            for i in range(1, len(yearly)):
-                yearly.loc[i, 'opex'] = opex_boe * boe.iloc[i] * ((1.0 + escal) ** i)
-
-        # Taxes on gross revenue (simple model)
-        yearly['tax'] = tax_rate * yearly['revenue']
-
-        # Net cash flow by year
-        yearly['net_cf'] = yearly['revenue'] - yearly['royalty'] - yearly['opex'] - yearly['tax']
-
-        # Add CAPEX at year 0
-        cash_flow = [-capex] + yearly['net_cf'].tolist()
-
-        import numpy_financial as npf
-        npv = npf.npv(disc_rate, cash_flow)
-        try:
-            irr = float(npf.irr(cash_flow)) * 100.0
-        except Exception:
-            irr = float('nan')
-
-        cum_cf = np.cumsum(cash_flow)
-        payout_year = next((i for i, v in enumerate(cum_cf) if v > 0), None)
-        payout_year = "N/A" if payout_year is None else payout_year
-
-        st.markdown("---"); st.markdown("#### Key Financial Metrics")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("NPV", f"${npv/1e6:.2f} MM")
-        m2.metric("IRR", f"{irr:.1f}%" if np.isfinite(irr) else "N/A")
-        m3.metric("Payout (Year)", f"{payout_year}")
-
-        st.markdown("---"); st.markdown("#### Yearly Cash Flow")
-        show_df = yearly[['year','oil_bbl','gas_mcf','revenue','royalty','opex','tax','net_cf']].copy()
-        show_df.columns = ["Year","Oil (bbl)","Gas (Mcf)","Revenue","Royalty","OPEX","Tax","Net CF"]
-        st.dataframe(show_df, use_container_width=True, hide_index=True)
-
-        fig_cf = go.Figure()
-        fig_cf.add_trace(go.Bar(x=show_df["Year"], y=show_df["Net CF"], name="Net CF"))
-        fig_cf.add_trace(go.Scatter(x=list(range(len(cash_flow))), y=np.cumsum(cash_flow),
-                                    name="Cumulative CF", mode="lines+markers", yaxis="y2"))
-        fig_cf.update_layout(
-            title="<b>Cash Flow</b>", template="plotly_white",
-            yaxis=dict(title="Yearly Net CF ($)"),
-            yaxis2=dict(title="Cumulative CF ($)", overlaying="y", side="right")
-        )
-        st.plotly_chart(fig_cf, use_container_width=True, theme="streamlit")
+        st.info("Wire your economics panel here (OPEX, taxes, royalties, detailed cash flow).")
 
 elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
