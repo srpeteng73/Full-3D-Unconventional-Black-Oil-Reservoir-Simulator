@@ -4,13 +4,65 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
+import plotly.io as pio
 import streamlit as st
 from scipy import stats
 from scipy.integrate import cumulative_trapezoid
 import numpy_financial as npf  # Economics Tab
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
-from plotly.subplots import make_subplots
+
+# ---------------------- Plot Style Pack (Gas=RED, Oil=GREEN) ----------------------
+COLOR_GAS   = "#d62728"  # red
+COLOR_OIL   = "#2ca02c"  # green
+COLOR_WATER = "#1f77b4"  # blue
+
+# Clean global template
+pio.templates.default = "plotly_white"
+
+def _style_fig(fig, title, xlab, ylab_left, ylab_right=None):
+    fig.update_layout(
+        title=dict(text=f"<b>{title}</b>", x=0, xanchor="left"),
+        font=dict(size=14),
+        margin=dict(l=60, r=90, t=60, b=60),
+        legend=dict(orientation="h", y=1.02, yanchor="bottom", x=1, xanchor="right"),
+    )
+    fig.update_xaxes(title=xlab, showline=True, linewidth=1, mirror=True)
+    fig.update_yaxes(title=ylab_left, showline=True, linewidth=1, mirror=True, secondary_y=False)
+    if ylab_right:
+        fig.update_yaxes(title=ylab_right, secondary_y=True, showgrid=False)
+
+def rate_chart(t, qg=None, qo=None, qw=None):
+    """Dual-axis rate chart: Gas left (red), Liquids right (green/blue)."""
+    fig = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+    if qg is not None:
+        fig.add_trace(
+            go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)),
+            secondary_y=False
+        )
+    if qo is not None:
+        fig.add_trace(
+            go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)),
+            secondary_y=True
+        )
+    if qw is not None:
+        fig.add_trace(
+            go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=2, color=COLOR_WATER)),
+            secondary_y=True
+        )
+    _style_fig(fig, "Production Rate vs. Time", "Time (days)", "Gas Rate (Mscf/d)", "Liquid Rate (STB/d)")
+    return fig
+
+# High-resolution export button for all charts
+PLOT_CONFIG = {
+    "displaylogo": False,
+    "toImageButtonOptions": {
+        "format": "png", "filename": "plot", "height": 720, "width": 1280, "scale": 3
+    },
+}
+# ----------------------------------------------------------------------------------
+
 
 
 # ------------------------ Utils ------------------------
@@ -649,7 +701,7 @@ st.write(
 selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
 # ------------------------ TAB CONTENT DEFINITIONS ------------------------
-# ------------------------ TAB CONTENT DEFINITIONS ------------------------
+
 if selected_tab == "Setup Preview":
     st.header("Setup Preview")
     c1, c2 = st.columns([1, 1])
@@ -916,9 +968,18 @@ elif selected_tab == "Results":
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
         st.markdown("### Production Profiles")
 
-        # --- Dual-axis rate chart (gas = left axis, liquids = right axis) ---
+        # --- Dual-axis rate chart (Gas left, Liquids right) ---
         from plotly.subplots import make_subplots
         import plotly.graph_objects as go
+
+        # Color & export defaults (use global style pack if present)
+        COLOR_GAS   = globals().get("COLOR_GAS", "#d62728")  # red
+        COLOR_OIL   = globals().get("COLOR_OIL", "#2ca02c")  # green
+        COLOR_WATER = globals().get("COLOR_WATER", "#1f77b4")  # blue
+        PLOT_CONFIG = globals().get("PLOT_CONFIG", {
+            "displaylogo": False,
+            "toImageButtonOptions": {"format": "png", "filename": "plot", "height": 720, "width": 1280, "scale": 3},
+        })
 
         t  = sim_data.get("t")
         qg = sim_data.get("qg")  # Mscf/d
@@ -927,33 +988,36 @@ elif selected_tab == "Results":
 
         if t is not None and (qg is not None or qo is not None or qw is not None):
             fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-
             # Gas on left (primary) axis
             if qg is not None:
                 fig_rate.add_trace(
-                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)"),
+                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)),
                     secondary_y=False
                 )
-
             # Liquids on right (secondary) axis
             if qo is not None:
                 fig_rate.add_trace(
-                    go.Scatter(x=t, y=qo, name="Oil (STB/d)"),
+                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)),
                     secondary_y=True
                 )
             if qw is not None:
                 fig_rate.add_trace(
-                    go.Scatter(x=t, y=qw, name="Water (STB/d)"),
+                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=2, color=COLOR_WATER)),
                     secondary_y=True
                 )
 
             # Layout AFTER traces are added
-            fig_rate.update_layout(template="plotly_white", title_text="<b>Production Rate vs. Time</b>")
-            fig_rate.update_xaxes(title_text="Time (days)")
-            fig_rate.update_yaxes(title_text="Gas Rate (Mscf/d)", secondary_y=False)
+            fig_rate.update_layout(
+                template="plotly_white",
+                title=dict(text="<b>Production Rate vs. Time</b>", x=0, xanchor="left"),
+                margin=dict(l=60, r=90, t=60, b=60),
+                legend=dict(orientation="h", y=1.02, yanchor="bottom", x=1, xanchor="right"),
+            )
+            fig_rate.update_xaxes(title_text="Time (days)", showline=True, linewidth=1, mirror=True)
+            fig_rate.update_yaxes(title_text="Gas Rate (Mscf/d)", secondary_y=False, showline=True, linewidth=1, mirror=True)
             fig_rate.update_yaxes(title_text="Liquid Rate (STB/d)", secondary_y=True, showgrid=False)
 
-            st.plotly_chart(fig_rate, use_container_width=True)
+            st.plotly_chart(fig_rate, use_container_width=True, config=PLOT_CONFIG)
         else:
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
 
@@ -965,9 +1029,9 @@ elif selected_tab == "Results":
                     gfig, ofig = eur_gauges(eur_g, eur_o)
                     c1, c2 = st.columns(2)
                     with c1:
-                        st.plotly_chart(gfig, use_container_width=True)
+                        st.plotly_chart(gfig, use_container_width=True, config=PLOT_CONFIG)
                     with c2:
-                        st.plotly_chart(ofig, use_container_width=True)
+                        st.plotly_chart(ofig, use_container_width=True, config=PLOT_CONFIG)
             except Exception as e:
                 st.warning(f"Could not display EUR gauges. Error: {e}")
 
