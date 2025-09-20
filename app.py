@@ -1071,34 +1071,10 @@ elif selected_tab == "Results":
         qw = sim_data.get("qw") # Check for water data
 
         if t is not None and (qo is not None or qg is not None):
-            
-            # --- FIX: Define the layout as an object FIRST ---
-            # This is the most stable way to configure a complex Plotly layout.
-            figure_layout = go.Layout(
-                title={"text": "<b>Production Rate vs. Time</b>"},
-                xaxis={"title": "Time (days)"},
-                template="plotly_white",
-                legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-                yaxis={
-                    "title": "Gas Rate (Mscf/d)",
-                    "titlefont": {"color": "red"},
-                    "tickfont": {"color": "red"},
-                    "side": "left"
-                },
-                yaxis2={
-                    "title": "Liquid Rate (STB/d)",
-                    "titlefont": {"color": "green"},
-                    "tickfont": {"color": "green"},
-                    "overlaying": "y",
-                    "side": "right",
-                    "showgrid": False
-                }
-            )
+            # Create a blank figure first
+            fig_rate = go.Figure()
 
-            # --- Create the figure WITH the layout pre-defined ---
-            fig_rate = go.Figure(layout=figure_layout)
-            
-            # Now, add the traces to the pre-configured figure
+            # Add traces and map them to their respective axes
             if qg is not None:
                 fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)",
                                               line=dict(color="red"), yaxis="y1"))
@@ -1110,6 +1086,28 @@ elif selected_tab == "Results":
             if qw is not None:
                 fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
                                               line=dict(color="blue"), yaxis="y2"))
+
+            # --- FINAL FIX: Use a robust update_layout call with validated keys ---
+            fig_rate.update_layout(
+                title_text="<b>Production Rate vs. Time</b>",
+                xaxis_title="Time (days)",
+                template="plotly_white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                yaxis=dict(
+                    title="Gas Rate (Mscf/d)",
+                    titlefont=dict(color="red"),
+                    tickfont=dict(color="red")
+                ),
+                yaxis2=dict(
+                    title="Liquid Rate (STB/d)",
+                    titlefont=dict(color="green"),
+                    tickfont=dict(color="green"),
+                    anchor="x",
+                    overlaying="y",
+                    side="right",
+                    showgrid=False
+                )
+            )
             
             st.plotly_chart(fig_rate, use_container_width=True)
         else:
@@ -1128,8 +1126,7 @@ elif selected_tab == "Results":
                     with c2:
                         st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not display EUR gauges. Error: {e}")
-elif selected_tab == "3D Viewer":
+                st.warning(f"Could not display EUR gauges. Error: {e}")elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
 
