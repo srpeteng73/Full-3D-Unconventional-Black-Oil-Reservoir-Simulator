@@ -360,6 +360,39 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     return fallback_fast_solver(tmp, rng_preview)
 
+def generate_property_volumes(state):
+    """Generates kx, ky, and phi volumes based on sidebar settings and stores them in session_state."""
+    rng = np.random.default_rng(int(st.session_state.rng_seed))
+    nz, ny, nx = int(state["nz"]), int(state["ny"]), int(state["nx"])
+
+    # Use the facies style from the state to generate the base 2D maps
+    style = state.get("facies_style", "Continuous (Gaussian)")
+
+    if "Continuous" in style:
+        kx_mid = 0.05 + state["k_stdev"] * rng.standard_normal((ny, nx))
+        ky_mid = (0.05 / state["anis_kxky"]) + state["k_stdev"] * rng.standard_normal((ny, nx))
+        phi_mid = 0.10 + state["phi_stdev"] * rng.standard_normal((ny, nx))
+    elif "Speckled" in style:
+        # High variance using log-normal distribution for more contrast
+        kx_mid = np.exp(rng.normal(np.log(0.05), 1.5 + state["k_stdev"]*5, (ny, nx)))
+        ky_mid = kx_mid / state["anis_kxky"]
+        phi_mid = np.exp(rng.normal(np.log(0.10), 0.8 + state["phi_stdev"]*3, (ny, nx)))
+    elif "Layered" in style:
+        # Vertical bands (variation primarily in y-direction)
+        base_profile_k = 0.05 + state["k_stdev"] * rng.standard_normal(ny)
+        kx_mid = np.tile(base_profile_k[:, None], (1, nx))
+        ky_mid = kx_mid / state["anis_kxky"]
+        base_profile_phi = 0.10 + state["phi_stdev"] * rng.standard_normal(ny)
+        phi_mid = np.tile(base_profile_phi[:, None], (1, nx))
+    
+    # Apply a slight vertical trend and store in session_state
+    kz_scale = np.linspace(0.95, 1.05, nz)[:, None, None]
+    st.session_state.kx = np.clip(kx_mid[None, ...] * kz_scale, 1e-4, 5.0)
+    st.session_state.ky = np.clip(ky_mid[None, ...] * kz_scale, 1e-4, 5.0)
+    st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
+    st.success("Successfully generated 3D property volumes!")
+
+
 # --- Engine wrapper ---
 def run_simulation_engine(state):
     t0 = time.time()
@@ -846,19 +879,48 @@ elif selected_tab == "Control Panel":
         pass
     st.write(summary)
 elif selected_tab == "Generate 3D property volumes":
-    st.header("Generate 3D property volumes")
-    st.info("Use this tab to (re)generate φ/k grids and any DFN volumes before running the simulator.")
-    # If you already have a generator function, we call it safely.
-    if st.button("Generate volumes", use_container_width=True):
-        try:
-            if "generate_property_volumes" in globals():
-                generate_property_volumes(state)  # optional: your existing function
-                st.success("Volumes generated.")
-            else:
-                st.warning("No generator function wired yet.")
-        except Exception as e:
-            st.exception(e)
+    st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
+    st.info("Use this tab to (re)generate φ/k grids based on the parameters set in the sidebar.")
 
+    # Button to clear and re-generate
+    if st.button("Generate New Property Volumes", use_container_width=True, type="primary"):
+        # Call the newly defined helper function
+        generate_property_volumes(state)
+        # A rerun is implicitly handled by Streamlit's execution flow after a button press
+        
+    st.markdown("---")
+    
+    # Display plots IF the volumes exist in session state
+    if st.session_state.get('kx') is not None:
+        st.markdown("### Mid-Layer Property Maps")
+        # Get the middle slice for visualization
+        kx_display = get_k_slice(st.session_state.kx, state['nz'] // 2)
+        ky_display = get_k_slice(st.session_state.ky, state['nz'] // 2)
+        phi_display = get_k_slice(st.session_state.phi, state['nz'] // 2)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(
+                px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis", labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"),
+                use_container_width=True, theme="streamlit"
+            )
+            with st.expander("Click for details"):
+                st.markdown("**Permeability (k)** is a measure of a rock's ability to transmit fluids. This map shows kx for the middle layer.\n- **High values (yellow)** are 'sweet spots'.\n- **Low values (purple)** are tighter rock.")
+        with c2:
+            st.plotly_chart(
+                px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis", labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"),
+                use_container_width=True, theme="streamlit"
+            )
+            with st.expander("Click for details"):
+                st.markdown("This map shows permeability in the y-direction (ky). Comparing this to the kx map allows you to visually assess **anisotropy**.")
+        st.plotly_chart(
+            px.imshow(phi_display, origin="lower", color_continuous_scale="Magma", labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"),
+            use_container_width=True, theme="streamlit"
+        )
+        with st.expander("Click for details"):
+            st.markdown("**Porosity (ϕ)** is the void space in the rock where fluids are stored.\n- **High values (yellow/white)** indicate more storage capacity.")
+    else:
+        st.info("Click the button above to generate the initial property volumes.")
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000, state["p_min_bhp_psi"]), max(2000, state["p_init_psi"] + 1000), 120)
