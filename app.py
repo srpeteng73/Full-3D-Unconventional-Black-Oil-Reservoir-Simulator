@@ -1080,7 +1080,6 @@ elif selected_tab == "Results":
 
         st.markdown("### Production Profiles")
         
-        # --- FIX: Replaced st.line_chart with a more customizable Plotly chart ---
         t = sim_data.get("t")
         qo = sim_data.get("qo")
         qg = sim_data.get("qg")
@@ -1104,10 +1103,10 @@ elif selected_tab == "Results":
                 fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
                                               line=dict(color="blue"), yaxis="y2"))
             
-            # Configure layout with dual axes for different scales
+            # --- FIX: Replaced shorthand arguments with the standard dictionary format ---
             fig_rate.update_layout(
-                title_text="<b>Production Rate vs. Time</b>",
-                xaxis_title="Time (days)",
+                title=dict(text="<b>Production Rate vs. Time</b>"), # More robust way to set title
+                xaxis=dict(title="Time (days)"),                   # More robust way to set axis title
                 template="plotly_white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                 yaxis=dict(
@@ -1142,8 +1141,7 @@ elif selected_tab == "Results":
                     with c2:
                         st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not display EUR gauges. Error: {e}")
-# ==== BEGIN 3D VIEWER BLOCK ====
+                st.warning(f"Could not display EUR gauges. Error: {e}")# ==== BEGIN 3D VIEWER BLOCK ====
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
