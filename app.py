@@ -10,6 +10,8 @@ from scipy.integrate import cumulative_trapezoid
 import numpy_financial as npf  # Economics Tab
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
+from plotly.subplots import make_subplots
+
 
 # ------------------------ Utils ------------------------
 def _setdefault(k, v):
@@ -905,27 +907,62 @@ elif selected_tab == "Results":
             st.error("Simulation failed. Check sidebar parameters and logs.")
         else:
             st.session_state.sim = sim_out
+
     sim_data = st.session_state.get("sim")
     if sim_data is None:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
         st.markdown("### Production Profiles")
-        t, qo, qg, qw = (sim_data.get("t"), sim_data.get("qo"), sim_data.get("qg"), sim_data.get("qw"))
-        if t is not None and (qo is not None or qg is not None):
-            fig_rate = go.Figure()
-            if qg is not None: fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)", line=dict(color="red"), yaxis="y1"))
-            if qo is not None: fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil Rate (STB/d)", line=dict(color="green"), yaxis="y2"))
-            if qw is not None: fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)", line=dict(color="blue"), yaxis="y2"))
+
+        # --- Dual-axis rate chart (gas = left axis, liquids = right axis) ---
+        t  = sim_data.get("t")
+        qg = sim_data.get("qg")   # Mscf/d
+        qo = sim_data.get("qo")   # STB/d
+        qw = sim_data.get("qw")   # STB/d
+
+        if t is not None and (qo is not None or qg is not None or qw is not None):
+            fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+
+            # Gas on left (primary) axis
+            if qg is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)"),
+                    secondary_y=False
+                )
+
+            # Liquids (oil + water) on right (secondary) axis
+            if qo is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qo, name="Oil (STB/d)"),
+                    secondary_y=True
+                )
+            if qw is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qw, name="Water (STB/d)"),
+                    secondary_y=True
+                )
+
+            # Layout AFTER traces are added
             fig_rate.update_layout(
-                title_text="<b>Production Rate vs. Time</b>", xaxis_title="Time (days)", template="plotly_white",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis=dict(title="Gas Rate (Mscf/d)", titlefont=dict(color="red"), tickfont=dict(color="red")),
-                yaxis2=dict(title="Liquid Rate (STB/d)", titlefont=dict(color="green"), tickfont=dict(color="green"), anchor="x", overlaying="y", side="right", showgrid=False)
+                template="plotly_white",
+                title_text="<b>Production Rate vs. Time</b>",
+                xaxis_title="Time (days)",
+                yaxis_title="Gas Rate (Mscf/d)",
+                yaxis2=dict(
+                    title="Liquid Rate (STB/d)",
+                    titlefont=dict(color="green"),
+                    tickfont=dict(color="green"),
+                    overlaying="y",
+                    side="right",
+                    showgrid=False
+                ),
             )
             st.plotly_chart(fig_rate, use_container_width=True)
         else:
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
+
+        # EUR gauges (optional)
         if "eur_gauges" in globals():
             try:
                 eur_g, eur_o = sim_data.get("EUR_g_BCF"), sim_data.get("EUR_o_MMBO")
@@ -936,6 +973,7 @@ elif selected_tab == "Results":
                     with c2: st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
                 st.warning(f"Could not display EUR gauges. Error: {e}")
+
 
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
