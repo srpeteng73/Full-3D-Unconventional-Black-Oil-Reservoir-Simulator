@@ -751,7 +751,6 @@ if selected_tab == "Setup Preview":
             "These charts use a simplified analytical model for quick iteration before running the full 3D simulation."
         )
 
-# ---------- TAB ROUTING (must be contiguous; do not insert code between clauses) ----------
 elif selected_tab == "Control Panel":
     st.header("Control Panel")
 
@@ -759,7 +758,8 @@ elif selected_tab == "Control Panel":
     c1, c2 = st.columns(2)
 
     with c1:
-        st.session_state.control = st.selectbox(
+        # CORRECTED: The `key` argument handles the assignment to st.session_state.control.
+        st.selectbox(
             "Well control",
             ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
             index=["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"].index(
@@ -770,54 +770,62 @@ elif selected_tab == "Control Panel":
         )
 
         if st.session_state.control == "BHP":
-            st.session_state.bhp_psi = st.number_input(
+            # CORRECTED: Removed direct assignment.
+            st.number_input(
                 "BHP (psi)", min_value=500.0, max_value=15000.0,
                 value=float(st.session_state.get("bhp_psi", 2500.0)),
                 step=50.0, key="bhp_psi"
             )
-            # zero out rate targets for clarity
+            # These assignments are correct because they are not creating widgets.
+            # They are logic to reset other state variables.
             st.session_state.rate_mscfd = st.session_state.get("rate_mscfd", 0.0)
             st.session_state.rate_stbd  = st.session_state.get("rate_stbd", 0.0)
 
         elif st.session_state.control == "RATE_GAS_MSCFD":
-            st.session_state.rate_mscfd = st.number_input(
+            # CORRECTED: Removed direct assignment.
+            st.number_input(
                 "Gas rate target (Mscf/d)", min_value=0.0, max_value=500000.0,
                 value=float(st.session_state.get("rate_mscfd", 5000.0)),
                 step=100.0, key="rate_mscfd"
             )
 
         elif st.session_state.control == "RATE_OIL_STBD":
-            st.session_state.rate_stbd = st.number_input(
+            # CORRECTED: Removed direct assignment.
+            st.number_input(
                 "Oil rate target (STB/d)", min_value=0.0, max_value=20000.0,
                 value=float(st.session_state.get("rate_stbd", 800.0)),
                 step=10.0, key="rate_stbd"
             )
 
         elif st.session_state.control == "RATE_LIQ_STBD":
-            st.session_state.rate_stbd = st.number_input(
+            # CORRECTED: Removed direct assignment.
+            st.number_input(
                 "Liquid (oil+water) rate target (STB/d)", min_value=0.0, max_value=40000.0,
                 value=float(st.session_state.get("rate_stbd", 1200.0)),
                 step=10.0, key="rate_stbd"
             )
 
     with c2:
-        st.session_state.use_gravity = st.checkbox(
+        # CORRECTED: Removed direct assignment.
+        st.checkbox(
             "Use gravity", value=bool(st.session_state.get("use_gravity", True)),
             key="use_gravity"
         )
-        st.session_state.kvkh = st.number_input(
+        # CORRECTED: Removed direct assignment.
+        st.number_input(
             "kv/kh", min_value=0.01, max_value=1.0,
             value=float(st.session_state.get("kvkh", 0.10)),
             step=0.01, format="%.2f", key="kvkh"
         )
-        st.session_state.geo_alpha = st.number_input(
+        # CORRECTED: Removed direct assignment.
+        st.number_input(
             "Geomech α (1/psi)", min_value=0.0, max_value=1e-3,
             value=float(st.session_state.get("geo_alpha", 0.0)),
             step=1e-5, format="%.5f", key="geo_alpha"
         )
 
     st.markdown("#### Well & Frac Summary")
-    # Keep this lightweight and robust (only show what exists)
+    # This section is correct as it only reads from session state.
     summary = {
         "Control": st.session_state.get("control"),
         "BHP (psi)": st.session_state.get("bhp_psi"),
@@ -837,7 +845,6 @@ elif selected_tab == "Control Panel":
     except Exception:
         pass
     st.write(summary)
-
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D property volumes")
     st.info("Use this tab to (re)generate φ/k grids and any DFN volumes before running the simulator.")
