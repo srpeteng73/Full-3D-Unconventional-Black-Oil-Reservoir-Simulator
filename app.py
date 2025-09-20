@@ -647,6 +647,7 @@ st.write(
 selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
 # ------------------------ TAB CONTENT DEFINITIONS ------------------------
+# ------------------------ TAB CONTENT DEFINITIONS ------------------------
 if selected_tab == "Setup Preview":
     st.header("Setup Preview")
     c1, c2 = st.columns([1, 1])
@@ -680,40 +681,27 @@ if selected_tab == "Setup Preview":
                 "- **Anisotropy**: The ratio of permeability in X (kx) to Y (ky)."
             )
 
-        # ----- DEBUG EXPANDER (safe to remove later) -----
         with st.expander("Preset sanity check (debug)"):
             st.write({
                 "Play selected": st.session_state.get("play_sel"),
                 "Model Type (sim_mode)": st.session_state.get("sim_mode"),
                 "fluid_model": st.session_state.get("fluid_model"),
                 "Engine Type": st.session_state.get("engine_type"),
-                # a few preset-driven values to verify
-                "L_ft": state.get("L_ft"),
-                "stage_spacing_ft": state.get("stage_spacing_ft"),
-                "xf_ft": state.get("xf_ft"),
-                "hf_ft": state.get("hf_ft"),
-                "pb_psi": state.get("pb_psi"),
-                "Rs_pb_scf_stb": state.get("Rs_pb_scf_stb"),
-                "Bo_pb_rb_stb": state.get("Bo_pb_rb_stb"),
-                "p_init_psi": state.get("p_init_psi"),
+                "L_ft": state.get("L_ft"), "stage_spacing_ft": state.get("stage_spacing_ft"),
+                "xf_ft": state.get("xf_ft"), "hf_ft": state.get("hf_ft"),
+                "pb_psi": state.get("pb_psi"), "Rs_pb_scf_stb": state.get("Rs_pb_scf_stb"),
+                "Bo_pb_rb_stb": state.get("Bo_pb_rb_stb"), "p_init_psi": state.get("p_init_psi"),
             })
 
         st.markdown("#### Well & Frac Summary")
         well_data = {
             "Parameter": [
-                "Laterals",
-                "Lateral Length (ft)",
-                "Frac Half-length (ft)",
-                "Frac Height (ft)",
-                "Stages",
-                "Clusters/Stage",
+                "Laterals", "Lateral Length (ft)", "Frac Half-length (ft)",
+                "Frac Height (ft)", "Stages", "Clusters/Stage",
             ],
             "Value": [
-                state['n_laterals'],
-                state['L_ft'],
-                state['xf_ft'],
-                state['hf_ft'],
-                int(state['L_ft'] / state['stage_spacing_ft']),
+                state['n_laterals'], state['L_ft'], state['xf_ft'],
+                state['hf_ft'], int(state['L_ft'] / state['stage_spacing_ft']),
                 state['clusters_per_stage'],
             ],
         }
@@ -735,37 +723,25 @@ if selected_tab == "Setup Preview":
         nx, ny, dx, dy = state['nx'], state['ny'], state['dx'], state['dy']
         L_ft, xf_ft, ss_ft, n_lats = state['L_ft'], state['xf_ft'], state['stage_spacing_ft'], state['n_laterals']
         fig.add_shape(
-            type="rect",
-            x0=0, y0=0, x1=nx*dx, y1=ny*dy,
-            line=dict(color="RoyalBlue"),
-            fillcolor="lightskyblue",
-            opacity=0.3,
+            type="rect", x0=0, y0=0, x1=nx*dx, y1=ny*dy,
+            line=dict(color="RoyalBlue"), fillcolor="lightskyblue", opacity=0.3,
         )
         lat_rows_y = [ny*dy/3, 2*ny*dy/3] if n_lats >= 2 else [ny*dy/2]
         n_stages = max(1, int(L_ft / max(ss_ft, 1.0)))
         for i, y_lat in enumerate(lat_rows_y):
             fig.add_trace(go.Scatter(
-                x=[0, L_ft], y=[y_lat, y_lat],
-                mode='lines',
-                line=dict(color='black', width=3),
-                name='Lateral',
-                showlegend=(i == 0),
+                x=[0, L_ft], y=[y_lat, y_lat], mode='lines',
+                line=dict(color='black', width=3), name='Lateral', showlegend=(i == 0),
             ))
             for j in range(n_stages):
                 x_stage = (j + 0.5) * ss_ft
-                if x_stage > L_ft:
-                    continue
+                if x_stage > L_ft: continue
                 fig.add_trace(go.Scatter(
-                    x=[x_stage, x_stage], y=[y_lat - xf_ft, y_lat + xf_ft],
-                    mode='lines',
-                    line=dict(color='red', width=2),
-                    name='Frac',
-                    showlegend=(i == 0 and j == 0),
+                    x=[x_stage, x_stage], y=[y_lat - xf_ft, y_lat + xf_ft], mode='lines',
+                    line=dict(color='red', width=2), name='Frac', showlegend=(i == 0 and j == 0),
                 ))
         fig.update_layout(
-            title="<b>Well and Fracture Geometry</b>",
-            xaxis_title="X (ft)",
-            yaxis_title="Y (ft)",
+            title="<b>Well and Fracture Geometry</b>", xaxis_title="X (ft)", yaxis_title="Y (ft)",
             yaxis_range=[-0.1 * ny * dy, 1.1 * ny * dy],
         )
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
@@ -783,226 +759,121 @@ if selected_tab == "Setup Preview":
     preview = _get_sim_preview()
     p_c1, p_c2 = st.columns(2)
     with p_c1:
-        fig_g = go.Figure()
-        fig_g.add_trace(go.Scatter(x=preview['t'], y=preview['qg'], name="Gas Rate", line=dict(color="#d62728")))
+        fig_g = go.Figure(go.Scatter(x=preview['t'], y=preview['qg'], name="Gas Rate", line=dict(color="#d62728")))
         fig_g.update_layout(**semi_log_layout("Gas Production Preview", yaxis="Gas Rate (Mscf/d)"))
         st.plotly_chart(fig_g, use_container_width=True, theme="streamlit")
     with p_c2:
-        fig_o = go.Figure()
-        fig_o.add_trace(go.Scatter(x=preview['t'], y=preview['qo'], name="Oil Rate", line=dict(color="#2ca02c")))
+        fig_o = go.Figure(go.Scatter(x=preview['t'], y=preview['qo'], name="Oil Rate", line=dict(color="#2ca02c")))
         fig_o.update_layout(**semi_log_layout("Oil Production Preview", yaxis="Oil Rate (STB/d)"))
         st.plotly_chart(fig_o, use_container_width=True, theme="streamlit")
     with st.expander("Click for details"):
-        st.markdown(
-            "These charts use a simplified analytical model for quick iteration before running the full 3D simulation."
-        )
+        st.markdown("These charts use a simplified analytical model for quick iteration.")
 
 elif selected_tab == "Control Panel":
     st.header("Control Panel")
-
-    # --- Well Control + Physics ---
     c1, c2 = st.columns(2)
-
     with c1:
         st.selectbox(
-            "Well control",
-            ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
-            index=["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"].index(
-                st.session_state.get("control", "BHP")
-            ),
-            key="control",
-            help="Choose BHP control or a rate target (gas/oil/liquids).",
+            "Well control", ["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"],
+            index=["BHP", "RATE_GAS_MSCFD", "RATE_OIL_STBD", "RATE_LIQ_STBD"].index(st.session_state.get("control", "BHP")),
+            key="control", help="Choose BHP control or a rate target.",
         )
-
         if st.session_state.control == "BHP":
-            st.number_input(
-                "BHP (psi)", min_value=500.0, max_value=15000.0,
-                value=float(st.session_state.get("bhp_psi", 2500.0)),
-                step=50.0, key="bhp_psi"
-            )
+            st.number_input("BHP (psi)", 500.0, 15000.0, float(st.session_state.get("bhp_psi", 2500.0)), 50.0, key="bhp_psi")
             st.session_state.rate_mscfd = st.session_state.get("rate_mscfd", 0.0)
             st.session_state.rate_stbd  = st.session_state.get("rate_stbd", 0.0)
-
         elif st.session_state.control == "RATE_GAS_MSCFD":
-            st.number_input(
-                "Gas rate target (Mscf/d)", min_value=0.0, max_value=500000.0,
-                value=float(st.session_state.get("rate_mscfd", 5000.0)),
-                step=100.0, key="rate_mscfd"
-            )
-
+            st.number_input("Gas rate (Mscf/d)", 0.0, 500000.0, float(st.session_state.get("rate_mscfd", 5000.0)), 100.0, key="rate_mscfd")
         elif st.session_state.control == "RATE_OIL_STBD":
-            st.number_input(
-                "Oil rate target (STB/d)", min_value=0.0, max_value=20000.0,
-                value=float(st.session_state.get("rate_stbd", 800.0)),
-                step=10.0, key="rate_stbd"
-            )
-
+            st.number_input("Oil rate (STB/d)", 0.0, 20000.0, float(st.session_state.get("rate_stbd", 800.0)), 10.0, key="rate_stbd")
         elif st.session_state.control == "RATE_LIQ_STBD":
-            st.number_input(
-                "Liquid (oil+water) rate target (STB/d)", min_value=0.0, max_value=40000.0,
-                value=float(st.session_state.get("rate_stbd", 1200.0)),
-                step=10.0, key="rate_stbd"
-            )
-
+            st.number_input("Liquid rate (STB/d)", 0.0, 40000.0, float(st.session_state.get("rate_stbd", 1200.0)), 10.0, key="rate_stbd")
     with c2:
-        st.checkbox(
-            "Use gravity", value=bool(st.session_state.get("use_gravity", True)),
-            key="use_gravity"
-        )
-        st.number_input(
-            "kv/kh", min_value=0.01, max_value=1.0,
-            value=float(st.session_state.get("kvkh", 0.10)),
-            step=0.01, format="%.2f", key="kvkh"
-        )
-        st.number_input(
-            "Geomech α (1/psi)", min_value=0.0, max_value=1e-3,
-            value=float(st.session_state.get("geo_alpha", 0.0)),
-            step=1e-5, format="%.5f", key="geo_alpha"
-        )
-
+        st.checkbox("Use gravity", bool(st.session_state.get("use_gravity", True)), key="use_gravity")
+        st.number_input("kv/kh", 0.01, 1.0, float(st.session_state.get("kvkh", 0.10)), 0.01, "%.2f", key="kvkh")
+        st.number_input("Geomech α (1/psi)", 0.0, 1e-3, float(st.session_state.get("geo_alpha", 0.0)), 1e-5, "%.5f", key="geo_alpha")
     st.markdown("#### Well & Frac Summary")
     summary = {
-        "Control": st.session_state.get("control"),
-        "BHP (psi)": st.session_state.get("bhp_psi"),
-        "Gas rate (Mscf/d)": st.session_state.get("rate_mscfd"),
-        "Oil/Liq rate (STB/d)": st.session_state.get("rate_stbd"),
-        "Use gravity": st.session_state.get("use_gravity"),
-        "kv/kh": st.session_state.get("kvkh"),
+        "Control": st.session_state.get("control"), "BHP (psi)": st.session_state.get("bhp_psi"),
+        "Gas rate (Mscf/d)": st.session_state.get("rate_mscfd"), "Oil/Liq rate (STB/d)": st.session_state.get("rate_stbd"),
+        "Use gravity": st.session_state.get("use_gravity"), "kv/kh": st.session_state.get("kvkh"),
         "Geomech α (1/psi)": st.session_state.get("geo_alpha"),
     }
     try:
-        summary.update({
-            "xf_ft": state.get("xf_ft"),
-            "hf_ft": state.get("hf_ft"),
-            "stage_spacing_ft": state.get("stage_spacing_ft"),
-        })
-    except Exception:
-        pass
+        summary.update({"xf_ft": state.get("xf_ft"), "hf_ft": state.get("hf_ft"), "stage_spacing_ft": state.get("stage_spacing_ft")})
+    except Exception: pass
     st.write(summary)
 
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
-    st.info("Use this tab to (re)generate φ/k grids based on the parameters set in the sidebar.")
-
+    st.info("Use this tab to (re)generate φ/k grids based on sidebar parameters.")
     if st.button("Generate New Property Volumes", use_container_width=True, type="primary"):
         generate_property_volumes(state)
-        
     st.markdown("---")
-    
     if st.session_state.get('kx') is not None:
         st.markdown("### Mid-Layer Property Maps")
-        kx_display = get_k_slice(st.session_state.kx, state['nz'] // 2)
-        ky_display = get_k_slice(st.session_state.ky, state['nz'] // 2)
-        phi_display = get_k_slice(st.session_state.phi, state['nz'] // 2)
-
+        kx_display, ky_display, phi_display = (get_k_slice(st.session_state.kx, state['nz'] // 2),
+                                               get_k_slice(st.session_state.ky, state['nz'] // 2),
+                                               get_k_slice(st.session_state.phi, state['nz'] // 2))
         c1, c2 = st.columns(2)
         with c1:
-            st.plotly_chart(
-                px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis", labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"),
-                use_container_width=True, theme="streamlit"
-            )
-            with st.expander("Click for details"):
-                st.markdown("**Permeability (k)** is a measure of a rock's ability to transmit fluids. This map shows kx for the middle layer.\n- **High values (yellow)** are 'sweet spots'.\n- **Low values (purple)** are tighter rock.")
+            st.plotly_chart(px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis", labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"), use_container_width=True)
         with c2:
-            st.plotly_chart(
-                px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis", labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"),
-                use_container_width=True, theme="streamlit"
-            )
-            with st.expander("Click for details"):
-                st.markdown("This map shows permeability in the y-direction (ky). Comparing this to the kx map allows you to visually assess **anisotropy**.")
-        st.plotly_chart(
-            px.imshow(phi_display, origin="lower", color_continuous_scale="Magma", labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"),
-            use_container_width=True, theme="streamlit"
-        )
-        with st.expander("Click for details"):
-            st.markdown("**Porosity (ϕ)** is the void space in the rock where fluids are stored.\n- **High values (yellow/white)** indicate more storage capacity.")
+            st.plotly_chart(px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis", labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"), use_container_width=True)
+        st.plotly_chart(px.imshow(phi_display, origin="lower", color_continuous_scale="Magma", labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"), use_container_width=True)
     else:
-        st.info("Click the button above to generate the initial property volumes.")
+        st.info("Click the button above to generate initial property volumes.")
 
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000, state["p_min_bhp_psi"]), max(2000, state["p_init_psi"] + 1000), 120)
-    Rs = Rs_of_p(P, state["pb_psi"], state["Rs_pb_scf_stb"])
-    Bo = Bo_of_p(P, state["pb_psi"], state["Bo_pb_rb_stb"])
-    Bg = Bg_of_p(P)
-    mug = mu_g_of_p(P, state["pb_psi"], state["mug_pb_cp"])
-
-    f1 = go.Figure()
-    f1.add_trace(go.Scatter(x=P, y=Rs, line=dict(color="firebrick", width=3)))
+    Rs, Bo, Bg, mug = (Rs_of_p(P, state["pb_psi"], state["Rs_pb_scf_stb"]),
+                       Bo_of_p(P, state["pb_psi"], state["Bo_pb_rb_stb"]),
+                       Bg_of_p(P), mu_g_of_p(P, state["pb_psi"], state["mug_pb_cp"]))
+    f1 = go.Figure(go.Scatter(x=P, y=Rs, line=dict(color="firebrick", width=3)))
     f1.add_vline(x=state["pb_psi"], line_dash="dash", line_width=2, annotation_text="Bubble Point")
     f1.update_layout(template="plotly_white", title="<b>Solution GOR Rs vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="Rs (scf/STB)")
-    st.plotly_chart(f1, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"):
-        st.markdown("The **Solution Gas-Oil Ratio (Rs)** is the amount of gas dissolved in oil. As pressure drops below the Bubble Point, gas comes out of solution.")
-
-    f2 = go.Figure()
-    f2.add_trace(go.Scatter(x=P, y=Bo, line=dict(color="seagreen", width=3)))
+    st.plotly_chart(f1, use_container_width=True)
+    f2 = go.Figure(go.Scatter(x=P, y=Bo, line=dict(color="seagreen", width=3)))
     f2.add_vline(x=state["pb_psi"], line_dash="dash", line_width=2, annotation_text="Bubble Point")
     f2.update_layout(template="plotly_white", title="<b>Oil FVF Bo vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="Bo (rb/STB)")
-    st.plotly_chart(f2, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"):
-        st.markdown("The **Oil Formation Volume Factor (Bo)** is the volume of reservoir oil needed to produce one barrel at the surface. As gas comes out of solution, the oil shrinks, and Bo decreases.")
-
-    f3 = go.Figure()
-    f3.add_trace(go.Scatter(x=P, y=Bg, line=dict(color="steelblue", width=3)))
-    f3.add_vline(x=state["pb_psi"], line_dash="dash", line_width=2)
+    st.plotly_chart(f2, use_container_width=True)
+    f3 = go.Figure(go.Scatter(x=P, y=Bg, line=dict(color="steelblue", width=3)))
     f3.update_layout(template="plotly_white", title="<b>Gas FVF Bg vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="Bg (rb/scf)")
-    st.plotly_chart(f3, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"):
-        st.markdown("The **Gas Formation Volume Factor (Bg)** is the volume of reservoir gas needed to produce one standard cubic foot at the surface. Gas expands as pressure drops, so Bg increases.")
-
-    f4 = go.Figure()
-    f4.add_trace(go.Scatter(x=P, y=mug, line=dict(color="mediumpurple", width=3)))
-    f4.add_vline(x=state["pb_psi"], line_dash="dash", line_width=2)
+    st.plotly_chart(f3, use_container_width=True)
+    f4 = go.Figure(go.Scatter(x=P, y=mug, line=dict(color="mediumpurple", width=3)))
     f4.update_layout(template="plotly_white", title="<b>Gas viscosity μg vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="μg (cP)")
-    st.plotly_chart(f4, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"):
-        st.markdown("**Gas Viscosity (μg)** is the measure of gas's resistance to flow and is a key input for flow calculations.")
+    st.plotly_chart(f4, use_container_width=True)
 
 elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
     try:
-        L_ft, ss_ft, n_clusters = float(state['L_ft']), float(state['stage_spacing_ft']), int(state['clusters_per_stage'])
+        L_ft, ss_ft = float(state['L_ft']), float(state['stage_spacing_ft'])
         n_stages = max(1, int(L_ft / ss_ft))
         well_id_ft, f_fric, dP_le = float(state['wellbore_ID_ft']), float(state['f_fric']), float(state['dP_LE_psi'])
         p_bhp, p_res = float(state['pad_bhp_psi']), float(state['p_init_psi'])
-
-        preview = _get_sim_preview()
-        q_oil_total_stbd = preview['qo'][0]
-        rho_o_lb_ft3 = 50.0
-
+        q_oil_total_stbd = _get_sim_preview()['qo'][0]
         q_dist = np.ones(n_stages) / n_stages
         for _ in range(5):
-            q_per_stage_bpd = q_dist * q_oil_total_stbd
-            p_wellbore_at_stage = np.zeros(n_stages)
-            p_current = p_bhp
-            flow_rate_bpd = q_oil_total_stbd
+            q_per_stage_bpd, p_wellbore_at_stage = q_dist * q_oil_total_stbd, np.zeros(n_stages)
+            p_current, flow_rate_bpd = p_bhp, q_oil_total_stbd
             for i in range(n_stages):
                 p_wellbore_at_stage[i] = p_current
-                q_ft3_s = flow_rate_bpd * 5.615 / (24*3600)
-                area_ft2 = np.pi * (well_id_ft/2)**2
-                v_fps = q_ft3_s / area_ft2
-                dp_psi_segment = (2 * f_fric * rho_o_lb_ft3 * v_fps**2 * ss_ft / well_id_ft) / 144.0
-                p_current += dp_psi_segment
+                v_fps = (flow_rate_bpd * 5.615 / (24*3600)) / (np.pi * (well_id_ft/2)**2)
+                p_current += (2 * f_fric * 50.0 * v_fps**2 * ss_ft / well_id_ft) / 144.0
                 flow_rate_bpd -= q_per_stage_bpd[i]
             drawdown = p_res - p_wellbore_at_stage - dP_le
             q_new_dist_unnorm = np.sqrt(np.maximum(0, drawdown))
-            if np.sum(q_new_dist_unnorm) > 1e-9:
-                q_dist = q_new_dist_unnorm / np.sum(q_new_dist_unnorm)
-
+            if np.sum(q_new_dist_unnorm) > 1e-9: q_dist = q_new_dist_unnorm / np.sum(q_new_dist_unnorm)
         c1_msw, c2_msw = st.columns(2)
         with c1_msw:
-            fig_p = go.Figure(go.Scatter(x=np.arange(n_stages)*ss_ft, y=p_wellbore_at_stage, mode='lines+markers', name='Wellbore Pressure'))
-            fig_p.update_layout(title="<b>Wellbore Pressure Profile</b>", xaxis_title="Position along Lateral (ft, 0=Heel)", yaxis_title="Pressure (psi)", template="plotly_white")
-            st.plotly_chart(fig_p, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown("This plot shows the pressure inside the horizontal wellbore. Due to friction, pressure is lowest at the heel and increases towards the toe, driving the \"heel-toe effect.\" ")
+            fig_p = go.Figure(go.Scatter(x=np.arange(n_stages)*ss_ft, y=p_wellbore_at_stage, mode='lines+markers'))
+            fig_p.update_layout(title="<b>Wellbore Pressure Profile</b>", xaxis_title="Dist. from Heel (ft)", yaxis_title="Pressure (psi)", template="plotly_white")
+            st.plotly_chart(fig_p, use_container_width=True)
         with c2_msw:
-            fig_q = go.Figure(go.Bar(x=np.arange(n_stages)*ss_ft, y=q_dist * 100, name='Flow Contribution'))
-            fig_q.update_layout(title="<b>Flow Contribution per Stage</b>", xaxis_title="Position along Lateral (ft, 0=Heel)", yaxis_title="Contribution (%)", template="plotly_white")
-            st.plotly_chart(fig_q, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown("This chart shows the production percentage from each stage. Stages near the heel often produce more due to higher drawdown. The **Δp limited-entry** parameter can be used to mitigate this.")
+            fig_q = go.Figure(go.Bar(x=np.arange(n_stages)*ss_ft, y=q_dist * 100))
+            fig_q.update_layout(title="<b>Flow Contribution per Stage</b>", xaxis_title="Dist. from Heel (ft)", yaxis_title="Contribution (%)", template="plotly_white")
+            st.plotly_chart(fig_q, use_container_width=True)
     except Exception as e:
         st.warning(f"Could not compute wellbore hydraulics. Error: {e}")
 
@@ -1010,194 +881,103 @@ elif selected_tab == "RTA":
     st.header("RTA — Quick Diagnostics")
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
     t, qg = sim_data["t"], sim_data["qg"]
-
-    rate_y_mode_rta = st.radio("Rate y-axis", ["Linear", "Log"], index=0, horizontal=True, key="rta_rate_y_mode_unique")
-    y_type_rta = "log" if rate_y_mode_rta == "Log" else "linear"
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
+    y_type_rta = "log" if st.radio("Rate y-axis", ["Linear", "Log"], horizontal=True) == "Log" else "linear"
+    fig = go.Figure(go.Scatter(x=t, y=qg, line=dict(color="firebrick", width=3), name="Gas"))
     fig.update_layout(**semi_log_layout("R1. Gas rate (q) vs time", yaxis="q (Mscf/d)"))
     fig.update_yaxes(type=y_type_rta)
-    st.plotly_chart(fig, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"):
-        st.markdown("This is a standard **Rate vs. Time** plot on a semi-log scale, showing the production decline.")
-
-    t_safe = np.maximum(t, 1e-9)
-    qg_safe = np.maximum(qg, 1e-9)
-    logt, logq = np.log(t_safe), np.log(qg_safe)
-    slope = np.gradient(logq, logt)
-
-    fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt"))
+    st.plotly_chart(fig, use_container_width=True)
+    slope = np.gradient(np.log(np.maximum(qg, 1e-9)), np.log(np.maximum(t, 1e-9)))
+    fig2 = go.Figure(go.Scatter(x=t, y=slope, line=dict(color="teal", width=3), name="dlogq/dlogt"))
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
-    st.plotly_chart(fig2, use_container_width=True, theme="streamlit")
-    with st.expander("Click for details"):
-        st.markdown(
-            "This is the **log-log derivative** plot, a core RTA diagnostic tool. The slope indicates the dominant flow regime:\n"
-            "- **Slope ≈ 0.5**: Indicates **linear flow** from fractures.\n"
-            "- **Slope → 0**: Suggests **boundary-dominated flow**."
-        )
+    st.plotly_chart(fig2, use_container_width=True)
 
 elif selected_tab == "Results":
     st.header("Simulation Results")
-
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
-        # Before running, generate properties if they don't exist to prevent errors.
         if 'kx' not in st.session_state:
             st.info("Rock properties not found. Generating them first...")
             generate_property_volumes(state)
-            
         with st.spinner("Running full 3D simulation..."):
             sim_out = run_simulation_engine(state)
-        
         if sim_out is None:
             st.session_state.sim = None
             st.error("Simulation failed. Check sidebar parameters and logs.")
         else:
             st.session_state.sim = sim_out
-
     sim_data = st.session_state.get("sim")
     if sim_data is None:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
-
         st.markdown("### Production Profiles")
-        
-        t = sim_data.get("t")
-        qo = sim_data.get("qo")
-        qg = sim_data.get("qg")
-        qw = sim_data.get("qw") # Check for water data
-
+        t, qo, qg, qw = (sim_data.get("t"), sim_data.get("qo"), sim_data.get("qg"), sim_data.get("qw"))
         if t is not None and (qo is not None or qg is not None):
-            # Create a blank figure first
             fig_rate = go.Figure()
-
-            # Add traces and map them to their respective axes
-            if qg is not None:
-                fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)",
-                                              line=dict(color="red"), yaxis="y1"))
-            
-            if qo is not None:
-                fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil Rate (STB/d)",
-                                              line=dict(color="green"), yaxis="y2"))
-
-            if qw is not None:
-                fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
-                                              line=dict(color="blue"), yaxis="y2"))
-
-            # --- FINAL FIX: Use a robust update_layout call with validated keys ---
+            if qg is not None: fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas Rate (Mscf/d)", line=dict(color="red"), yaxis="y1"))
+            if qo is not None: fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil Rate (STB/d)", line=dict(color="green"), yaxis="y2"))
+            if qw is not None: fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)", line=dict(color="blue"), yaxis="y2"))
             fig_rate.update_layout(
-                title_text="<b>Production Rate vs. Time</b>",
-                xaxis_title="Time (days)",
-                template="plotly_white",
+                title_text="<b>Production Rate vs. Time</b>", xaxis_title="Time (days)", template="plotly_white",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis=dict(
-                    title="Gas Rate (Mscf/d)",
-                    titlefont=dict(color="red"),
-                    tickfont=dict(color="red")
-                ),
-                yaxis2=dict(
-                    title="Liquid Rate (STB/d)",
-                    titlefont=dict(color="green"),
-                    tickfont=dict(color="green"),
-                    anchor="x",
-                    overlaying="y",
-                    side="right",
-                    showgrid=False
-                )
+                yaxis=dict(title="Gas Rate (Mscf/d)", titlefont=dict(color="red"), tickfont=dict(color="red")),
+                yaxis2=dict(title="Liquid Rate (STB/d)", titlefont=dict(color="green"), tickfont=dict(color="green"), anchor="x", overlaying="y", side="right", showgrid=False)
             )
-            
             st.plotly_chart(fig_rate, use_container_width=True)
         else:
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
-
-        # Optional EUR gauges remain
         if "eur_gauges" in globals():
             try:
-                eur_g = sim_data.get("EUR_g_BCF")
-                eur_o = sim_data.get("EUR_o_MMBO")
+                eur_g, eur_o = sim_data.get("EUR_g_BCF"), sim_data.get("EUR_o_MMBO")
                 if eur_g is not None and eur_o is not None:
                     gfig, ofig = eur_gauges(eur_g, eur_o)
                     c1, c2 = st.columns(2)
-                    with c1:
-                        st.plotly_chart(gfig, use_container_width=True)
-                    with c2:
-                        st.plotly_chart(ofig, use_container_width=True)
+                    with c1: st.plotly_chart(gfig, use_container_width=True)
+                    with c2: st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not display EUR gauges. Error: {e}")elif selected_tab == "3D Viewer":
+                st.warning(f"Could not display EUR gauges. Error: {e}")
+
+elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
-
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties or run a simulation to enable the 3D viewer.")
     else:
         prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
-        if sim_data:
-            prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
-
+        if sim_data: prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
         prop_3d = st.selectbox("Select property to view:", prop_list)
-        c1_3d, c2_3d = st.columns(2)
-        with c1_3d:
-            st.session_state.vol_downsample = st.slider("Downsample factor", 1, 10, st.session_state.vol_downsample, 1, key="vol_ds")
-        with c2_3d:
-            st.session_state.iso_value_rel = st.slider("Isosurface value (relative)", 0.05, 0.95, st.session_state.iso_value_rel, 0.05, key="iso_val_rel")
-
-        data_3d, colorscale, colorbar_title = (None, None, None)
-        if 'kx' in prop_3d:
-            data_3d, colorscale, colorbar_title = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
-        elif 'ϕ' in prop_3d:
-            data_3d, colorscale, colorbar_title = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
-        elif 'Pressure (psi)' in prop_3d and sim_data:
-            data_3d, colorscale, colorbar_title = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
+        c1, c2 = st.columns(2)
+        with c1: st.slider("Downsample factor", 1, 10, st.session_state.vol_downsample, 1, key="vol_ds")
+        with c2: st.slider("Isosurface value (relative)", 0.05, 0.95, st.session_state.iso_value_rel, 0.05, key="iso_val_rel")
+        data_3d, cs, cbt = (None, None, None)
+        if 'kx' in prop_3d: data_3d, cs, cbt = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
+        elif 'ϕ' in prop_3d: data_3d, cs, cbt = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
+        elif 'Pressure (psi)' in prop_3d and sim_data: data_3d, cs, cbt = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
         elif 'Pressure Change' in prop_3d and sim_data:
-            p_final = sim_data.get('press_matrix'); p_init = sim_data.get('p_init_3d')
-            if p_final is not None and p_init is not None:
-                data_3d, colorscale, colorbar_title = p_init - p_final, 'inferno', 'ΔP (psi)'
-        elif 'OOIP' in prop_3d and sim_data:
-            data_3d, colorscale, colorbar_title = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
-
+            p_final, p_init = sim_data.get('press_matrix'), sim_data.get('p_init_3d')
+            if p_final is not None and p_init is not None: data_3d, cs, cbt = p_init - p_final, 'inferno', 'ΔP (psi)'
+        elif 'OOIP' in prop_3d and sim_data: data_3d, cs, cbt = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
         if data_3d is not None:
             with st.spinner("Generating 3D plot..."):
-                data_3d_ds = downsample_3d(data_3d, st.session_state.vol_downsample)
-                v_min, v_max = np.min(data_3d_ds), np.max(data_3d_ds)
-                isoval = v_min + (v_max - v_min) * st.session_state.iso_value_rel if v_max > v_min else v_min
-                nz, ny, nx = data_3d_ds.shape
+                data_ds = downsample_3d(data_3d, st.session_state.vol_downsample)
+                v_min, v_max = np.min(data_ds), np.max(data_ds)
+                isoval = v_min + (v_max - v_min) * st.session_state.iso_value_rel
+                nz, ny, nx = data_ds.shape
                 Z, Y, X = np.mgrid[0:nz*state['dz']:nz, 0:ny*state['dy']:ny, 0:nx*state['dx']:nx]
-                fig3d = go.Figure()
-                fig3d.add_trace(go.Isosurface(
-                    x=X.flatten(), y=Y.flatten(), z=Z.flatten(),
-                    value=data_3d_ds.flatten(), isomin=isoval, isomax=v_max, surface_count=1,
-                    caps=dict(x_show=False, y_show=False),
-                    colorscale=colorscale, colorbar=dict(title=colorbar_title)
+                fig3d = go.Figure(go.Isosurface(
+                    x=X.flatten(), y=Y.flatten(), z=Z.flatten(), value=data_ds.flatten(),
+                    isomin=isoval, isomax=v_max, surface_count=1, caps=dict(x_show=False, y_show=False),
+                    colorscale=cs, colorbar=dict(title=cbt)
                 ))
                 if sim_data:
-                    n_lats = int(state.get('n_laterals', 1))
-                    L_ft = float(state.get('L_ft', 10000.0))
-                    lat_rows_y = [ny*state['dy']/3, 2*ny*state['dy']/3] if n_lats >= 2 else [ny*state['dy']/2]
-                    lat_z = nz * state['dz'] / 2
-                    for i, lat_y in enumerate(lat_rows_y):
-                        fig3d.add_trace(go.Scatter3d(
-                            x=[0, L_ft], y=[lat_y, lat_y], z=[lat_z, lat_z],
-                            mode='lines', line=dict(color='white', width=10),
-                            name='Well Lateral' if i == 0 else '', showlegend=(i == 0)
-                        ))
-                fig3d.update_layout(
-                    title=f"<b>3D Isosurface for {prop_3d}</b>",
-                    scene=dict(xaxis_title='X (ft)', yaxis_title='Y (ft)', zaxis_title='Z (ft)', aspectmode='data'),
-                    margin=dict(l=0, r=0, b=0, t=40)
-                )
-                st.plotly_chart(fig3d, use_container_width=True, theme="streamlit")
-                with st.expander("Click for details on the visualized property"):
-                    if 'Pressure Change' in prop_3d:
-                        st.markdown("This shows the **Pressure Drawdown (Initial - Final Pressure)**. The resulting 'plume' is a powerful visualization of the Stimulated Reservoir Volume (SRV).")
-                    elif 'OOIP' in prop_3d:
-                        st.markdown("This shows the **Original Oil In Place** per grid cell, highlighting the 'sweet spots' in the reservoir.")
-                    else:
-                        st.markdown("This visualization shows the 3D distribution of the selected reservoir property. An **isosurface** is a 3D contour that connects points of equal value.")
+                    lat_y_pos = [ny*state['dy']/3, 2*ny*state['dy']/3] if int(state.get('n_laterals', 1)) >= 2 else [ny*state['dy']/2]
+                    for i, y_pos in enumerate(lat_y_pos):
+                        fig3d.add_trace(go.Scatter3d(x=[0, float(state.get('L_ft'))], y=[y_pos, y_pos], z=[nz*state['dz']/2, nz*state['dz']/2],
+                                                     mode='lines', line=dict(color='white', width=10), name='Well' if i==0 else '', showlegend=(i==0)))
+                fig3d.update_layout(title=f"<b>3D Isosurface: {prop_3d}</b>", scene=dict(xaxis_title='X (ft)', yaxis_title='Y (ft)', zaxis_title='Z (ft)', aspectmode='data'), margin=dict(l=0,r=0,b=0,t=40))
+                st.plotly_chart(fig3d, use_container_width=True)
         else:
-            st.warning(f"Data for '{prop_3d}' could not be generated or found. Please run a simulation.")
+            st.warning(f"Data for '{prop_3d}' not found. Please run a simulation.")
 
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
@@ -1205,49 +985,27 @@ elif selected_tab == "Slice Viewer":
     if sim_data is None and st.session_state.get('kx') is None:
         st.warning("Please generate rock properties or run a simulation to enable the slice viewer.")
     else:
-        slice_prop_list = ['Permeability (kx)', 'Permeability (ky)', 'Porosity (ϕ)']
-        if sim_data and sim_data.get('press_matrix') is not None:
-            slice_prop_list.append('Pressure (psi)')
-        c1_sl, c2_sl = st.columns(2)
-        with c1_sl:
-            prop_slice = st.selectbox("Select property to view:", slice_prop_list, key="slice_prop_select")
-        with c2_sl:
-            plane_slice = st.selectbox("Select plane:", ["k-plane (z, top-down)", "j-plane (y, side-view)", "i-plane (x, end-view)"], key="slice_plane_select")
-
-        data_slice_3d = (
-            st.session_state.get('kx') if 'kx' in prop_slice else
-            st.session_state.get('ky') if 'ky' in prop_slice else
-            st.session_state.get('phi') if 'ϕ' in prop_slice else
-            sim_data.get('press_matrix')
-        )
-        if data_slice_3d is not None:
-            nz, ny, nx = data_slice_3d.shape
+        prop_list = ['Permeability (kx)', 'Permeability (ky)', 'Porosity (ϕ)']
+        if sim_data and sim_data.get('press_matrix') is not None: prop_list.append('Pressure (psi)')
+        c1, c2 = st.columns(2)
+        with c1: prop_slice = st.selectbox("Select property:", prop_list)
+        with c2: plane_slice = st.selectbox("Select plane:", ["k-plane (z, top-down)", "j-plane (y, side-view)", "i-plane (x, end-view)"])
+        data_3d = (st.session_state.get('kx') if 'kx' in prop_slice else st.session_state.get('ky') if 'ky' in prop_slice
+                   else st.session_state.get('phi') if 'ϕ' in prop_slice else sim_data.get('press_matrix'))
+        if data_3d is not None:
+            nz, ny, nx = data_3d.shape
             if "k-plane" in plane_slice:
-                slice_idx = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2)
-                data_2d = data_slice_3d[slice_idx, :, :]
-                labels = dict(x="i-index", y="j-index")
-                title_plane = f"k = {slice_idx}"
+                idx, axis_name = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2), "k"
+                data_2d, labels = data_3d[idx, :, :], dict(x="i-index", y="j-index")
             elif "j-plane" in plane_slice:
-                slice_idx = st.slider("j-index (y-layer)", 0, ny - 1, ny // 2)
-                data_2d = data_slice_3d[:, slice_idx, :]
-                labels = dict(x="i-index", y="k-index")
-                title_plane = f"j = {slice_idx}"
+                idx, axis_name = st.slider("j-index (y-layer)", 0, ny - 1, ny // 2), "j"
+                data_2d, labels = data_3d[:, idx, :], dict(x="i-index", y="k-index")
             else:
-                slice_idx = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2)
-                data_2d = data_slice_3d[:, :, slice_idx]
-                labels = dict(x="j-index", y="k-index")
-                title_plane = f"i = {slice_idx}"
-
-            fig_slice = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
-            fig_slice.update_layout(title=f"<b>{prop_slice} @ {title_plane}</b>")
-            st.plotly_chart(fig_slice, use_container_width=True, theme="streamlit")
-            with st.expander("Click for details"):
-                st.markdown(
-                    "This tool allows you to inspect 2D cross-sections of the 3D data volumes.\n"
-                    "- **k-plane**: A horizontal, top-down view.\n"
-                    "- **j-plane**: A vertical slice parallel to the well laterals.\n"
-                    "- **i-plane**: A vertical slice perpendicular to the well laterals."
-                )
+                idx, axis_name = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2), "i"
+                data_2d, labels = data_3d[:, :, idx], dict(x="j-index", y="k-index")
+            fig = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
+            fig.update_layout(title=f"<b>{prop_slice} @ {axis_name} = {idx}</b>")
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f"Data for '{prop_slice}' not found.")
 
@@ -1281,15 +1039,7 @@ elif selected_tab == "QA / Material Balance":
                 fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode='lines', name='Linear Extrapolation', line=dict(dash='dash')))
                 fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white", xaxis_range=[0, giip_bcf * 1100])
                 st.plotly_chart(fig_pz_gas, use_container_width=True, theme="streamlit")
-                with st.expander("Click for details"):
-                    st.markdown(
-                        "This is a classic **P/Z vs. Gp** material balance plot for gas reservoirs. It serves as a powerful validation tool.\n"
-                        "- **Theory**: For a volumetric gas reservoir, a plot of (Pressure/Z-factor) vs. Cumulative Gas Production (Gp) should form a straight line.\n"
-                        "- **Interpretation**: The data points (blue dots) are calculated from the simulator's output. A linear regression (dashed line) is fitted to these points.\n"
-                        "- **GIIP**: Extrapolating the line to the x-axis (where P/Z = 0) gives an independent estimate of the Gas Initially In Place (GIIP).\n"
-                        "- **Validation**: The GIIP from this plot is compared to the simulator's EUR. A close match provides high confidence that the simulation is conserving mass and behaving physically correctly."
-                    )
-
+                
                 st.markdown("---")
                 st.markdown("### Oil Material Balance")
                 Np = cumulative_trapezoid(sim_data['qo'], sim_data['t'], initial=0)
@@ -1321,12 +1071,6 @@ elif selected_tab == "QA / Material Balance":
                 fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode='lines', name=f'Slope (OOIP) = {ooip_mmstb:.2f} MMSTB', line=dict(dash='dash')))
                 fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena-Odeh Plot)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
                 st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
-                with st.expander("Click for details"):
-                    st.markdown(
-                        "This is a **Havlena-Odeh** material balance plot for solution-gas drive reservoirs.\n"
-                        "- The slope gives an independent **OOIP** estimate.\n"
-                        "- Compare to simulator EUR to sanity-check recovery."
-                    )
             else:
                 st.warning("Could not create plots. Pressure and time data have mismatched lengths.")
         else:
@@ -1342,12 +1086,9 @@ elif selected_tab == "Economics":
 elif selected_tab == "EUR vs Lateral Length":
     st.header("Sensitivity: EUR vs Lateral Length")
     c1, c2, c3 = st.columns(3)
-    with c1:
-        L_min = st.number_input("Min Lateral Length (ft)", 1000, 20000, 5000, 500)
-    with c2:
-        L_max = st.number_input("Max Lateral Length (ft)", 1000, 20000, 15000, 500)
-    with c3:
-        L_steps = st.number_input("Number of steps", 2, 20, 11, 1)
+    with c1: L_min = st.number_input("Min Lateral Length (ft)", 1000, 20000, 5000, 500)
+    with c2: L_max = st.number_input("Max Lateral Length (ft)", 1000, 20000, 15000, 500)
+    with c3: L_steps = st.number_input("Number of steps", 2, 20, 11, 1)
 
     if st.button("Run Sensitivity Analysis", key="run_sens_L"):
         lengths = np.linspace(L_min, L_max, L_steps)
@@ -1369,12 +1110,14 @@ elif selected_tab == "EUR vs Lateral Length":
         with c1_eur:
             fig_g_eur = go.Figure(go.Scatter(x=res['L_ft'], y=res['EUR_g'], mode='lines+markers'))
             fig_g_eur.update_layout(title="<b>Gas EUR vs. Lateral Length</b>", xaxis_title="Lateral Length (ft)", yaxis_title="EUR (BCF)", template="plotly_white")
-            st.plotly_chart(fig_g_eur, use_container_width=True, theme="streamlit")
+            st.plotly_chart(fig_g_eur, use_container_width=True)
         with c2_eur:
             fig_o_eur = go.Figure(go.Scatter(x=res['L_ft'], y=res['EUR_o'], mode='lines+markers', marker_color='green'))
             fig_o_eur.update_layout(title="<b>Oil EUR vs. Lateral Length</b>", xaxis_title="Lateral Length (ft)", yaxis_title="EUR (MMSTB)", template="plotly_white")
-            st.plotly_chart(fig_o_eur, use_container_width=True, theme="streamlit")
+            st.plotly_chart(fig_o_eur, use_container_width=True)
 
+
+    
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
 
