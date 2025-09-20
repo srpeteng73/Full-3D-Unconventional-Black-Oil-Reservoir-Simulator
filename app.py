@@ -915,52 +915,50 @@ elif selected_tab == "Results":
         st.success(f"Simulation complete in {sim_data.get('runtime_s', 0):.2f} seconds.")
         st.markdown("### Production Profiles")
 
-        # --- Dual-axis rate chart (gas = left axis, liquids = right axis) ---
-        t  = sim_data.get("t")
-        qg = sim_data.get("qg")   # Mscf/d
-        qo = sim_data.get("qo")   # STB/d
-        qw = sim_data.get("qw")   # STB/d
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
-        if t is not None and (qo is not None or qg is not None or qw is not None):
-            fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+# --- Dual-axis rate chart (gas = left axis, liquids = right axis) ---
+t  = sim_data.get("t")
+qg = sim_data.get("qg")   # Mscf/d
+qo = sim_data.get("qo")   # STB/d
+qw = sim_data.get("qw")   # STB/d
 
-            # Gas on left (primary) axis
-            if qg is not None:
-                fig_rate.add_trace(
-                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)"),
-                    secondary_y=False
-                )
+if t is not None and (qo is not None or qg is not None or qw is not None):
+    fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
 
-            # Liquids (oil + water) on right (secondary) axis
-            if qo is not None:
-                fig_rate.add_trace(
-                    go.Scatter(x=t, y=qo, name="Oil (STB/d)"),
-                    secondary_y=True
-                )
-            if qw is not None:
-                fig_rate.add_trace(
-                    go.Scatter(x=t, y=qw, name="Water (STB/d)"),
-                    secondary_y=True
-                )
+    # Gas on left (primary) axis
+    if qg is not None:
+        fig_rate.add_trace(
+            go.Scatter(x=t, y=qg, name="Gas (Mscf/d)"),
+            secondary_y=False
+        )
 
-            # Layout AFTER traces are added
-            fig_rate.update_layout(
-                template="plotly_white",
-                title_text="<b>Production Rate vs. Time</b>",
-                xaxis_title="Time (days)",
-                yaxis_title="Gas Rate (Mscf/d)",
-                yaxis2=dict(
-                    title="Liquid Rate (STB/d)",
-                    titlefont=dict(color="green"),
-                    tickfont=dict(color="green"),
-                    overlaying="y",
-                    side="right",
-                    showgrid=False
-                ),
-            )
-            st.plotly_chart(fig_rate, use_container_width=True)
-        else:
-            st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
+    # Liquids on right (secondary) axis
+    if qo is not None:
+        fig_rate.add_trace(
+            go.Scatter(x=t, y=qo, name="Oil (STB/d)"),
+            secondary_y=True
+        )
+    if qw is not None:
+        fig_rate.add_trace(
+            go.Scatter(x=t, y=qw, name="Water (STB/d)"),
+            secondary_y=True
+        )
+
+    # Layout (use axis helpers to avoid yaxis2 dict pitfalls)
+    fig_rate.update_layout(
+        template="plotly_white",
+        title_text="<b>Production Rate vs. Time</b>"
+    )
+    fig_rate.update_xaxes(title_text="Time (days)")
+    fig_rate.update_yaxes(title_text="Gas Rate (Mscf/d)", secondary_y=False)
+    fig_rate.update_yaxes(title_text="Liquid Rate (STB/d)", secondary_y=True, showgrid=False)
+
+    st.plotly_chart(fig_rate, use_container_width=True)
+else:
+    st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
+
 
         # EUR gauges (optional)
         if "eur_gauges" in globals():
