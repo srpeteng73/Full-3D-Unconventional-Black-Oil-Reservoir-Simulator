@@ -1103,27 +1103,30 @@ elif selected_tab == "Results":
                 fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water Rate (STB/d)",
                                               line=dict(color="blue"), yaxis="y2"))
             
-            # --- FIX: Replaced shorthand arguments with the standard dictionary format ---
-            fig_rate.update_layout(
-                title=dict(text="<b>Production Rate vs. Time</b>"), # More robust way to set title
-                xaxis=dict(title="Time (days)"),                   # More robust way to set axis title
-                template="plotly_white",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                yaxis=dict(
-                    title="Gas Rate (Mscf/d)", 
-                    titlefont=dict(color="red"),
-                    tickfont=dict(color="red"),
-                    side="left"
-                ),
-                yaxis2=dict(
-                    title="Liquid Rate (STB/d)", 
-                    titlefont=dict(color="green"), # Main color for this axis
-                    tickfont=dict(color="green"),
-                    overlaying="y", 
-                    side="right",
-                    showgrid=False
-                )
-            )
+            # --- FIX: Consolidated all layout updates into a single dictionary ---
+            # This is the most robust way to update a Plotly layout and avoids argument conflicts.
+            layout_updates = {
+                "title": {"text": "<b>Production Rate vs. Time</b>"},
+                "xaxis": {"title": "Time (days)"},
+                "template": "plotly_white",
+                "legend": {"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+                "yaxis": {
+                    "title": "Gas Rate (Mscf/d)",
+                    "titlefont": {"color": "red"},
+                    "tickfont": {"color": "red"},
+                    "side": "left"
+                },
+                "yaxis2": {
+                    "title": "Liquid Rate (STB/d)",
+                    "titlefont": {"color": "green"},
+                    "tickfont": {"color": "green"},
+                    "overlaying": "y",
+                    "side": "right",
+                    "showgrid": False
+                }
+            }
+            fig_rate.update_layout(layout_updates)
+            
             st.plotly_chart(fig_rate, use_container_width=True)
         else:
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
@@ -1134,15 +1137,14 @@ elif selected_tab == "Results":
                 eur_g = sim_data.get("EUR_g_BCF")
                 eur_o = sim_data.get("EUR_o_MMBO")
                 if eur_g is not None and eur_o is not None:
-                    gfig, ofig = eur_gauges(eur_g, eur_o)
                     c1, c2 = st.columns(2)
                     with c1:
                         st.plotly_chart(gfig, use_container_width=True)
                     with c2:
                         st.plotly_chart(ofig, use_container_width=True)
             except Exception as e:
-                st.warning(f"Could not display EUR gauges. Error: {e}")# ==== BEGIN 3D VIEWER BLOCK ====
-elif selected_tab == "3D Viewer":
+                st.warning(f"Could not display EUR gauges. Error: {e}")elif selected_tab == "3D Viewer":
+   
     st.header("3D Viewer")
     sim_data = st.session_state.get("sim")
 
