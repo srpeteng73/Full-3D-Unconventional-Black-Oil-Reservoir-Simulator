@@ -11,6 +11,11 @@
 #   • Wells: BHP, TRUE rate control (extra unknown + constraint), multi-perf
 #   • Well limits (pw min/max) with automatic per-step mode switching
 #   • Advanced well scheduling: time-windowed events select active wells each step
+#
+# Notes:
+# - “Aquifer tank” is water-only (industry-typical support aquifer). Flux uses
+#   water transmissibility on boundary faces into a lumped tank with storage C_aq.
+# - Multi-segment friction is NOT modeled (field accepted in events but ignored).
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -411,10 +416,11 @@ def assemble_jacobian_and_residuals_blackoil(
                     n = lin(ii, jj, kk + 1)
                     T = (harm(kz[c], kz[n]) * (dx * dy)) / max(dz, 1e-30)
                     add_face(c, n, T, dz_ft=-dz)  # upward neighbor is deeper by dz
+
     # ----------------- boundary faces: fixed-P & aquifer tanks ----------------
+    # geometry again
     kx_mat = np.asarray(rock.get("kx_md", 100.0)).reshape(nz, ny, nx)
     ky_mat = np.asarray(rock.get("ky_md", 100.0)).reshape(nz, ny, nx)
-
     def add_dirichlet_face(c, face, area, half_d, p_ext):
         if face in ("xmin","xmax"): kdir = kx[c]
         elif face in ("ymin","ymax"): kdir = ky[c]
@@ -467,27 +473,28 @@ def assemble_jacobian_and_residuals_blackoil(
         A[_cell_idx_sw(c), _cell_idx(c)] += T * lam_w_c * (P[c]) * (-dBw_dP[c] / (max(Bw[c],1e-12)**2))
 
         # aquifer tank equation row: C_aq*(Paq - Paq_prev)/dt + sum(-q_w_face) = 0
-        row_aq = col_paq
+        row_aq = col_paq  # we place tank equation at the same index as unknown (block diagonal)
+        # contribution from this face: - T lam/Bw (P_cell - P_aq)
         A[row_aq, _cell_idx(c)] += -T * lam_w_c * invBw_c
         A[row_aq, col_paq]      += +T * lam_w_c * invBw_c
-        R[row_aq]               += 0.0  # storage term added below
+        R[row_aq]               += 0.0  # faces add no constant term; storage term added below later
 
     # fixed-P faces
     for c, face, area, half_d in _iter_boundary_cells(grid):
-        if face in options.get("fixed_p_face_map", {}):
-            add_dirichlet_face(c, face, area, half_d, options["fixed_p_face_map"][face])
+        if face in fixed_by_face:
+            add_dirichlet_face(c, face, area, half_d, fixed_by_face[face])
 
     # aquifer faces (water-only)
     for c, face, area, half_d in _iter_boundary_cells(grid):
-        if face in options.get("aquifer_face_map", {}):
-            for aq_idx, pi_mult in options["aquifer_face_map"][face]:
+        if face in aq_by_face:
+            for aq_idx, pi_mult in aq_by_face[face]:
                 col_paq = aq_map[aq_idx]
                 add_aquifer_face(c, face, area, half_d, aq_idx, pi_mult, col_paq)
 
     # add storage for aquifer tanks: C_aq*(Paq - Paq_prev)/dt
     for aq_idx, col in aq_map.items():
         C = float(options["aquifers"][aq_idx].get("C_bbl_per_psi", 0.0))
-        Paq_prev = float(options["prev_aquifer_pressures"].get(aq_idx, options["aquifers"][aq_idx].get("p_init_psi", 3000.0)))
+        Paq_prev = float(prev_aqP.get(aq_idx, options["aquifers"][aq_idx].get("p_init_psi", 3000.0)))
         A[col, col] += C / dt
         R[col]      += -C * Paq_prev / dt
 
@@ -496,17 +503,21 @@ def assemble_jacobian_and_residuals_blackoil(
     def wi_at(i,j,k, rw, skin):
         return peaceman_wi_cartesian(kx_mat[k,j,i], ky_mat[k,j,i], dz, dx, dy, rw_ft=rw, skin=skin)
 
+    # directional perms for WI
+    kx_mat = np.asarray(rock.get("kx_md", 100.0)).reshape(nz, ny, nx)
+    ky_mat = np.asarray(rock.get("ky_md", 100.0)).reshape(nz, ny, nx)
+
     for w_idx, w in enumerate(wells):
         ctrl = str(w.get("control","BHP")).upper()
         perfs = w["perfs"]
         q_tgt = float(w.get("rate_mscfd", w.get("rate_stbd", 0.0)))
-        pw_col = options.get("well_unknown_map", {}).get(w_idx, None)
+        pw_col = well_map.get(w_idx, None)
         limits = w.get("limits", {"pw": float(w.get("bhp_psi", 2500.0))})
 
         # build sum coefficient for TRUE-rate constraint
         total_coef = 0.0
         if pw_col is not None:
-            row_w = pw_col
+            row_w = pw_col  # place constraint row at same index as unknown
         else:
             row_w = None
 
@@ -516,7 +527,7 @@ def assemble_jacobian_and_residuals_blackoil(
             wi = wi_at(i,j,k, float(p.get("rw_ft",0.35)), float(p.get("skin",0.0)))
 
             # local frozen mobilities
-            muo = max(mu_o[c], 1e-12); mug = max(mu_g[c], 1e-12); muw = max(mu_w[c], 1e-12)
+            muo = max(mu_o[c],1e-12); mug = max(mu_g[c],1e-12); muw = max(mu_w[c],1e-12)
             lam_o_c = max(0.0, kro_end * (So[c] ** no) / muo)
             lam_w_c = max(0.0, krw_end * (Sw[c] ** nw) / muw)
             lam_g_c = max(0.0, (Sg[c] ** 2) / mug)
@@ -528,7 +539,7 @@ def assemble_jacobian_and_residuals_blackoil(
             cg = wi * (lam_g_c / Bg_c + (Rs_c * lam_o_c) / Bo_c)
 
             if pw_col is None:
-                # BHP mode
+                # BHP mode: use pw number
                 dP = P[c] - limits["pw"]
                 R[_cell_idx(c)]     += co*dP
                 R[_cell_idx_sw(c)]  += cw*dP
@@ -574,7 +585,7 @@ def assemble_jacobian_and_residuals_blackoil(
 
         if pw_col is not None:
             # constraint row: sum_coef * (P_cell_ref - pw) = q_tgt
-            p0 = perfs[0]; c0 = (int(p0["k"])*ny + int(p0["j"])) * nx + int(p0["i"])
+            p0 = perfs[0]; c0 = (int(p0["k"])*ny + int(p0["j"]))*nx + int(p0["i"])
             A[pw_col, _cell_idx(c0)] += total_coef
             A[pw_col, pw_col]        += -total_coef
             R[pw_col]                += -q_tgt
@@ -600,6 +611,10 @@ class _SimplePVT:
 
 # ------------------- scheduling: active wells per time -----------------------
 def _active_wells_at_time(t_days: float, schedule: dict):
+    """
+    From schedule["well_events"] (list of time windows), pick active wells.
+    Fallback: schedule["wells"] if provided, else single default in center.
+    """
     if isinstance(schedule.get("well_events"), list) and len(schedule["well_events"])>0:
         active = []
         for ev in schedule["well_events"]:
@@ -609,8 +624,10 @@ def _active_wells_at_time(t_days: float, schedule: dict):
                 active.extend(ws)
         if len(active)>0:
             return active
+    # fallback
     if isinstance(schedule.get("wells"), list) and len(schedule["wells"])>0:
         return schedule["wells"]
+    # final fallback: center BHP well
     return [{
         "control": schedule.get("control","BHP"),
         "bhp_psi": float(schedule.get("bhp_psi", 2500.0)),
@@ -618,6 +635,11 @@ def _active_wells_at_time(t_days: float, schedule: dict):
 
 # ---------- per-step well prep (mode switching & unknown map) ----------------
 def _prepare_wells_for_step(P, grid, rock, relperm, wells, options, pvt):
+    """
+    Returns:
+      prepared_wells: list with 'control' (maybe switched), 'perfs', 'limits' or rate
+      well_unknown_map: {well_idx: col} for TRUE-rate wells this step
+    """
     nx, ny, nz = int(grid["nx"]), int(grid["ny"]), int(grid["nz"])
     dx, dy, dz = float(grid["dx"]), float(grid["dy"]), float(grid["dz"])
     kx_mat = np.asarray(rock.get("kx_md", 100.0)).reshape(nz, ny, nx)
@@ -631,11 +653,13 @@ def _prepare_wells_for_step(P, grid, rock, relperm, wells, options, pvt):
         ctrl = str(w.get("control", "BHP")).upper()
         perfs = _well_perf_list(w, nx, ny, nz)
 
+        # Build a quick coefficient using first perf as representative
         p0 = perfs[0]; i,j,k = int(p0["i"]), int(p0["j"]), int(p0["k"])
         c = (k*ny + j)*nx + i
         wi = peaceman_wi_cartesian(kx_mat[k,j,i], ky_mat[k,j,i], dz, dx, dy,
                                    rw_ft=float(p0.get("rw_ft", 0.35)),
                                    skin=float(p0.get("skin", 0.0)))
+        # rough mobilities for estimate
         Sw_est, Sg_est = 0.2, 0.05; So_est = 1.0 - Sw_est - Sg_est
         mu_o = pvt.mu_o(P[c]); mu_g = pvt.mu_g(P[c]); mu_w = pvt.mu_w(P[c])
         Bo_c = pvt.Bo(P[c]); Bg_c = pvt.Bg(P[c]); Bw_c = pvt.Bw(P[c]); Rs_c = pvt.Rs(P[c])
@@ -676,6 +700,7 @@ def _prepare_wells_for_step(P, grid, rock, relperm, wells, options, pvt):
                 "rate_stbd":  float(w.get("rate_stbd",0.0)),
             })
 
+    # map TRUE-rate wells to columns
     well_unknown_map = {}
     col = 3*nx*ny*nz
     for w_idx, w in enumerate(prepared):
@@ -686,10 +711,18 @@ def _prepare_wells_for_step(P, grid, rock, relperm, wells, options, pvt):
 
 # ---------------------- aquifer prep (tanks & mappings) ----------------------
 def _prepare_aquifers_for_step(grid, options, prev_aquifer_state):
+    """
+    Each aquifer dict:
+      {"name":"edge","face":"zmin","p_init_psi":3500,"C_bbl_per_psi":5e5,"pi_multiplier":1.0}
+    Returns:
+      aquifers (list), aquifer_unknown_map {aq_idx: col}, face_map {face:[(aq_idx,pi_mult)]}
+      prev_pressures {aq_idx: P_prev}
+    """
     aquifers = options.get("aquifers", []) or []
     if len(aquifers) == 0:
         return [], {}, {}, {}
-    aquifer_unknown_map = {}
+    # columns after well unknowns (assigned in driver)
+    aquifer_unknown_map = {}  # filled in driver for contiguous columns
     face_map = {}
     prev_press = {}
     for idx, aq in enumerate(aquifers):
@@ -702,6 +735,7 @@ def _prepare_aquifers_for_step(grid, options, prev_aquifer_state):
 # -------------------------- well-rate backcalc -------------------------------
 def _compute_well_rates(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
                         grid, rock, relperm, prepared_wells, well_solution_pw=None):
+    """Return aggregated (qo, qg, qw) for reporting (positive = production)."""
     nx, ny, nz = [int(grid[k]) for k in ("nx", "ny", "nz")]
     dx, dy, dz = [float(grid[k]) for k in ("dx", "dy", "dz")]
     def lin(i,j,k): return (k*ny + j)*nx + i
@@ -727,6 +761,7 @@ def _compute_well_rates(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
             if ctrl=="BHP":
                 dP = P[c]-pw_val
             else:
+                # TRUE-rate: use solved pw if provided; else approximate from target
                 if well_solution_pw and id(w) in well_solution_pw:
                     dP = P[c]-well_solution_pw[id(w)]
                 else:
@@ -748,17 +783,6 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
     N = nx * ny * nz
     assert state0.size == 3 * N
 
-    # === A) 3D/QA prep (viewer + material balance support) ===================
-    dx, dy, dz = float(grid["dx"]), float(grid["dy"]), float(grid["dz"])
-    Vcell_ft3 = dx * dy * dz
-    P0_vec  = state0[0::3].copy()
-    Sw0_vec = state0[1::3].copy()
-    Sg0_vec = state0[2::3].copy()
-    So0_vec = 1.0 - Sw0_vec - Sg0_vec
-    phi_vec = np.asarray(rock.get("phi", 0.08)).reshape(N)
-    Bo0_vec = np.asarray(pvt.Bo(P0_vec))
-    p_avg_hist: list[float] = []
-
     dt_days = float(options.get("dt_days", 30.0))
     t_end   = float(options.get("t_end_days", 3650.0))
     max_newton = int(options.get("max_newton", 10))
@@ -774,23 +798,29 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
     aquifer_state_prev = {}
 
     while t < t_end - 1e-9:
+        # select active wells by schedule
         wells_for_step = _active_wells_at_time(t, schedule)
 
+        # prep wells (mode switching & unknown mapping)
         prepared_wells, well_unknown_map = _prepare_wells_for_step(
             state[0::3], grid, rock, relperm, wells_for_step, options, pvt
         )
 
+        # prep aquifers (face map + previous pressures)
         aquifers, aquifer_unknown_map, aq_face_map, prev_aqP = _prepare_aquifers_for_step(
             grid, {**options, "aquifers": options.get("aquifers", [])}, aquifer_state_prev
         )
 
+        # build state_k with extra unknowns: well pw (if any) then aquifer Paq
         nW = len(well_unknown_map)
         nA = len(aquifers)
         state_k = state.copy()
         if nW > 0:
+            # initial guess for p_w: use BHP or nearby cell pressure
             pw0 = []
+            # assign contiguous columns for wells
             next_col = 3*N
-            for w_idx in sorted(well_unknown_map.keys(), key=lambda x: well_unknown_map[x]):
+            for w_idx in sorted(well_unknown_map.keys(), key=lambda x: w_unknown_sort(x, well_unknown_map)):
                 well_unknown_map[w_idx] = next_col; next_col += 1
             for w_idx in sorted(well_unknown_map.keys(), key=lambda x: well_unknown_map[x]):
                 w = prepared_wells[w_idx]
@@ -801,11 +831,14 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
             next_col = 3*N
 
         if nA > 0:
+            # assign contiguous columns for aquifers
             for aq_idx in range(nA):
                 aquifer_unknown_map[aq_idx] = next_col; next_col += 1
+            # initial guess for Paq: previous step value (or p_init)
             Paq0 = [float(prev_aqP.get(aq_idx, aquifers[aq_idx].get("p_init_psi", 3000.0))) for aq_idx in range(nA)]
             state_k = np.concatenate([state_k, np.asarray(Paq0, float)], axis=0)
 
+        # Newton loop
         converged = False
         for _it in range(max_newton):
             step_opts = dict(options)
@@ -816,6 +849,7 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
             step_opts["aquifer_unknown_map"] = aquifer_unknown_map
             step_opts["aquifer_face_map"] = aq_face_map
             step_opts["prev_aquifer_pressures"] = prev_aqP
+            # fixed-P faces map (if any)
             fixed_bounds = options.get("fixed_p_bounds", []) or []
             step_opts["fixed_p_face_map"] = {fb["face"]: float(fb["p_psi"] if "p_psi" in fb else fb["p"])
                                              for fb in fixed_bounds if fb.get("face") in _FACE_ORDER and ("p_psi" in fb or "p" in fb)}
@@ -864,6 +898,7 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
         Bo = np.asarray(pvt.Bo(P)); Bg = np.asarray(pvt.Bg(P)); Rs = np.asarray(pvt.Rs(P))
         mu_o = np.asarray(pvt.mu_o(P)); mu_g = np.asarray(pvt.mu_g(P))
         mu_w = np.asarray(pvt.mu_w(P));  Bw = np.asarray(pvt.Bw(P))
+        # collect solved pw for TRUE-rate wells
         solved_pw = {}
         for w_idx, col in well_unknown_map.items():
             solved_pw[id(prepared_wells[w_idx])] = float(state_k[col])
@@ -873,40 +908,23 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
         t += dt_days
         t_hist.append(t); qo_hist.append(qo); qg_hist.append(qg); qw_hist.append(qw)
 
-        # Track average reservoir pressure for QA / MB tab (A: one-liner)
-        p_avg_hist.append(float(np.mean(P)))
-
         # roll prev
         Pm, Swm, Sgm = P.copy(), Sw.copy(), Sg.copy()
-
-    # === B) Final payloads: 3D viewer + QA/MB =================================
-    P_final_vec  = state[0::3]
-    press_matrix = P_final_vec.reshape(nz, ny, nx)
-    p_init_3d = P0_vec.reshape(nz, ny, nx)
-
-    # OOIP per cell [STB] = (Vcell_ft3 * phi * So0) / (Bo0 * 5.614583)
-    OOIP_cell_STB = (Vcell_ft3 * phi_vec * So0_vec) / (np.maximum(Bo0_vec, 1e-12) * 5.614583)
-    ooip_3d = OOIP_cell_STB.reshape(nz, ny, nx)
-
-    p_avg_psi = np.asarray(p_avg_hist, float)
 
     return {
         "t": np.asarray(t_hist, float),
         "qo": np.asarray(qo_hist, float),
         "qg": np.asarray(qg_hist, float),
         "qw": np.asarray(qw_hist, float),
-        # 3D viewer payloads
-        "press_matrix": press_matrix,
-        "p_init_3d":    p_init_3d,
-        "ooip_3d":      ooip_3d,
-        # QA / MB payloads
-        "p_avg_psi":    p_avg_psi,
-        "pm_mid_psi":   p_avg_psi,  # alias if UI expects this key
+        "press_matrix": None,
+        "pm_mid_psi": None,
+        "p_init_3d": init.get("p_init_psi", None),
+        "ooip_3d": None,
     }
 
-def w_unknown_sort(idx, mapping): return mapping[idx]
+def w_unknown_sort(idx, mapping): return mapping[idx]  # helper for stable sort
 
-# --- analytical proxy (fast) ---
+# -------------------- analytical proxy (unchanged for speed) -----------------
 def _simulate_analytical_proxy(inputs: dict):
     t = np.linspace(1.0, 3650.0, 240)
     qi_g, di_g = 8000.0, 0.80; qi_o, di_o = 1000.0, 0.70
@@ -914,8 +932,9 @@ def _simulate_analytical_proxy(inputs: dict):
     qg = qi_g*np.exp(-di_g*years); qo = qi_o*np.exp(-di_o*years)
     return {"t":t,"qg":qg,"qo":qo,"press_matrix":None,"pm_mid_psi":None,"p_init_3d":None,"ooip_3d":None}
 
-# --- build inputs helper ---
+# --------------------------- build inputs helper -----------------------------
 def _build_inputs_for_blackoil(inputs):
+    """Build grid/rock/relperm/init/schedule/options/pvt + initial state."""
     nx = int(inputs.get("nx",10)); ny = int(inputs.get("ny",10)); nz = int(inputs.get("nz",5))
     dx = float(inputs.get("dx",100.0)); dy = float(inputs.get("dy",100.0)); dz = float(inputs.get("dz",50.0))
     grid = {"nx":nx,"ny":ny,"nz":nz,"dx":dx,"dy":dy,"dz":dz}
@@ -942,6 +961,7 @@ def _build_inputs_for_blackoil(inputs):
         "krw_end": float(inputs.get("krw_end",0.6)), "kro_end": float(inputs.get("kro_end",0.8)),
     }
 
+    # users can pass either "wells" or time-windowed "well_events"
     schedule = {
         "control":        str(inputs.get("control","BHP")),
         "bhp_psi":        float(inputs.get("bhp_psi",2500.0)),
@@ -965,8 +985,10 @@ def _build_inputs_for_blackoil(inputs):
         "geo_alpha": float(inputs.get("geo_alpha", DEFAULT_OPTIONS["geo_alpha"])),
         "use_pc": bool(inputs.get("use_pc", DEFAULT_OPTIONS["use_pc"])),
         "well_mode": str(inputs.get("well_mode", DEFAULT_OPTIONS["well_mode"])),
-        "fixed_p_bounds": inputs.get("fixed_p_bounds", []),
-        "aquifers": inputs.get("aquifers", []),
+        # boundaries:
+        "fixed_p_bounds": inputs.get("fixed_p_bounds", []),  # [{"face":"xmin","p_psi":3500}, ...]
+        # aquifer tanks (water-only):
+        "aquifers": inputs.get("aquifers", []),              # [{"face":"zmin","p_init_psi":3500,"C_bbl_per_psi":5e5,"pi_multiplier":1.0}]
     }
 
     pvt = _SimplePVT(
