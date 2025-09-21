@@ -447,42 +447,133 @@ def generate_property_volumes(state):
     st.success("Successfully generated 3D property volumes!")
 
 
-# --- Engine wrapper ---
+# --- Engine wrapper (drop-in replacement) ---
 def run_simulation_engine(state):
+    """
+    Build engine inputs from Streamlit UI state and run the implicit solver.
+    Compatible with the updated core.full3d.simulate(inputs).
+    Keeps runtime + EURs and supports either scalar or generated property volumes.
+    """
+    import time
+    import numpy as np
+    from core.full3d import simulate
+
     t0 = time.time()
-    inputs = {k: state.get(k) for k in defaults.keys()}
-    inputs['engine_type'] = state.get('engine_type')
-    inputs.update({
-        'grid': {k: state.get(k) for k in ['nx', 'ny', 'nz', 'dx', 'dy', 'dz']},
-        'rock': {
-            'kx_md': st.session_state.get('kx'),
-            'ky_md': st.session_state.get('ky'),
-            'phi':   st.session_state.get('phi'),
-        },
-        'relperm': {k: state.get(k) for k in ['krw_end','kro_end','nw','no','Swc','Sor']},
-        'init':    {'p_init_psi': state.get('p_init_psi'), 'Sw_init': state.get('Swc')},
-        'schedule': {'bhp_psi': state.get('pad_bhp_psi'), 'rate_mscfd': state.get('pad_rate_mscfd'), 'control': state.get('pad_ctrl', 'BHP')},
-        'msw': {'laterals': state.get('n_laterals'), 'L_ft': state.get('L_ft'), 'stage_spacing_ft': state.get('stage_spacing_ft'), 'hf_ft': state.get('hf_ft')},
-    })
-    inputs['pvt'] = _pvt_from_state(state)
+
+    # Grid (support either dx_ft/dy_ft/dz_ft or dx/dy/dz keys)
+    nx = int(state["nx"]); ny = int(state["ny"]); nz = int(state["nz"])
+    dx = float(state.get("dx_ft", state.get("dx")))
+    dy = float(state.get("dy_ft", state.get("dy")))
+    dz = float(state.get("dz_ft", state.get("dz")))
+
+    # Rock props: prefer generated volumes in st.session_state; fallback to scalars
+    # (We pass uniform averages to the engine; the current implicit core expects scalars.)
+    phi_val = float(state.get("phi", 0.08))
+    kx_md   = float(state.get("kx_md", 100.0))
+    ky_md   = float(state.get("ky_md", 100.0))
 
     try:
-        engine_results = simulate(inputs)
+        # If volumes exist, use volume-averaged values (keeps app running consistently)
+        if "phi" in st.session_state and st.session_state["phi"] is not None:
+            phi_arr = np.asarray(st.session_state["phi"]).reshape(nz, ny, nx)
+            phi_val = float(np.clip(np.nanmean(phi_arr), 1e-6, 0.9))
+        if "kx" in st.session_state and st.session_state["kx"] is not None:
+            kx_arr = np.asarray(st.session_state["kx"]).reshape(nz, ny, nx)
+            kx_md = float(np.nanmean(kx_arr))
+        if "ky" in st.session_state and st.session_state["ky"] is not None:
+            ky_arr = np.asarray(st.session_state["ky"]).reshape(nz, ny, nx)
+            ky_md = float(np.nanmean(ky_arr))
+    except Exception:
+        # If shapes don’t line up, quietly fall back to scalar UI values
+        pass
+
+    # Build inputs for the implicit engine
+    inputs = dict(
+        engine="implicit",
+        # grid
+        nx=nx, ny=ny, nz=nz, dx=dx, dy=dy, dz=dz,
+        # rock (uniform for now)
+        phi=phi_val, kx_md=kx_md, ky_md=ky_md,
+        # initials / rock compressibility
+        p_init_psi=float(state.get("p_init_psi", 5000.0)),
+        cr_1overpsi=float(state.get("cr_1overpsi", 0.0)),
+        p_ref_psi=float(state.get("p_ref_psi", state.get("p_init_psi", 5000.0))),
+        # relperm
+        nw=float(state.get("nw", 2.0)),
+        no=float(state.get("no", 2.0)),
+        krw_end=float(state.get("krw_end", 0.6)),
+        kro_end=float(state.get("kro_end", 0.8)),
+        # PVT (with water)
+        pb_psi=float(state.get("pb_psi", 3000.0)),
+        Bo_pb_rb_stb=float(state.get("Bo_pb_rb_stb", 1.2)),
+        Rs_pb_scf_stb=float(state.get("Rs_pb_scf_stb", 600.0)),
+        mu_o_cp=float(state.get("mu_o_cp", 1.2)),
+        mu_g_cp=float(state.get("mu_g_cp", 0.02)),
+        Bw_ref=float(state.get("Bw_ref", 1.0)),
+        cw_1overpsi=float(state.get("cw_1overpsi", 2.5e-6)),
+        mu_w_cp=float(state.get("mu_w_cp", 0.5)),
+        # time controls
+        dt_days=float(state.get("dt_days", 30.0)),
+        t_end_days=float(state.get("t_end_days", 3650.0)),
+        # physics toggles
+        use_gravity=bool(state.get("use_gravity", True)),
+        use_pc=bool(state.get("use_pc", False)),
+        kvkh=float(state.get("kvkh", 0.10)),
+        geo_alpha=float(state.get("geo_alpha", 0.0)),
+        rho_o_lbft3=float(state.get("rho_o_lbft3", 53.0)),
+        rho_w_lbft3=float(state.get("rho_w_lbft3", 62.4)),
+        rho_g_lbft3=float(state.get("rho_g_lbft3", 0.06)),
+        # boundaries: fixed-P (leave commented; wire to UI as needed)
+        fixed_p_bounds=[
+            # {"face":"xmin", "p_psi": float(state.get("p_xmin_psi", 3500.0))},
+            # {"face":"zmax", "p_psi": float(state.get("p_zmax_psi", 3000.0))},
+        ],
+        # aquifer tank(s), water-only (wire to UI as needed)
+        aquifers=[
+            # dict(name="edge_aquifer", face="zmin",
+            #      p_init_psi=float(state.get("aq_p_init", 3500.0)),
+            #      C_bbl_per_psi=float(state.get("aq_C_bbl_per_psi", 5e5)),
+            #      pi_multiplier=float(state.get("aq_pi_mult", 1.0))),
+        ],
+        # WELL MODE: "equivalent_bhp" (default) or "true_rate"
+        well_mode=str(state.get("well_mode", "equivalent_bhp")),
+    )
+
+    # Advanced scheduling: two-window template (safe defaults if UI not set)
+    inputs["well_events"] = [
+        {
+            "start_day": 0.0, "end_day": 180.0,
+            "wells": [{
+                "control": "RATE_GAS_MSCFD",
+                "rate_mscfd": float(state.get("qg_target_mscfd", 8000.0)),
+                "pw_min_psi": float(state.get("pw_min_psi", 1000.0)),
+                "pw_max_psi": float(state.get("pw_max_psi", 6000.0)),
+                "perfs": [{"i": nx//2, "j": ny//2, "k": max(0, nz//2 - 1)}],
+            }],
+        },
+        {
+            "start_day": 180.0, "end_day": 1e9,
+            "wells": [{
+                "control": "BHP",
+                "bhp_psi": float(state.get("bhp_late_psi", 2500.0)),
+                "perfs": [{"i": nx//2, "j": ny//2, "k": max(0, nz//2 - 1)}],
+            }],
+        },
+    ]
+    # If you prefer a single static well, set inputs["wells"] instead of well_events.
+
+    # Run engine
+    try:
+        out = simulate(inputs)
     except Exception as e:
         st.error(f"Simulation error: {e}")
         return None
 
-    def _pick(d, *keys):
-        for k in keys:
-            v = d.get(k)
-            if v is not None:
-                return v
-        return None
-
-    t  = _pick(engine_results, 't',  't_days', 'time_days')
-    qg = _pick(engine_results, 'qg', 'qg_Mscfd', 'qg_mscfd')
-    qo = _pick(engine_results, 'qo', 'qo_STBpd', 'qo_stbpd')
-    qw = _pick(engine_results, 'qw', 'qw_STBpd', 'qw_stbpd') # FIX: Also pick water rate if available
+    # Normalize outputs + add runtime/EURs (keeps your Results tab intact)
+    t  = out.get("t")
+    qg = out.get("qg")
+    qo = out.get("qo")
+    qw = out.get("qw")
 
     if t is None or qg is None or qo is None:
         st.error("Engine missing required arrays (t/qg/qo).")
@@ -491,25 +582,22 @@ def run_simulation_engine(state):
     EUR_g_BCF  = np.trapz(qg, t) / 1e6
     EUR_o_MMBO = np.trapz(qo, t) / 1e6
 
-    # FIX: Explicitly add all required keys to the final dictionary
-    # This ensures both timeseries and 3D arrays are passed to the UI.
     final_results = {
-        't': t,
-        'qg': qg,
-        'qo': qo,
-        'runtime_s': time.time() - t0,
-        'EUR_g_BCF': EUR_g_BCF,
-        'EUR_o_MMBO': EUR_o_MMBO
+        "t": t,
+        "qg": qg,
+        "qo": qo,
+        "runtime_s": time.time() - t0,
+        "EUR_g_BCF": EUR_g_BCF,
+        "EUR_o_MMBO": EUR_o_MMBO,
     }
-    
     if qw is not None:
-        final_results['qw'] = qw
+        final_results["qw"] = qw
 
-    # Pass through optional 3D matrices for the viewer if they exist
-    for key in ['press_matrix', 'p_init_3d', 'ooip_3d']:
-        if key in engine_results:
-            final_results[key] = engine_results[key]
-            
+    # Pass through optional 3D matrices if present
+    for key in ("press_matrix", "p_init_3d", "ooip_3d"):
+        if key in out:
+            final_results[key] = out[key]
+
     return final_results
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
