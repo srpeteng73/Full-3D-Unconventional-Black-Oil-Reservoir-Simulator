@@ -1117,46 +1117,140 @@ elif selected_tab == "Results":
 
 elif selected_tab == "3D Viewer":
     st.header("3D Viewer")
-    sim_data = st.session_state.get("sim")
-    if sim_data is None and st.session_state.get('kx') is None:
-        st.warning("Please generate rock properties or run a simulation to enable the 3D viewer.")
-    else:
-        prop_list = ['Permeability (kx)', 'Porosity (ϕ)']
-        if sim_data: prop_list.extend(['Pressure (psi)', 'Pressure Change (ΔP)', 'Original Oil In Place (OOIP)'])
-        prop_3d = st.selectbox("Select property to view:", prop_list)
-        c1, c2 = st.columns(2)
-        with c1: st.slider("Downsample factor", 1, 10, st.session_state.vol_downsample, 1, key="vol_ds")
-        with c2: st.slider("Isosurface value (relative)", 0.05, 0.95, st.session_state.iso_value_rel, 0.05, key="iso_val_rel")
-        data_3d, cs, cbt = (None, None, None)
-        if 'kx' in prop_3d: data_3d, cs, cbt = st.session_state.get('kx'), 'Viridis', 'kx (mD)'
-        elif 'ϕ' in prop_3d: data_3d, cs, cbt = st.session_state.get('phi'), 'Magma', 'Porosity (ϕ)'
-        elif 'Pressure (psi)' in prop_3d and sim_data: data_3d, cs, cbt = sim_data.get('press_matrix'), 'jet', 'Pressure (psi)'
-        elif 'Pressure Change' in prop_3d and sim_data:
-            p_final, p_init = sim_data.get('press_matrix'), sim_data.get('p_init_3d')
-            if p_final is not None and p_init is not None: data_3d, cs, cbt = p_init - p_final, 'inferno', 'ΔP (psi)'
-        elif 'OOIP' in prop_3d and sim_data: data_3d, cs, cbt = sim_data.get('ooip_3d'), 'plasma', 'OOIP (STB/cell)'
-        if data_3d is not None:
-            with st.spinner("Generating 3D plot..."):
-                data_ds = downsample_3d(data_3d, st.session_state.vol_downsample)
-                v_min, v_max = np.min(data_ds), np.max(data_ds)
-                isoval = v_min + (v_max - v_min) * st.session_state.iso_value_rel
-                nz, ny, nx = data_ds.shape
-                Z, Y, X = np.mgrid[0:nz*state['dz']:nz, 0:ny*state['dy']:ny, 0:nx*state['dx']:nx]
-                fig3d = go.Figure(go.Isosurface(
-                    x=X.flatten(), y=Y.flatten(), z=Z.flatten(), value=data_ds.flatten(),
-                    isomin=isoval, isomax=v_max, surface_count=1, caps=dict(x_show=False, y_show=False),
-                    colorscale=cs, colorbar=dict(title=cbt)
-                ))
-                if sim_data:
-                    lat_y_pos = [ny*state['dy']/3, 2*ny*state['dy']/3] if int(state.get('n_laterals', 1)) >= 2 else [ny*state['dy']/2]
-                    for i, y_pos in enumerate(lat_y_pos):
-                        fig3d.add_trace(go.Scatter3d(x=[0, float(state.get('L_ft'))], y=[y_pos, y_pos], z=[nz*state['dz']/2, nz*state['dz']/2],
-                                                     mode='lines', line=dict(color='white', width=10), name='Well' if i==0 else '', showlegend=(i==0)))
-                fig3d.update_layout(title=f"<b>3D Isosurface: {prop_3d}</b>", scene=dict(xaxis_title='X (ft)', yaxis_title='Y (ft)', zaxis_title='Z (ft)', aspectmode='data'), margin=dict(l=0,r=0,b=0,t=40))
-                st.plotly_chart(fig3d, use_container_width=True)
-        else:
-            st.warning(f"Data for '{prop_3d}' not found. Please run a simulation.")
 
+    sim = st.session_state.get("sim") or {}
+    kx_vol  = st.session_state.get("kx")   # expected (nz, ny, nx)
+    phi_vol = st.session_state.get("phi")  # expected (nz, ny, nx)
+
+    # If nothing at all is available, bail early
+    if kx_vol is None and phi_vol is None and not sim:
+        st.warning("Please generate rock properties or run a simulation to enable the 3D viewer.")
+        st.stop()
+
+    # Build the property list only from fields that actually exist
+    menu = []
+    if kx_vol is not None:                       menu.append("Permeability (kx)")
+    if phi_vol is not None:                      menu.append("Porosity (ϕ)")
+    if sim.get("press_matrix") is not None:      menu.append("Pressure (psi)")
+    if sim.get("press_matrix") is not None and sim.get("p_init_3d") is not None:
+        menu.append("Pressure Change (ΔP)")
+    if sim.get("ooip_3d") is not None:           menu.append("Original Oil In Place (OOIP)")
+
+    if not menu:
+        st.info("No 3D properties are available yet. Run a simulation to populate pressure/OOIP.")
+        st.stop()
+
+    prop_3d = st.selectbox("Select property to view:", menu, index=0)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        ds = st.slider("Downsample factor", 1, 10, int(st.session_state.get("vol_downsample", 2)), 1, key="vol_ds")
+    with c2:
+        iso_rel = st.slider("Isosurface value (relative)", 0.05, 0.95,
+                            float(st.session_state.get("iso_value_rel", 0.85)), 0.05, key="iso_val_rel")
+
+    # Resolve grid spacing (accept *_ft or raw)
+    dx = float(state.get("dx_ft", state.get("dx", 1.0)))
+    dy = float(state.get("dy_ft", state.get("dy", 1.0)))
+    dz = float(state.get("dz_ft", state.get("dz", 1.0)))
+
+    # Select data and styling
+    data_3d = None
+    colorscale = "Viridis"
+    colorbar_title = ""
+
+    if prop_3d.startswith("Permeability"):
+        data_3d = kx_vol
+        colorscale = "Viridis"
+        colorbar_title = "kx (mD)"
+
+    elif prop_3d.startswith("Porosity"):
+        data_3d = phi_vol
+        colorscale = "Magma"
+        colorbar_title = "Porosity (ϕ)"
+
+    elif prop_3d.startswith("Pressure (psi)"):
+        data_3d = sim.get("press_matrix")  # nz × ny × nx
+        colorscale = "Jet"
+        colorbar_title = "Pressure (psi)"
+
+    elif prop_3d.startswith("Pressure Change"):
+        p_final = sim.get("press_matrix")
+        p_init  = sim.get("p_init_3d")
+        if p_final is not None and p_init is not None:
+            data_3d = (np.asarray(p_init) - np.asarray(p_final))  # ΔP = Pin − Pfinal
+            colorscale = "Inferno"
+            colorbar_title = "ΔP (psi)"
+
+    elif prop_3d.startswith("Original Oil"):
+        data_3d = sim.get("ooip_3d")
+        colorscale = "Plasma"
+        colorbar_title = "OOIP (STB/cell)"
+
+    # Validate
+    if data_3d is None:
+        st.warning(f"Data for '{prop_3d}' not found. Please run a simulation.")
+        st.stop()
+
+    data_3d = np.asarray(data_3d)
+    if data_3d.ndim != 3:
+        st.warning("3D data is not in the expected (nz, ny, nx) shape.")
+        st.stop()
+
+    # Downsample (use your helper if available)
+    try:
+        data_ds = downsample_3d(data_3d, ds)
+    except Exception:
+        # simple stride fallback
+        data_ds = data_3d[::ds, ::ds, ::ds]
+
+    vmin, vmax = float(np.nanmin(data_ds)), float(np.nanmax(data_ds))
+    isoval = vmin + (vmax - vmin) * iso_rel
+
+    # Build coordinates consistent with (nz, ny, nx)
+    nz, ny, nx = data_ds.shape
+    z = np.arange(nz) * dz * ds
+    y = np.arange(ny) * dy * ds
+    x = np.arange(nx) * dx * ds
+    Z, Y, X = np.meshgrid(z, y, x, indexing="ij")  # shapes (nz, ny, nx)
+
+    with st.spinner("Generating 3D plot..."):
+        fig3d = go.Figure(
+            go.Isosurface(
+                x=X.ravel(), y=Y.ravel(), z=Z.ravel(), value=data_ds.ravel(),
+                isomin=isoval, isomax=vmax, surface_count=1,
+                caps=dict(x_show=False, y_show=False, z_show=False),
+                colorscale=colorscale, colorbar=dict(title=colorbar_title)
+            )
+        )
+
+        # Optional horizontal well overlay (best-effort)
+        try:
+            L_ft   = float(state.get("L_ft", nx * dx))
+            n_lat  = int(state.get("n_laterals", 1))
+            y_span = ny * dy * ds
+            y_positions = ([y_span/3.0, 2*y_span/3.0] if n_lat >= 2 else [y_span/2.0])
+            z_mid = (nz * dz * ds) / 2.0
+            for i, y_pos in enumerate(y_positions):
+                fig3d.add_trace(
+                    go.Scatter3d(
+                        x=[0.0, L_ft], y=[y_pos, y_pos], z=[z_mid, z_mid],
+                        mode="lines", line=dict(width=8),
+                        name=("Well" if i == 0 else ""), showlegend=(i == 0)
+                    )
+                )
+        except Exception:
+            pass
+
+        fig3d.update_layout(
+            title=f"<b>3D Isosurface: {prop_3d}</b>",
+            scene=dict(
+                xaxis_title="X (ft)", yaxis_title="Y (ft)", zaxis_title="Z (ft)",
+                aspectmode="data"
+            ),
+            margin=dict(l=0, r=0, b=0, t=40),
+        )
+        st.plotly_chart(fig3d, use_container_width=True)
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     sim_data = st.session_state.get("sim")
