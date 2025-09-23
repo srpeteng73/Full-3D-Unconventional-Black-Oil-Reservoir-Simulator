@@ -9,11 +9,14 @@
 #   • Clean hooks to update fracture aperture/perm with pressure (lagged/Picard)
 #   • Kept φ(P) + Bw(P) accumulation and k(p) rock multiplier exactly as you had
 # -----------------------------------------------------------------------------
-
 from __future__ import annotations
+
 import numpy as np
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import spsolve
+
+from utils.edfm_wf import apply_edfm_leak
+
 
 # ---------------------------- constants/options ------------------------------
 G_FT_S2 = 32.174  # ft/s^2 (gravity head)
@@ -171,11 +174,9 @@ def assemble_jacobian_and_residuals_blackoil(
 
     # Fracture pressures block (ordered by frac_map values)
     if Nf > 0:
-        # Build Pf vector in frac-index order (0..Nf-1)
         Pf = np.empty(Nf, float)
-        # find the starting offset for fracture block
         frac_cols = [frac_map[i] for i in range(Nf)]
-        base_off = min(frac_cols)  # contiguous block by construction
+        base_off = min(frac_cols)
         Pf[:] = state_vec[base_off:base_off+Nf]
     else:
         Pf = np.empty(0, float)
@@ -189,7 +190,7 @@ def assemble_jacobian_and_residuals_blackoil(
     else:
         phi = phi0; dphi_dP = np.zeros_like(P)
 
-    # perms (geomech) — keep your k(p) multiplier
+    # perms (geomech)
     kx  = np.asarray(rock.get("kx_md", 100.0)).reshape(N)
     ky  = np.asarray(rock.get("ky_md", 100.0)).reshape(N)
     kvkh = float(options.get("kvkh", 0.1))
@@ -285,8 +286,7 @@ def assemble_jacobian_and_residuals_blackoil(
     Pcw, dPcw_dSw = Pcow(Sw); Pcg, dPcg_dSg = Pcg(Sg)
 
     def add_face(c, n, T_face, dz_ft):
-        # (same as your Phase 1, unchanged) — omitted here for brevity:
-        # NOTE: keep exactly your code; no behavioral change intended.
+        # (unchanged internal-face flux/Jacobian assembly; keep your code)
         dP = P[c] - P[n]
         up = c if dP >= 0.0 else n
         Bo_up, Bg_up, Bw_up = Bo[up], Bg[up], Bw[up]
@@ -362,7 +362,6 @@ def assemble_jacobian_and_residuals_blackoil(
             A[_cell_idx_sg(c), _cell_idx_sg(n)] += T_face * (dlamo_dSg * Rs_up) * invBo_up * dPhi_o
             A[_cell_idx_sg(n), _cell_idx_sg(n)] -= T_face * (dlamo_dSg * Rs_up) * invBo_up * dPhi_o
 
-        # pressure derivatives (1/B, Rs/Bo) — unchanged…
         extra_o = T_face * lam_o_up * dPhi_o * (-dBo_dP[up] / (max(Bo_up,1e-12)**2))
         extra_w = T_face * lam_w_up * dPhi_w * (-dBw_dP[up] / (max(Bw_up,1e-12)**2))
         extra_g = T_face * (lam_g_up * dPhi_g * (-dBg_dP[up] / (max(Bg_up,1e-12)**2))
@@ -374,7 +373,6 @@ def assemble_jacobian_and_residuals_blackoil(
         for row in (_cell_idx_sg(c), _cell_idx_sg(n)):
             A[row, _cell_idx(up)] += extra_g
 
-        # capillary derivatives — unchanged
         if use_pc:
             cwcoef = T_face * lam_w_up * (1.0 / max(Bw_up,1e-12))
             cgcoef = T_face * lam_g_up * (1.0 / max(Bg_up,1e-12))
@@ -405,31 +403,30 @@ def assemble_jacobian_and_residuals_blackoil(
                     T = (harm(kz[c], kz[n]) * (dx * dy)) / max(dz, 1e-30)
                     add_face(c, n, T, dz_ft=-dz)  # upward neighbor is deeper by dz
 
-    # ---------------------- EDFM: matrix ↔ fracture ---------------------------
-    # We treat each fracture control volume as PRESSURE-only unknown.
-    # Flux split across phase rows uses matrix upwind mobilities (fracture uses
-    # host-cell saturations when fracture is upwind — acceptable for Phase 2).
+    # -------------------------------------------------------------------------
+    # Phase-2 EDFM: add a diagonal “leak” for matrix↔fracture coupling.
+    # Safe no-op if options["edfm_connectivity"] is absent/empty.
+    # -------------------------------------------------------------------------
+    A = apply_edfm_leak(A, lam_o, lam_w, lam_g, Bo, Bw, Bg, options)
 
+    # ---------------------- EDFM: matrix ↔ fracture ---------------------------
+    # (your existing explicit matrix↔fracture transmissibility block stays)
     if Nf > 0:
-        # figure fracture block offset
         frac_cols = [frac_map[i] for i in range(Nf)]
         fbase = min(frac_cols)
-
         for fi, f in enumerate(frac_cells):
             c = int(f["cell"])
             nx_u, ny_u, nz_u = _safe_unit(f.get("normal", (1.0, 0.0, 0.0)))
             area_ft2 = float(f["area_ft2"])
             aperture_ft = float(f.get("aperture_ft", 0.0))
-            # project diag perm onto the fracture normal (md)
             k_n_md = _proj_diag_perm_md(nx_u, ny_u, nz_u, kx[c], ky[c], kz[c])
-            # effective distance: half-cell along normal + 0.5*aperture
             d_eq_ft = _half_cell_distance_ft(dx, dy, dz, (nx_u, ny_u, nz_u)) + 0.5*aperture_ft
             Tmf = (max(k_n_md, 1e-30) * area_ft2) / max(d_eq_ft, 1e-30)
 
-            col_f = fbase + fi  # fracture pressure column
+            col_f = fbase + fi
             dP = P[c] - Pf[fi]
-            up_is_c = (dP >= 0.0)
-            up = c  # use matrix cell saturations/mobilities either way
+            up_is_c = (dP >= 0.0)  # (kept for clarity)
+            up = c                 # use matrix saturations/mobilities
 
             invBo_up = 1.0 / max(Bo[up], 1e-12)
             invBg_up = 1.0 / max(Bg[up], 1e-12)
@@ -442,26 +439,24 @@ def assemble_jacobian_and_residuals_blackoil(
             Fg = Tmf * (lam_g_up * invBg_up * (P[c] - Pf[fi]) + (Rs_up * lam_o_up * invBo_up) * (P[c] - Pf[fi]))
 
             R[_cell_idx(c)]    += Fo;    R[col_f] -= Fo
-            R[_cell_idx_sw(c)] += Fw;    R[col_f] -= Fw  # water into fracture eq (we lump into Pf row)
-            R[_cell_idx_sg(c)] += Fg;    R[col_f] -= Fg  # gas into Pf row
+            R[_cell_idx_sw(c)] += Fw;    R[col_f] -= Fw
+            R[_cell_idx_sg(c)] += Fg;    R[col_f] -= Fg
 
-            # Jacobian (pressure-only, Picard on mobilities)
             coef_o = Tmf * lam_o_up * invBo_up
             coef_w = Tmf * lam_w_up * invBw_up
             coef_g1 = Tmf * lam_g_up * invBg_up
             coef_g2 = Tmf * (Rs_up * lam_o_up * invBo_up)
 
-            # oil row
             A[_cell_idx(c),  _cell_idx(c)] += coef_o
             A[_cell_idx(c),  col_f]        -= coef_o
             A[col_f,         _cell_idx(c)] -= coef_o
             A[col_f,         col_f]        += coef_o
-            # water row
+
             A[_cell_idx_sw(c),  _cell_idx(c)] += coef_w
             A[_cell_idx_sw(c),  col_f]        -= coef_w
             A[col_f,            _cell_idx(c)] -= coef_w
             A[col_f,            col_f]        += coef_w
-            # gas row
+
             A[_cell_idx_sg(c),  _cell_idx(c)] += (coef_g1 + coef_g2)
             A[_cell_idx_sg(c),  col_f]        -= (coef_g1 + coef_g2)
             A[col_f,            _cell_idx(c)] -= (coef_g1 + coef_g2)
@@ -472,7 +467,7 @@ def assemble_jacobian_and_residuals_blackoil(
     ky_mat = np.asarray(rock.get("ky_md", 100.0)).reshape(nz, ny, nx)
 
     def add_dirichlet_face(c, face, area, half_d, p_ext):
-        # (identical to Phase 1) — unchanged for brevity; keep your code:
+        # (keep your Phase-1 boundary code as-is)
         if face in ("xmin","xmax"): kdir = kx[c]
         elif face in ("ymin","ymax"): kdir = ky[c]
         else: kdir = kz[c]
@@ -504,7 +499,7 @@ def assemble_jacobian_and_residuals_blackoil(
         )
 
     def add_aquifer_face(c, face, area, half_d, aq_idx, pi_mult, col_paq):
-        # (identical to Phase 1) — unchanged; keep your code block verbatim.
+        # (keep your Phase-1 aquifer code as-is)
         if face in ("xmin","xmax"): kdir = kx[c]
         elif face in ("ymin","ymax"): kdir = ky[c]
         else: kdir = kz[c]
@@ -560,7 +555,7 @@ def assemble_jacobian_and_residuals_blackoil(
         A[col, col] += C / dt
         R[col]      += -C * Paq_prev / dt
 
-    # wells (unchanged; your Phase 1 code)
+    # wells (unchanged; Phase-1 code kept verbatim)
     wells = options.get("prepared_wells", []) or []
     def wi_at(i,j,k, rw, skin):
         return peaceman_wi_cartesian(kx_mat[k,j,i], ky_mat[k,j,i], dz, dx, dy, rw_ft=rw, skin=skin)
@@ -642,8 +637,9 @@ def assemble_jacobian_and_residuals_blackoil(
             A[pw_col, pw_col]        += -total_coef
             R[pw_col]                += -q_tgt
 
-    meta = {"note": "TPFA black-oil with φ(P), Bw(P), Pc (opt), gravity, fixed-P BCs, aquifer tanks, BHP/TRUE-rate wells, and EDFM (matrix–fracture, optional fracture–fracture)."}
+    meta = {"note": "TPFA black-oil with φ(P), Bw(P), Pc (opt), gravity, fixed-P BCs, aquifer tanks, BHP/TRUE-rate wells, and EDFM (matrix–fracture, optional fracture–fracture) + Phase-2 diagonal leak."}
     return A.tocsr(), R, meta
+    
 # core/full3d.py  — Part 3/4
 # -----------------------------------------------------------------------------
 # PVT (same), scheduling helpers (same), plus NEW fracture prep for EDFM
