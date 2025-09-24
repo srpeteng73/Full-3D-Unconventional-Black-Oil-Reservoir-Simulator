@@ -10,7 +10,7 @@
 #   • Kept φ(P) + Bw(P) accumulation and k(p) rock multiplier exactly as you had
 # -----------------------------------------------------------------------------
 from __future__ import annotations
-
+from utils.edfm_wf import apply_edfm_leak
 import numpy as np
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import spsolve
