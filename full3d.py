@@ -90,6 +90,89 @@ def _frac_initial_pressures(frac_cells, P_matrix):
     for idx, f in enumerate(frac_cells):
         Pf0[idx] = float(P_matrix[f["cell"]])
     return Pf0
+
+# ---------------------------- EUR helpers (NEW) ------------------------------
+def _apply_cutoffs_and_cap(t_days, qo_stbd, qg_mscfd,
+                           oil_cutoff_stbd=30.0, gas_cutoff_mscfd=100.0,
+                           cap_days=10950.0):
+    """
+    Zero-out rates below economic cutoffs and cap the horizon.
+    Returns masked copies (qo_cut, qg_cut) and capped time array.
+    """
+    t = np.asarray(t_days, float)
+    qo = np.asarray(qo_stbd, float).copy()
+    qg = np.asarray(qg_mscfd, float).copy()
+
+    # Cap the time series
+    if t.size > 0 and t[-1] > cap_days:
+        mask = t <= cap_days
+        t, qo, qg = t[mask], qo[mask], qg[mask]
+
+    # Apply economic cutoffs
+    qo[qo < oil_cutoff_stbd] = 0.0
+    qg[qg < gas_cutoff_mscfd] = 0.0
+    return t, qo, qg
+
+def _cum_trapz(t_days, y):
+    """Monotone time cumulative integral with trapezoid rule."""
+    t = np.asarray(t_days, float)
+    y = np.asarray(y, float)
+    if t.size == 0:
+        return np.asarray([], float)
+    dt = np.diff(t)
+    mid = 0.5 * (y[1:] + y[:-1])
+    cum = np.concatenate([[0.0], np.cumsum(mid * dt)])
+    return cum
+
+def _compute_eur_and_cum(t_days, qo_stbd, qg_mscfd,
+                         oil_cutoff_stbd=30.0, gas_cutoff_mscfd=100.0,
+                         cap_days=10950.0):
+    """
+    Returns:
+      t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf
+    Notes:
+      - Oil EUR [MMBO] = cum_o_stb / 1e6
+      - Gas EUR [BCF]  = cum_g_mscf / 1e3   (since 1 BCF = 1000 Mscf)
+    """
+    t_cap, qo_cut, qg_cut = _apply_cutoffs_and_cap(
+        t_days, qo_stbd, qg_mscfd,
+        oil_cutoff_stbd=oil_cutoff_stbd,
+        gas_cutoff_mscfd=gas_cutoff_mscfd,
+        cap_days=cap_days,
+    )
+    cum_o_stb = _cum_trapz(t_cap, qo_cut)            # STB
+    cum_g_mscf = _cum_trapz(t_cap, qg_cut)           # Mscf
+    eur_o_mmbo = float(cum_o_stb[-1] / 1e6) if cum_o_stb.size else 0.0
+    eur_g_bcf  = float(cum_g_mscf[-1] / 1e3) if cum_g_mscf.size else 0.0
+    return t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf
+
+def _validate_eur(eur_o_mmbo, eur_g_bcf,
+                  basin="Midland", window="oil",
+                  oil_bounds=(0.3, 1.5), gas_bounds=(0.3, 3.0)):
+    """
+    Simple guardrails. Returns dict with {valid, messages, bounds}.
+    You can tweak bounds via inputs if needed.
+    """
+    msgs = []
+    valid = True
+    lo_o, hi_o = oil_bounds
+    lo_g, hi_g = gas_bounds
+
+    if eur_o_mmbo < lo_o or eur_o_mmbo > hi_o:
+        valid = False
+        msgs.append(f"Oil EUR {eur_o_mmbo:.2f} MMBO outside expected range {lo_o}-{hi_o} MMBO for {basin} {window}-window.")
+    if eur_g_bcf < lo_g or eur_g_bcf > hi_g:
+        valid = False
+        msgs.append(f"Gas EUR {eur_g_bcf:.2f} BCF outside expected range {lo_g}-{hi_g} BCF for {basin} {window}-window.")
+
+    return {
+        "valid": valid,
+        "messages": msgs,
+        "oil_bounds_mmbo": list(oil_bounds),
+        "gas_bounds_bcf": list(gas_bounds),
+        "basin": basin,
+        "window": window,
+    }
 # core/full3d.py  — Part 2/4
 # -----------------------------------------------------------------------------
 # Black-oil residual/Jacobian assembly with:
@@ -544,7 +627,7 @@ def assemble_jacobian_and_residuals_blackoil(
 
     for c, face, area, half_d in _iter_boundary_cells(grid):
         if face in options.get("aquifer_face_map", {}):
-            for aq_idx, pi_mult in options["aquifer_face_map"][face]:
+            for aq_idx, pi_mult in options.get("aquifer_face_map", {})[face]:
                 col_paq = aq_map[aq_idx]
                 add_aquifer_face(c, face, area, half_d, aq_idx, pi_mult, col_paq)
 
@@ -639,7 +722,6 @@ def assemble_jacobian_and_residuals_blackoil(
 
     meta = {"note": "TPFA black-oil with φ(P), Bw(P), Pc (opt), gravity, fixed-P BCs, aquifer tanks, BHP/TRUE-rate wells, and EDFM (matrix–fracture, optional fracture–fracture) + Phase-2 diagonal leak."}
     return A.tocsr(), R, meta
-    
 # core/full3d.py  — Part 3/4
 # -----------------------------------------------------------------------------
 # PVT (same), scheduling helpers (same), plus NEW fracture prep for EDFM
@@ -686,7 +768,7 @@ def _well_perf_list(w, nx, ny, nz):
                 "i": int(p.get("i", nx // 2)),
                 "j": int(p.get("j", ny // 2)),
                 "k": int(p.get("k", nz // 2)),
-                "rw_ft": float(p.get("rw_ft", base["rw_ft"])),
+                "rw_ft": float(p.get("rw_ft", base["rw_ft"]))),
                 "skin": float(p.get("skin",  base["skin"])),
             })
     else:
@@ -1089,6 +1171,15 @@ def _build_inputs_for_blackoil(inputs):
         # ---- NEW: pass-through fracture cells/links from inputs if provided ---
         "frac_cells": inputs.get("frac_cells", []),
         "frac_links": inputs.get("frac_links", []),  # reserved for future ff terms
+
+        # ---- NEW: EUR options / guardrails / cutoffs -------------------------
+        "eur_oil_cutoff_stbd": float(inputs.get("eur_oil_cutoff_stbd", 30.0)),
+        "eur_gas_cutoff_mscfd": float(inputs.get("eur_gas_cutoff_mscfd", 100.0)),
+        "eur_cap_days": float(inputs.get("eur_cap_days", 10950.0)),  # ~30 years
+        "eur_basin": str(inputs.get("eur_basin", "Midland")),
+        "eur_window": str(inputs.get("eur_window", "oil")),
+        "eur_oil_bounds_mmbo": tuple(inputs.get("eur_oil_bounds_mmbo", (0.3, 1.5))),
+        "eur_gas_bounds_bcf": tuple(inputs.get("eur_gas_bounds_bcf", (0.3, 3.0))),
     }
 
     pvt = _SimplePVT(
@@ -1109,6 +1200,88 @@ def simulate(inputs: dict):
         return _simulate_analytical_proxy(inputs)
     elif engine == "implicit":
         state0, grid, rock, relperm, init, schedule, options, pvt = _build_inputs_for_blackoil(inputs)
-        return newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt)
+        out = newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt)
+
+        # --- NEW: build consistent time/rates for EUR integration ------------
+        # Assumptions:
+        #   qo in STB/day, qg in Mscf/day (consistent with your RATE_* fields).
+        t_days = np.asarray(out.get("t", []), float)
+        qo_stbd = np.asarray(out.get("qo", []), float)
+        qg_mscfd = np.asarray(out.get("qg", []), float)
+
+        # Pull options (with defaults)
+        oil_cut = float(options.get("eur_oil_cutoff_stbd", 30.0))
+        gas_cut = float(options.get("eur_gas_cutoff_mscfd", 100.0))
+        cap_days = float(options.get("eur_cap_days", 10950.0))
+        basin = str(options.get("eur_basin", "Midland"))
+        window = str(options.get("eur_window", "oil"))
+        oil_bounds = tuple(options.get("eur_oil_bounds_mmbo", (0.3, 1.5)))
+        gas_bounds = tuple(options.get("eur_gas_bounds_bcf", (0.3, 3.0)))
+
+        # Compute cumulative + EURs
+        (t_cap,
+         cum_o_stb,
+         cum_g_mscf,
+         eur_o_mmbo,
+         eur_g_bcf) = _compute_eur_and_cum(
+            t_days, qo_stbd, qg_mscfd,
+            oil_cutoff_stbd=oil_cut,
+            gas_cutoff_mscfd=gas_cut,
+            cap_days=cap_days,
+        )
+
+        # Validate against guardrails
+        eur_validation = _validate_eur(
+            eur_o_mmbo, eur_g_bcf,
+            basin=basin, window=window,
+            oil_bounds=oil_bounds, gas_bounds=gas_bounds
+        )
+
+        # Attach to output payload used by your Streamlit Result tab
+        out.update({
+            "t_cap": t_cap,                    # time after cap
+            "cum_o_stb": cum_o_stb,            # cumulative oil (STB)
+            "cum_g_mscf": cum_g_mscf,          # cumulative gas (Mscf)
+            "eur_o_mmbo": eur_o_mmbo,          # Oil EUR (MMBO)
+            "eur_g_bcf": eur_g_bcf,            # Gas EUR (BCF)
+            "eur_validation": eur_validation,  # flags + messages
+            "cutoffs": {
+                "oil_stbd": oil_cut,
+                "gas_mscfd": gas_cut,
+                "cap_days": cap_days
+            }
+        })
+        return out
     else:
         raise ValueError(f"Unknown engine '{engine}'")
+
+# (Optional) Convenience API to compute EURs directly from series
+def compute_eur_from_series(t_days, qo_stbd, qg_mscfd,
+                            oil_cutoff_stbd=30.0, gas_cutoff_mscfd=100.0,
+                            cap_days=10950.0,
+                            basin="Midland", window="oil",
+                            oil_bounds_mmbo=(0.3, 1.5), gas_bounds_bcf=(0.3, 3.0)):
+    t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf = _compute_eur_and_cum(
+        t_days, qo_stbd, qg_mscfd,
+        oil_cutoff_stbd=oil_cutoff_stbd,
+        gas_cutoff_mscfd=gas_cutoff_mscfd,
+        cap_days=cap_days,
+    )
+    eur_validation = _validate_eur(
+        eur_o_mmbo, eur_g_bcf,
+        basin=basin, window=window,
+        oil_bounds=oil_bounds_mmbo, gas_bounds=gas_bounds_bcf
+    )
+    return {
+        "t_cap": t_cap,
+        "cum_o_stb": cum_o_stb,
+        "cum_g_mscf": cum_g_mscf,
+        "eur_o_mmbo": eur_o_mmbo,
+        "eur_g_bcf": eur_g_bcf,
+        "eur_validation": eur_validation,
+        "cutoffs": {
+            "oil_stbd": oil_cutoff_stbd,
+            "gas_mscfd": gas_cutoff_mscfd,
+            "cap_days": cap_days
+        }
+    }
