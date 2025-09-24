@@ -23,6 +23,62 @@ COLOR_WATER = "#1f77b4"  # blue
 pio.templates.default = "plotly_white"
 
 
+# ---------------------- EUR helpers (local fallbacks) ----------------------
+def _eur_apply_cutoffs_and_cap(t_days, qo_stbd, qg_mscfd,
+                               oil_cutoff_stbd=30.0, gas_cutoff_mscfd=100.0,
+                               cap_days=10950.0):
+    """Apply economic cutoffs and cap the horizon (units unchanged)."""
+    t = np.asarray(t_days, float)
+    qo = np.asarray(qo_stbd, float).copy() if qo_stbd is not None else None
+    qg = np.asarray(qg_mscfd, float).copy() if qg_mscfd is not None else None
+
+    if t.size > 0 and t[-1] > cap_days:
+        m = t <= cap_days
+        t = t[m]
+        if qo is not None: qo = qo[m]
+        if qg is not None: qg = qg[m]
+
+    if qo is not None:
+        qo[qo < float(oil_cutoff_stbd)] = 0.0
+    if qg is not None:
+        qg[qg < float(gas_cutoff_mscfd)] = 0.0
+    return t, qo, qg
+
+
+def _eur_cum_trapz(t_days, y):
+    """Monotone cumulative (trapezoid)."""
+    if y is None:
+        return None
+    t = np.asarray(t_days, float)
+    yv = np.asarray(y, float)
+    if t.size == 0:
+        return np.asarray([], float)
+    dt = np.diff(t)
+    mid = 0.5 * (yv[1:] + yv[:-1])
+    return np.concatenate([[0.0], np.cumsum(mid * dt)])
+
+
+def _eur_compute_eur_from_series(t_days, qo_stbd, qg_mscfd,
+                                 oil_cutoff_stbd=30.0, gas_cutoff_mscfd=100.0,
+                                 cap_days=10950.0):
+    """
+    Returns:
+      t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf
+    """
+    t_cap, qo_cut, qg_cut = _eur_apply_cutoffs_and_cap(
+        t_days, qo_stbd, qg_mscfd,
+        oil_cutoff_stbd=oil_cutoff_stbd,
+        gas_cutoff_mscfd=gas_cutoff_mscfd,
+        cap_days=cap_days,
+    )
+    cum_o_stb = _eur_cum_trapz(t_cap, qo_cut) if qo_cut is not None else None
+    cum_g_mscf = _eur_cum_trapz(t_cap, qg_cut) if qg_cut is not None else None
+    eur_o_mmbo = float(cum_o_stb[-1] / 1e6) if cum_o_stb is not None and cum_o_stb.size else 0.0
+    eur_g_bcf  = float(cum_g_mscf[-1] / 1e3) if cum_g_mscf is not None and cum_g_mscf.size else 0.0
+    return t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf
+# ------------------------------------------------------------------------
+
+
 def _style_fig(fig, title, xlab, ylab_left, ylab_right=None):
     fig.update_layout(
         title=dict(text=f"<b>{title}</b>", x=0, xanchor="left"),
@@ -126,6 +182,7 @@ _setdefault("use_auto_dfn", True)
 _setdefault("vol_downsample", 2)
 _setdefault("iso_value_rel", 0.5)
 
+# --- Defaults incl. EUR option defaults added ---
 defaults = dict(
     nx=300,
     ny=60,
@@ -188,7 +245,18 @@ defaults = dict(
     use_cusparse=False,
     dfn_radius_ft=60.0,
     dfn_strength_psi=500.0,
-    engine_type="Analytical Model (Fast Proxy)"  # Set stable engine as default
+    engine_type="Analytical Model (Fast Proxy)",  # Set stable engine as default
+
+    # --- EUR UI defaults (new) ---
+    eur_oil_cutoff_stbd=30.0,
+    eur_gas_cutoff_mscfd=100.0,
+    eur_cap_days=10950.0,
+    eur_basin="Midland",
+    eur_window="oil",
+    eur_oil_bounds_mmbo_low=0.3,
+    eur_oil_bounds_mmbo_high=1.5,
+    eur_gas_bounds_bcf_low=0.3,
+    eur_gas_bounds_bcf_high=3.0,
 )
 for k, v in defaults.items():
     _setdefault(k, v)
@@ -376,7 +444,6 @@ PLAY_PRESETS = {
     ),
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
-
 #### Part 2: Core Logic, Simulation Engine, and Sidebar UI ####
 
 # ------------------------ HELPER FUNCTIONS ------------------------
@@ -515,7 +582,7 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
                     'bar': {'color': color, 'thickness': 0.28},
                     'bgcolor': 'white',
                     'borderwidth': 1,
-                    'bordercolor': '#cfe0ff',  # moved inside gauge:
+                    'bordercolor': '#cfe0ff',
                     'steps': [
                         {'range': [0, 0.6 * vmax], 'color': 'rgba(0,0,0,0.04)'},
                         {'range': [0.6 * vmax, 0.85 * vmax], 'color': 'rgba(0,0,0,0.07)'}
@@ -679,12 +746,28 @@ def run_simulation_engine(state):
         "use_gravity": bool(state.get("use_gravity", True)),
         "kvkh": float(state.get("kvkh", 0.10)),
         "geo_alpha": float(state.get("geo_alpha", 0.0)),
+
+        # ------------- NEW: EUR options passthrough to engine -------------
+        "eur_oil_cutoff_stbd": float(state.get("eur_oil_cutoff_stbd", 30.0)),
+        "eur_gas_cutoff_mscfd": float(state.get("eur_gas_cutoff_mscfd", 100.0)),
+        "eur_cap_days": float(state.get("eur_cap_days", 10950.0)),
+        "eur_basin": str(state.get("eur_basin", "Midland")),
+        "eur_window": str(state.get("eur_window", "oil")),
+        "eur_oil_bounds_mmbo": (
+            float(state.get("eur_oil_bounds_mmbo_low", 0.3)),
+            float(state.get("eur_oil_bounds_mmbo_high", 1.5)),
+        ),
+        "eur_gas_bounds_bcf": (
+            float(state.get("eur_gas_bounds_bcf_low", 0.3)),
+            float(state.get("eur_gas_bounds_bcf_high", 3.0)),
+        ),
     }
     try:
         out = simulate(inputs)
     except Exception as e:
         st.error(f"Simulation error: {e}")
         return None
+
     # ---- unpack time series ----
     t = out.get("t")
     qg = out.get("qg")  # expected Mscf/d for display
@@ -693,32 +776,48 @@ def run_simulation_engine(state):
     if t is None or (qg is None and qo is None):
         st.error("Engine did not return time series.")
         return None
-    # ---- cumulative & EURs ----
-    def _cum(y):
-        if y is None:
-            return None
-        y = np.nan_to_num(np.asarray(y, float), nan=0.0)
-        return cumulative_trapezoid(y, np.asarray(t, float), initial=0.0)
 
-    cum_g_Mscf = _cum(qg)
-    cum_o_STB = _cum(qo)
-    cum_w_STB = _cum(qw) if qw is not None else None
-    EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0  # 1 BCF = 1e6 Mscf
-    EUR_o_MMBO = float(cum_o_STB[-1] / 1e6) if cum_o_STB is not None else 0.0  # 1 MMBO = 1e6 STB
-    EUR_w_MMBL = float(cum_w_STB[-1] / 1e6) if cum_w_STB is not None else 0.0  # 1 MMBL = 1e6 STB
+    # ---- cumulative & EURs (prefer engine outputs; else local fallback) ----
+    # Engine-provided fields (if available)
+    t_cap = out.get("t_cap")
+    cum_o_stb = out.get("cum_o_stb")
+    cum_g_mscf = out.get("cum_g_mscf")
+    eur_o_mmbo = out.get("eur_o_mmbo")
+    eur_g_bcf = out.get("eur_g_bcf")
+    eur_validation = out.get("eur_validation")
+
+    # If engine didn't return cum/EUR, compute locally using the same options
+    oil_cut = float(inputs["eur_oil_cutoff_stbd"])
+    gas_cut = float(inputs["eur_gas_cutoff_mscfd"])
+    cap_days = float(inputs["eur_cap_days"])
+    if (t_cap is None) or (cum_o_stb is None and cum_g_mscf is None) or (eur_o_mmbo is None and eur_g_bcf is None):
+        t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf = _eur_compute_eur_from_series(
+            t, qo, qg, oil_cutoff_stbd=oil_cut, gas_cutoff_mscfd=gas_cut, cap_days=cap_days
+        )
+
+    # UI-friendly cumulatives
+    cum_g_BCF = (np.asarray(cum_g_mscf, float) / 1e3) if cum_g_mscf is not None else None  # Mscf → BCF
+    cum_o_MMBO = (np.asarray(cum_o_stb, float) / 1e6) if cum_o_stb is not None else None   # STB → MMBO
+    # Final EUR scalars
+    EUR_g_BCF = float(eur_g_bcf if eur_g_bcf is not None else (cum_g_mscf[-1] / 1e3 if cum_g_mscf is not None else 0.0))
+    EUR_o_MMBO = float(eur_o_mmbo if eur_o_mmbo is not None else (cum_o_stb[-1] / 1e6 if cum_o_stb is not None else 0.0))
+    EUR_w_MMBL = float((cumulative_trapezoid(np.nan_to_num(np.asarray(qw) if qw is not None else np.zeros_like(qo), nan=0.0), np.asarray(t, float), initial=0.0)[-1] / 1e6)) if qw is not None else 0.0
+
     # ---- final dict back to UI ----
     final = dict(
         t=t,
         qg=qg,
         qo=qo,
         qw=qw,
-        cum_g_BCF=(cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None,
-        cum_o_MMBO=(cum_o_STB / 1e6) if cum_o_STB is not None else None,
-        cum_w_MMBL=(cum_w_STB / 1e6) if cum_w_STB is not None else None,
+        cum_g_BCF=cum_g_BCF,
+        cum_o_MMBO=cum_o_MMBO,
+        cum_w_MMBL=None,  # left as-is (rarely used), computed elsewhere if needed
         EUR_g_BCF=EUR_g_BCF,
         EUR_o_MMBO=EUR_o_MMBO,
         EUR_w_MMBL=EUR_w_MMBL,
         runtime_s=time.time() - t0,
+        eur_validation=eur_validation,
+        t_cap=t_cap,
     )
     # pass through 3D/QA arrays if present
     for k in ("press_matrix", "p_init_3d", "ooip_3d", "p_avg_psi", "pm_mid_psi"):
@@ -891,6 +990,29 @@ with st.sidebar:
             st.session_state.dfn_segments = segs
             st.success(f"Auto-generated DFN segments: {0 if segs is None else len(segs)}")
 
+    # --------------------- NEW: EUR Options (UI) ---------------------
+    st.markdown("### EUR Options")
+    c1_eur, c2_eur, c3_eur = st.columns(3)
+    with c1_eur:
+        st.number_input("Oil cutoff (STB/d)", 0.0, 5000.0, float(st.session_state.eur_oil_cutoff_stbd), 5.0, key="eur_oil_cutoff_stbd")
+    with c2_eur:
+        st.number_input("Gas cutoff (Mscf/d)", 0.0, 100000.0, float(st.session_state.eur_gas_cutoff_mscfd), 10.0, key="eur_gas_cutoff_mscfd")
+    with c3_eur:
+        st.number_input("Cap horizon (days)", 30.0, 50000.0, float(st.session_state.eur_cap_days), 30.0, key="eur_cap_days")
+    c1b_eur, c2b_eur = st.columns(2)
+    with c1b_eur:
+        st.text_input("Basin label", value=str(st.session_state.eur_basin), key="eur_basin")
+    with c2b_eur:
+        st.selectbox("Window", ["oil", "gas", "condensate", "mixed"], index=["oil","gas","condensate","mixed"].index(str(st.session_state.eur_window)), key="eur_window")
+    st.markdown("Bounds (validation)")
+    c_lb, c_ub = st.columns(2)
+    with c_lb:
+        st.number_input("Oil EUR lower (MMBO)", 0.0, 10.0, float(st.session_state.eur_oil_bounds_mmbo_low), 0.05, key="eur_oil_bounds_mmbo_low")
+        st.number_input("Gas EUR lower (BCF)", 0.0, 50.0, float(st.session_state.eur_gas_bounds_bcf_low), 0.1, key="eur_gas_bounds_bcf_low")
+    with c_ub:
+        st.number_input("Oil EUR upper (MMBO)", 0.0, 50.0, float(st.session_state.eur_oil_bounds_mmbo_high), 0.1, key="eur_oil_bounds_mmbo_high")
+        st.number_input("Gas EUR upper (BCF)", 0.0, 200.0, float(st.session_state.eur_gas_bounds_bcf_high), 0.5, key="eur_gas_bounds_bcf_high")
+
     st.markdown("### Solver & Profiling")
     st.number_input("Newton tolerance", value=float(st.session_state.newton_tol), format="%.1e", key="newton_tol")
     st.number_input("Transmissibility tolerance", value=float(st.session_state.trans_tol), format="%.1e", key="trans_tol")
@@ -907,7 +1029,6 @@ with st.sidebar:
     st.markdown("---")
 
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
-
 #### Part 3: Main Application UI - Primary Workflow Tabs ####
 
 # --- Tab list ---
@@ -1229,6 +1350,17 @@ elif selected_tab == "Results":
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
         st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
+
+        # ---- Validation banner (if engine provided eur_validation) ----
+        if isinstance(sim.get("eur_validation"), dict):
+            val = sim["eur_validation"]
+            if not val.get("valid", True):
+                st.warning("EUR guardrails triggered:")
+                for m in val.get("messages", []):
+                    st.write(f"• {m}")
+            else:
+                st.info("EUR values are within provided guardrail ranges.")
+
         # --------- EUR GAUGES (first) ----------
         import plotly.graph_objects as go
         c1, c2 = st.columns(2)
@@ -1318,15 +1450,16 @@ elif selected_tab == "Results":
             st.warning("Timeseries data (t, qo, qg) not found in simulation results.")
 
         # --------- CUMULATIVE (Gas=BCF left, Liquids=MMbbl right) ----------
+        # Prefer engine-processed cumulative (already cutoff/capped) if present, else fallback
         cum_g = sim.get("cum_g_BCF")
         cum_o = sim.get("cum_o_MMBO")
         cum_w = sim.get("cum_w_MMBL")
         if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
             fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
             if cum_g is not None:
-                fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(color="red", width=2)), secondary_y=False)
+                fig_cum.add_trace(go.Scatter(x=t if sim.get("t_cap") is None else sim["t_cap"], y=cum_g, name="Cum Gas (BCF)", line=dict(color="red", width=2)), secondary_y=False)
             if cum_o is not None:
-                fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(color="green", width=2)), secondary_y=True)
+                fig_cum.add_trace(go.Scatter(x=t if sim.get("t_cap") is None else sim["t_cap"], y=cum_o, name="Cum Oil (MMbbl)", line=dict(color="green", width=2)), secondary_y=True)
             if cum_w is not None:
                 fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(color="blue", width=1.5, dash="dot")), secondary_y=True)
             fig_cum.update_layout(
@@ -1340,7 +1473,6 @@ elif selected_tab == "Results":
             fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False, showgrid=True, gridwidth=1)
             fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
             st.plotly_chart(fig_cum, use_container_width=True, theme=None)
-
 #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
@@ -1541,7 +1673,7 @@ elif selected_tab == "QA / Material Balance":
     slope, intercept, _, _, _ = stats.linregress(Gp_MMscf[fit_start:], p_over_z[fit_start:])
     # GIIP from P/Z line intercept (Gp at P/Z = 0). Convert MMscf→BCF (/1000).
     giip_bcf = max(0.0, -intercept / slope / 1000.0) if slope != 0 else 0.0
-    # Simulator EUR (fallback compute if not provided)
+    # Simulator EUR (prefer engine; else fallback)
     sim_eur_g_bcf = sim.get("EUR_g_BCF")
     if sim_eur_g_bcf is None:
         sim_eur_g_bcf = np.trapz(qg, t) / 1e6  # Mscf → BCF
@@ -1649,6 +1781,10 @@ elif selected_tab == "Economics":
         fig_cf = go.Figure(go.Bar(x=t, y=cf/1e3, name="Cash Flow (k$)"))
         fig_cf.update_layout(template="plotly_white", title_text="<b>Cash Flow (Approx.)</b>", xaxis_title="Time (days)", yaxis_title="k$")
         st.plotly_chart(fig_cf, use_container_width=True, theme=None)
+
+elif selected_tab == "EUR vs Lateral Length":
+    st.header("EUR vs Lateral Length")
+    st.info("Use Monte Carlo or your own sweep to populate this tab in a later iteration.")
 
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
@@ -1854,7 +1990,6 @@ elif selected_tab == "Well Placement Optimization":
         st.markdown("### Optimization Results")
         c1_res, c2_res = st.columns(2)
         with c1_res:
-            st.markdown("##### Best Placement Found")
             score_unit = "MMBO" if "Oil" in st.session_state.get("opt_objective", "Maximize Oil EUR") else "BCF"
             st.metric(label=f"Best Score ({score_unit})", value=f"{best_run['Score']:.3f}")
             st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})")
