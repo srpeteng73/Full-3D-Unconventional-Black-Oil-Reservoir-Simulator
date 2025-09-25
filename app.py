@@ -1441,57 +1441,39 @@ elif selected_tab == "Results":
         st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
         # --- Sanity gate: block publishing if EURs are out-of-bounds ---
-        eur_g = float(sim.get("EUR_g_BCF", 0.0))
-        eur_o = float(sim.get("EUR_o_MMBO", 0.0))
+eur_g = float(sim.get("EUR_g_BCF", 0.0))
+eur_o = float(sim.get("EUR_o_MMBO", 0.0))
 
-        play_name = st.session_state.get("play_sel", "")
-        b = _sanity_bounds_for_play(play_name)
+play_name = st.session_state.get("play_sel", "")
+b = _sanity_bounds_for_play(play_name)
 
-        # Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against /0
+# Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against /0
 implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
 
 # Cap with tiny tolerance so equality doesn't trip the check
 gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
 tol = 1e-6  # allow equality within numerical noise
 
+issues = []
+if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+    issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+    issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
 if implied_eur_gor > (gor_cap + tol):
-    issues.append(
-        f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
+    issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
+
+if issues:
+    # Soft guidance if user picked Analytical on an oil-window play
+    hint = ""
+    chosen_engine = st.session_state.get("engine_type", "")
+    if "Analytical" in chosen_engine and b["max_eur_gor_scfstb"] <= 3000.0:
+        hint = " Tip: switch to an Implicit engine for oil-window plays."
+
+    st.error(
+        "Production results failed sanity checks and were not published.\n\n"
+        "Details:\n- " + "\n- ".join(issues) + hint
     )
-
-
-        issues = []
-        if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-            issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
-        if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
-            issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
-        if implied_eur_gor > b["max_eur_gor_scfstb"]:
-            issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {b['max_eur_gor_scfstb']:,.0f}")
-
-        if issues:
-            # Soft guidance if user picked Analytical on an oil-window play
-            hint = ""
-            chosen_engine = st.session_state.get("engine_type", "")
-            if "Analytical" in chosen_engine and b["max_eur_gor_scfstb"] <= 3000.0:
-                hint = " Tip: switch to an Implicit engine for oil-window plays."
-
-            st.error(
-                "Production results failed sanity checks and were not published.\n\n"
-                "Details:\n- " + "\n- ".join(issues) + hint
-            )
-            st.stop()
-
-        # ---- Validation gate (engine-side) ----
-        eur_valid = bool(sim.get("eur_valid", True))
-        eur_msg   = sim.get("eur_validation_msg", "OK")
-        if not eur_valid:
-            st.error(
-                "Production results failed sanity checks and were not published.\n\n"
-                f"Details: {eur_msg}\n\n"
-                "Please review PVT, controls, and units; then re-run.",
-                icon="🚫"
-            )
-            st.stop()
+    st.stop()
 
         # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
         # (Gauge max scaled from play-aware sanity bounds)
