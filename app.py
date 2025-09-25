@@ -882,27 +882,41 @@ def run_simulation_engine(state):
     EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # STB→MMBO
     EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0  # STB→MMbbl
 
-    # ---- GOR-consistency cap for oil-window style plays (tolerance-aware) ----
-    b = _sanity_bounds_for_play(play_name)
-    if b and EUR_o_MMBO > 0.0:
-        implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)  # scf/STB
-        gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
-        tol = 1e-6  # allow equality within numerical noise
+    # ---- GOR-consistency cap (use tighter of basin cap vs PVT cap), tolerance-aware ----
+b = _sanity_bounds_for_play(play_name)
+if b and EUR_o_MMBO > 0.0:
+    # Basin-wide cap (e.g., oil-window 2,000 scf/STB)
+    gor_cap_basin = float(b.get("max_eur_gor_scfstb", 2000.0))
 
-        if implied_eur_gor > (gor_cap + tol):
-            # Cap total produced gas so: gas_scf_total <= gor_cap * oil_STB_total
-            max_gas_scf = gor_cap * (EUR_o_MMBO * 1e6)  # (cap scf/STB) × (oil STB)
-            cur_gas_scf = EUR_g_BCF * 1e9               # BCF → scf
-            scale = max_gas_scf / max(cur_gas_scf, 1e-12)
+    # PVT-derived cap ≈ 3×Rs(pb), only if pb>1 psi and Rs>0
+    Rs_pb_val = float(state.get("Rs_pb_scf_stb", 0.0))
+    pb_val    = float(state.get("pb_psi", 1.0))
+    gor_cap_pvt = (3.0 * Rs_pb_val) if (pb_val > 1.0 and Rs_pb_val > 0.0) else np.inf
 
-            # Scale the CUT gas series & cumulative consistently
-            if qg_cut is not None:
-                qg_cut = np.asarray(qg_cut, float) * scale
-            if cum_g_Mscf is not None:
-                cum_g_Mscf = cum_g_Mscf * scale  # still Mscf
+    # Effective cap = tighter limit
+    gor_cap_eff = min(gor_cap_basin, gor_cap_pvt)
 
-            # Recompute EUR_g_BCF from scaled total
-            EUR_g_BCF = (cur_gas_scf * scale) / 1e9
+    # Tiny numerical slack so equality doesn't trip the check
+    tol = 1e-6
+
+    # Current implied EUR GOR from the (cutoff) EURs
+    implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
+
+    if implied_eur_gor > (gor_cap_eff + tol):
+        # Scale gas down so implied GOR = gor_cap_eff - tol (stay just below the limit)
+        target_gor = max(gor_cap_eff - tol, 0.0)
+        scale = target_gor / max(implied_eur_gor, 1e-12)
+
+        # Scale gas rate series (cut window), cumulative, and gas EUR consistently
+        if qg_cut is not None:
+            qg_cut = np.asarray(qg_cut, float) * scale
+        if cum_g_Mscf is not None:
+            cum_g_Mscf = cum_g_Mscf * scale  # still in Mscf
+        # Recompute gas EUR (BCF) from scaled cumulative total
+        EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0
+
+# Keep the cut series for plots and downstream tabs
+t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
 
     # ---- basic Midland guardrails + PVT/GOR consistency message (engine-side) ----
     ok_eur, eur_msg = validate_midland_eur(
