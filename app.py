@@ -836,8 +836,8 @@ def run_simulation_engine(state):
         st.error(f"Simulation error: {e}")
         return None
 
-    # ---- unpack time series ----
-    t = out.get("t")
+        # ---- unpack time series ----
+    t  = out.get("t")
     qg = out.get("qg")  # expected Mscf/d
     qo = out.get("qo")  # STB/d
     qw = out.get("qw")  # STB/d
@@ -854,7 +854,7 @@ def run_simulation_engine(state):
     qo_arr = np.nan_to_num(np.asarray(qo, float), nan=0.0) if qo is not None else None
     qw_arr = np.nan_to_num(np.asarray(qw, float), nan=0.0) if qw is not None else None
 
-    # Rate thresholds
+    # Thresholds
     if qg_arr is not None:
         qg_arr[qg_arr < eur_cutoffs["gas_min_mscfd"]] = 0.0
     if qo_arr is not None:
@@ -862,7 +862,7 @@ def run_simulation_engine(state):
     if qw_arr is not None:
         qw_arr[qw_arr < 0.0] = 0.0
 
-    # Apply time mask
+    # Time window
     t_cut  = t[mask_time]
     qg_cut = qg_arr[mask_time] if qg_arr is not None else None
     qo_cut = qo_arr[mask_time] if qo_arr is not None else None
@@ -874,66 +874,64 @@ def run_simulation_engine(state):
             return None
         return cumulative_trapezoid(y, tt, initial=0.0)
 
-    cum_g_Mscf = _cum(qg_cut, t_cut)           # Mscf
-    cum_o_STB  = _cum(qo_cut, t_cut)           # STB
+    cum_g_Mscf = _cum(qg_cut, t_cut)            # Mscf
+    cum_o_STB  = _cum(qo_cut, t_cut)            # STB
     cum_w_STB  = _cum(qw_cut, t_cut) if qw_cut is not None else None
 
     EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0  # Mscf→BCF
-    EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # STB→MMBO
-    EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0  # STB→MMbbl
+    EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # STB →MMBO
+    EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0  # STB →MMBL
 
-    # ---- GOR-consistency cap (use tighter of basin cap vs PVT cap), tolerance-aware ----
-b = _sanity_bounds_for_play(play_name)
-if b and EUR_o_MMBO > 0.0:
-    # Basin-wide cap (e.g., oil-window 2,000 scf/STB)
-    gor_cap_basin = float(b.get("max_eur_gor_scfstb", 2000.0))
+    # ---- GOR-consistency cap (tighter of basin cap vs ~3×Rs(pb)), tolerance-aware ----
+    play_name = st.session_state.get("play_sel", "")
+    b = _sanity_bounds_for_play(play_name)
+    if b and EUR_o_MMBO > 0.0:
+        gor_cap_basin = float(b.get("max_eur_gor_scfstb", 2000.0))
+        Rs_pb_val = float(state.get("Rs_pb_scf_stb", 0.0))
+        pb_val    = float(state.get("pb_psi", 1.0))
+        gor_cap_pvt = (3.0 * Rs_pb_val) if (pb_val > 1.0 and Rs_pb_val > 0.0) else np.inf
+        gor_cap_eff = min(gor_cap_basin, gor_cap_pvt)
 
-    # PVT-derived cap ≈ 3×Rs(pb), only if pb>1 psi and Rs>0
-    Rs_pb_val = float(state.get("Rs_pb_scf_stb", 0.0))
-    pb_val    = float(state.get("pb_psi", 1.0))
-    gor_cap_pvt = (3.0 * Rs_pb_val) if (pb_val > 1.0 and Rs_pb_val > 0.0) else np.inf
+        tol = 1e-6
+        implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
+        if implied_eur_gor > (gor_cap_eff + tol):
+            target_gor = max(gor_cap_eff - tol, 0.0)
+            scale = target_gor / max(implied_eur_gor, 1e-12)
 
-    # Effective cap = tighter limit
-    gor_cap_eff = min(gor_cap_basin, gor_cap_pvt)
+            # Scale gas series/cumulative in the same (cut) window
+            if qg_cut is not None:
+                qg_cut = np.asarray(qg_cut, float) * scale
+            if cum_g_Mscf is not None:
+                cum_g_Mscf = cum_g_Mscf * scale
 
-    # Tiny numerical slack so equality doesn't trip the check
-    tol = 1e-6
+            # Recompute EUR_g_BCF after scaling
+            EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0
 
-    # Current implied EUR GOR from the (cutoff) EURs
-    implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
+    # Keep the (possibly scaled) cut series for plots/outputs
+    t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
 
-    if implied_eur_gor > (gor_cap_eff + tol):
-        # Scale gas down so implied GOR = gor_cap_eff - tol (stay just below the limit)
-        target_gor = max(gor_cap_eff - tol, 0.0)
-        scale = target_gor / max(implied_eur_gor, 1e-12)
+    # ---- package cumulative series in output units for plotting ----
+    cum_g_BCF  = (cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None
+    cum_o_MMBO = (cum_o_STB  / 1e6) if cum_o_STB  is not None else None
+    cum_w_MMBL = (cum_w_STB  / 1e6) if cum_w_STB  is not None else None
 
-        # Scale gas rate series (cut window), cumulative, and gas EUR consistently
-        if qg_cut is not None:
-            qg_cut = np.asarray(qg_cut, float) * scale
-        if cum_g_Mscf is not None:
-            cum_g_Mscf = cum_g_Mscf * scale  # still in Mscf
-        # Recompute gas EUR (BCF) from scaled cumulative total
-        EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0
-
-# Keep the cut series for plots and downstream tabs
-t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
-
-    # ---- basic Midland guardrails + PVT/GOR consistency message (engine-side) ----
+    # ---- engine-side validation (Midland-type sanity + PVT GOR) ----
     ok_eur, eur_msg = validate_midland_eur(
-        EUR_o_MMBO, EUR_g_BCF,
+        EUR_o_MMBO,
+        EUR_g_BCF,
         pb_psi=float(state.get("pb_psi", 1.0)),
         Rs_pb=float(state.get("Rs_pb_scf_stb", 0.0)),
     )
 
-    # ---- final dict back to UI (keep cut series for plots) ----
+    # ---- final dict back to UI ----
     final = dict(
-        t=t_cut,
-        qg=qg_cut,
-        qo=qo_cut,
-        qw=qw_cut,
-        cum_g_BCF=(cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None,  # Mscf→BCF
-        cum_o_MMBO=(cum_o_STB  / 1e6) if cum_o_STB  is not None else None,  # STB→MMBO
-        cum_w_MMBL=(cum_w_STB  / 1e6) if cum_w_STB  is not None else None,  # STB→MMbbl
+        t=t,
+        qg=qg,
+        qo=qo,
+        qw=qw,
+        cum_g_BCF=cum_g_BCF,
+        cum_o_MMBO=cum_o_MMBO,
+        cum_w_MMBL=cum_w_MMBL,
         EUR_g_BCF=EUR_g_BCF,
         EUR_o_MMBO=EUR_o_MMBO,
         EUR_w_MMBL=EUR_w_MMBL,
