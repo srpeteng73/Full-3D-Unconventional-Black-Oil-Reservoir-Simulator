@@ -869,25 +869,37 @@ def run_simulation_engine(state):
     EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # (STB) /1e6 -> MMBO
     EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0
 
-      # ---- GOR-consistency cap for oil-window style plays ----
-    # Get play-specific sanity bounds (requires _sanity_bounds_for_play(play_name))
-    b = _sanity_bounds_for_play(play_name)
-    if b and EUR_o_MMBO > 0:
-        # Implied EUR GOR (scf/STB)
-        implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
+     # ---- GOR-consistency cap for oil-window style plays ----
+# (Place this after EUR_g_BCF / EUR_o_MMBO are computed, before validation/return)
+play_name = st.session_state.get("play_sel", "")
+b = _sanity_bounds_for_play(play_name)
 
-        max_gor = float(b.get("max_eur_gor_scfstb", 2000.0))
-        if implied_eur_gor > max_gor:
-            # Limit total produced gas so EUR_gas (scf) <= max_gor * EUR_oil (STB)
-            max_gas_scf = max_gor * (EUR_o_MMBO * 1e6)      # oil MMBO -> STB, then × max GOR => scf
-            cur_gas_scf = EUR_g_BCF * 1e9                   # BCF -> scf  (1 BCF = 1e9 scf)
+if b and EUR_o_MMBO > 0.0:
+    # Implied EUR GOR (scf/STB)
+    implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
 
-            scale = max(0.0, min(1.0, max_gas_scf / max(cur_gas_scf, 1e-12)))
-            if scale < 1.0 and qg_cut is not None:
-                qg_cut = np.asarray(qg_cut, float) * scale
-                # Recompute cumulative & EUR with the scaled gas
-                cum_g_Mscf = cumulative_trapezoid(qg_cut, t_cut, initial=0.0)    # Mscf
-                EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf.size else 0.0
+    gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
+    tol = 1e-6  # tiny numerical tolerance; allow equality within round-off
+
+    if implied_eur_gor > (gor_cap + tol):
+        # Cap total produced gas so EUR_gas (scf) <= gor_cap * EUR_oil (STB)
+        # oil: MMBO -> STB  (×1e6), then × cap (scf/STB) -> scf
+        max_gas_scf = gor_cap * (EUR_o_MMBO * 1e6)
+        # gas: BCF -> scf (×1e9)
+        cur_gas_scf = EUR_g_BCF * 1e9
+
+        scale = max_gas_scf / max(cur_gas_scf, 1e-12)
+
+        # Scale gas series + cumulative consistently
+        if qg is not None:
+            qg = np.asarray(qg, float) * scale
+        if cum_g_Mscf is not None:
+            cum_g_Mscf = cum_g_Mscf * scale  # still in Mscf
+
+        # Recompute EUR_g_BCF from scaled total (scf -> BCF)
+        EUR_g_BCF = (cur_gas_scf * scale) / 1e9
+
+        # Note: t/qo/qw and oil EUR are unchanged by this cap
 
     # Keep the cut series for plots, QA, and Results tab
     t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
@@ -1436,7 +1448,17 @@ elif selected_tab == "Results":
         b = _sanity_bounds_for_play(play_name)
 
         # Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against /0
-        implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-9 else np.inf
+implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
+
+# Cap with tiny tolerance so equality doesn't trip the check
+gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
+tol = 1e-6  # allow equality within numerical noise
+
+if implied_eur_gor > (gor_cap + tol):
+    issues.append(
+        f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
+    )
+
 
         issues = []
         if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
