@@ -73,8 +73,7 @@ def compute_cum_and_eur_fixed(
 def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
-    msgs = []
-    ok = True
+    msgs, ok = [], True
 
     if EUR_o_MMBO < lo_o or EUR_o_MMBO > hi_o:
         ok = False
@@ -83,11 +82,11 @@ def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
         ok = False
         msgs.append(f"Gas EUR {EUR_g_BCF:.2f} BCF outside Midland sanity [{lo_g}, {hi_g}] BCF.")
 
-    # --- tolerance-aware PVT/GOR consistency ---
+    # Tolerance-aware PVT/GOR consistency (~3×Rs at pb)
     if EUR_o_MMBO > 0 and Rs_pb not in (None, 0):
         implied_GOR = (EUR_g_BCF * 1e9) / (EUR_o_MMBO * 1e6)  # scf/STB
-        limit = 3.0 * float(Rs_pb)  # ~3× Rs at pb
-        tol = 1e-6                  # tiny numerical slack
+        limit = 3.0 * float(Rs_pb)
+        tol = 1e-6
         if implied_GOR > (limit + tol) and (pb_psi or 0) > 1.0:
             ok = False
             msgs.append(
