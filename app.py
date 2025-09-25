@@ -726,6 +726,21 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
+def _sanity_bounds_for_play(play_name: str):
+    s = (play_name or "").lower()
+    # Default (conservative, oil-window-ish)
+    bounds = dict(oil_mmbo=(0.3, 1.5), gas_bcf=(0.3, 3.0), max_eur_gor_scfstb=2000.0)
+    if "midland" in s or "delaware" in s or "eagle ford" in s or "niobrara" in s or "tuscaloosa" in s:
+        # Oil windows in US shale
+        bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
+    if "condensate" in s or "utica" in s or "montney" in s or "duvernay" in s:
+        # condensate/liquids-rich
+        bounds = dict(oil_mmbo=(0.1, 1.8), gas_bcf=(0.8, 8.0), max_eur_gor_scfstb=5000.0)
+    if "dry gas" in s or "haynesville" in s or "marcellus" in s or "horn river" in s or "barnett (gas)" in s:
+        # dry gas
+        bounds = dict(oil_mmbo=(0.0, 0.5), gas_bcf=(2.0, 20.0), max_eur_gor_scfstb=50000.0)
+    return bounds
+
 
 def run_simulation_engine(state):
     import time
@@ -1405,6 +1420,7 @@ elif selected_tab == "Results":
         st.number_input("Min oil rate (STB/d)", min_value=0.0,
                         value=float(st.session_state.get("eur_min_rate_oil_stbd", 30.0)),
                         step=5.0, key="eur_min_rate_oil_stbd")
+
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
         if 'kx' not in st.session_state:
@@ -1417,12 +1433,45 @@ elif selected_tab == "Results":
                 st.error("Simulation failed. Check sidebar parameters and logs.")
             else:
                 st.session_state.sim = sim_out
+
     sim = st.session_state.get("sim")
     if sim is None:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
         st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
-        # ---- Validation gate ----
+
+        # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+        eur_g = float(sim.get("EUR_g_BCF", 0.0))
+        eur_o = float(sim.get("EUR_o_MMBO", 0.0))
+
+        play_name = st.session_state.get("play_sel", "")
+        b = _sanity_bounds_for_play(play_name)
+
+        # Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against /0
+        implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-9 else np.inf
+
+        issues = []
+        if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+            issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+        if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+            issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
+        if implied_eur_gor > b["max_eur_gor_scfstb"]:
+            issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {b['max_eur_gor_scfstb']:,.0f}")
+
+        if issues:
+            # Soft guidance if user picked Analytical on an oil-window play
+            hint = ""
+            chosen_engine = st.session_state.get("engine_type", "")
+            if "Analytical" in chosen_engine and b["max_eur_gor_scfstb"] <= 3000.0:
+                hint = " Tip: switch to an Implicit engine for oil-window plays."
+
+            st.error(
+                "Production results failed sanity checks and were not published.\n\n"
+                "Details:\n- " + "\n- ".join(issues) + hint
+            )
+            st.stop()
+
+        # ---- Validation gate (engine-side) ----
         eur_valid = bool(sim.get("eur_valid", True))
         eur_msg   = sim.get("eur_validation_msg", "OK")
         if not eur_valid:
@@ -1433,15 +1482,15 @@ elif selected_tab == "Results":
                 icon="🚫"
             )
             st.stop()
-        # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-        eur_g = float(sim.get("EUR_g_BCF", 0.0))
-        eur_o = float(sim.get("EUR_o_MMBO", 0.0))
 
-        gas_hi = MIDLAND_BOUNDS["gas_bcf"][1]
-        oil_hi = MIDLAND_BOUNDS["oil_mmbo"][1]
+        # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
+        # (Gauge max scaled from play-aware sanity bounds)
+        gas_hi = b["gas_bcf"][1]
+        oil_hi = b["oil_mmbo"][1]
         gmax   = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
         omax   = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
 
+        import plotly.graph_objects as go
         c1, c2 = st.columns(2)
         with c1:
             gfig = go.Figure(go.Indicator(
@@ -1456,7 +1505,7 @@ elif selected_tab == "Results":
                     threshold=dict(line=dict(color=COLOR_GAS, width=4), thickness=0.9, value=eur_g),
                 )
             ))
-            gfig.update_layout(height=280, template="plotly_white", margin=dict(l=10,r=10,t=50,b=10))
+            gfig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(gfig, use_container_width=True, theme=None)
         with c2:
             ofig = go.Figure(go.Indicator(
@@ -1471,7 +1520,7 @@ elif selected_tab == "Results":
                     threshold=dict(line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o),
                 )
             ))
-            ofig.update_layout(height=280, template="plotly_white", margin=dict(l=10,r=10,t=50,b=10))
+            ofig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
             st.plotly_chart(ofig, use_container_width=True, theme=None)
 
         # --------- RATE vs TIME (log time, dual axis, pro styling) ----------
@@ -1485,18 +1534,18 @@ elif selected_tab == "Results":
             # Gas on left (red)
             if qg is not None:
                 fig_rate.add_trace(
-                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(color="red", width=2)),
+                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(color=COLOR_GAS, width=3)),
                     secondary_y=False
                 )
             # Liquids on right (Oil=green, Water=blue)
             if qo is not None:
                 fig_rate.add_trace(
-                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(color="green", width=2)),
+                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(color=COLOR_OIL, width=3)),
                     secondary_y=True
                 )
             if qw is not None:
                 fig_rate.add_trace(
-                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(color="blue", width=1.5, dash="dot")),
+                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(color=COLOR_WATER, width=2, dash="dot")),
                     secondary_y=True
                 )
             fig_rate.update_layout(
