@@ -727,16 +727,36 @@ def generate_property_volumes(state):
     st.success("Successfully generated 3D property volumes!")
 
 
-# --- Engine wrapper (drop-in replacement) ---
 def run_simulation_engine(state):
     import time
     import numpy as np
     from scipy.integrate import cumulative_trapezoid
     from core.full3d import simulate
+
     t0 = time.time()
+
+    # Detect resource class from the selected play name
+    play_name = st.session_state.get("play_sel", "")
+    _s = play_name.lower()
+    if "condensate" in _s:
+        resource_class = "Condensate"
+    elif "dry gas" in _s or ("gas" in _s and "oil" not in _s and "liquids" not in _s and "condensate" not in _s):
+        resource_class = "Gas"
+    elif "liquids" in _s:
+        resource_class = "Liquids"
+    else:
+        resource_class = "Oil"
+
+    # Respect the UI but fail-safe: analytical proxy is gas-heavy for oil-window plays.
+    chosen_engine = st.session_state.get("engine_type", "")
+    engine_for_run = (
+        "implicit" if (resource_class in ("Oil", "Liquids") and "Analytical" in chosen_engine)
+        else ("implicit" if "Implicit" in chosen_engine else "analytical")
+    )
+
     # Build a lean inputs dict from your UI 'state'
     inputs = {
-        "engine": "implicit" if "Implicit" in str(state.get("engine_type", "")) else "analytical",
+        "engine": engine_for_run,
         "nx": int(state.get("nx", 20)),
         "ny": int(state.get("ny", 20)),
         "nz": int(state.get("nz", 5)),
@@ -752,7 +772,7 @@ def run_simulation_engine(state):
         "no": float(state.get("no", 2.0)),
         "krw_end": float(state.get("krw_end", 0.6)),
         "kro_end": float(state.get("kro_end", 0.8)),
-        # PVT (analytical/implicit share these)
+        # PVT
         "pb_psi": float(state.get("pb_psi", 3000.0)),
         "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
         "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)),
@@ -762,7 +782,7 @@ def run_simulation_engine(state):
         "control": str(state.get("pad_ctrl", "BHP")),
         "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)),
         "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
-        "rate_stbd": float(state.get("pad_rate_stbd", 0.0)),
+        "rate_stbd": float(state.get("rate_stbd", 0.0)),
         # time controls
         "dt_days": float(state.get("dt_days", 30.0)),
         "t_end_days": float(state.get("t_end_days", 3650.0)),
@@ -770,37 +790,88 @@ def run_simulation_engine(state):
         "use_gravity": bool(state.get("use_gravity", True)),
         "kvkh": float(state.get("kvkh", 0.10)),
         "geo_alpha": float(state.get("geo_alpha", 0.0)),
-        # --- EUR options (defaults per spec) ---
-        "eur_cutoff_days": float(state.get("eur_cutoff_days", 30.0*365.25)),
+        # --- baseline EUR options (kept for backward compat) ---
+        "eur_cutoff_days": float(state.get("eur_cutoff_days", 30.0 * 365.25)),
         "eur_min_rate_gas_mscfd": float(state.get("eur_min_rate_gas_mscfd", 100.0)),
         "eur_min_rate_oil_stbd": float(state.get("eur_min_rate_oil_stbd", 30.0)),
     }
+
+    # ---- EUR cutoff policy by resource class (days & rates) ----
+    if resource_class in ("Oil", "Liquids"):
+        eur_cutoffs = dict(max_years=20.0, oil_min_stbd=60.0, gas_min_mscfd=300.0)
+    elif resource_class in ("Condensate",):
+        eur_cutoffs = dict(max_years=25.0, oil_min_stbd=40.0, gas_min_mscfd=200.0)
+    else:  # Gas plays
+        eur_cutoffs = dict(max_years=30.0, oil_min_stbd=5.0, gas_min_mscfd=50.0)
+
+    # Allow UI overrides but clamp/tighten for liquids windows
+    eur_cutoff_days_ui = float(state.get("eur_cutoff_days", eur_cutoffs["max_years"] * 365.25))
+    eur_min_gas_ui     = float(state.get("eur_min_rate_gas_mscfd", eur_cutoffs["gas_min_mscfd"]))
+    eur_min_oil_ui     = float(state.get("eur_min_rate_oil_stbd",  eur_cutoffs["oil_min_stbd"]))
+    if resource_class in ("Oil", "Liquids", "Condensate"):
+        eur_cutoff_days_ui = min(eur_cutoff_days_ui, eur_cutoffs["max_years"] * 365.25)
+        eur_min_gas_ui     = max(eur_min_gas_ui,     eur_cutoffs["gas_min_mscfd"])
+        eur_min_oil_ui     = max(eur_min_oil_ui,     eur_cutoffs["oil_min_stbd"])
+
+    # Update inputs (kept keys + aliases)
+    inputs.update({
+        "eur_cutoff_days": eur_cutoff_days_ui,
+        "eur_min_rate_gas_mscfd": eur_min_gas_ui,
+        "eur_min_rate_oil_stbd": eur_min_oil_ui,
+        "eur_max_years": eur_cutoffs["max_years"],
+        "eur_oil_min_stbd": eur_cutoffs["oil_min_stbd"],
+        "eur_gas_min_mscfd": eur_cutoffs["gas_min_mscfd"],
+    })
+
     try:
         out = simulate(inputs)
     except Exception as e:
         st.error(f"Simulation error: {e}")
         return None
+
     # ---- unpack time series ----
     t = out.get("t")
-    qg = out.get("qg")  # expected Mscf/d for display
+    qg = out.get("qg")  # expected Mscf/d
     qo = out.get("qo")  # STB/d
-    qw = out.get("qw")  # STB/d (may be None)
+    qw = out.get("qw")  # STB/d
     if t is None or (qg is None and qo is None):
         st.error("Engine did not return time series.")
         return None
-    # ---- cumulative & EURs with economic cutoffs & max horizon ----
-    eur = compute_cum_and_eur_fixed(
-        t=t, qg=qg, qo=qo, qw=qw,
-        eur_cutoff_days=inputs.get("eur_cutoff_days", 30.0*365.25),
-        min_gas_rate_mscfd=inputs.get("eur_min_rate_gas_mscfd", 100.0),
-        min_oil_rate_stbd=inputs.get("eur_min_rate_oil_stbd", 30.0),
-    )
-    cum_g_BCF  = eur["cum_g_BCF"]
-    cum_o_MMBO = eur["cum_o_MMBO"]
-    cum_w_MMBL = eur["cum_w_MMBL"]
-    EUR_g_BCF  = eur["EUR_g_BCF"]
-    EUR_o_MMBO = eur["EUR_o_MMBO"]
-    EUR_w_MMBL = eur["EUR_w_MMBL"]
+
+    # ---- apply EUR cutoffs (resource-aware) BEFORE integration ----
+    t = np.asarray(t, float)
+    mask_time = t <= (eur_cutoffs["max_years"] * 365.25)
+    # Use safe arrays
+    qg_arr = np.nan_to_num(np.asarray(qg, float), nan=0.0)
+    qo_arr = np.nan_to_num(np.asarray(qo, float), nan=0.0)
+    qw_arr = np.nan_to_num(np.asarray(qw, float), nan=0.0) if qw is not None else None
+    # Rate thresholds
+    qg_arr[qg_arr < eur_cutoffs["gas_min_mscfd"]] = 0.0
+    qo_arr[qo_arr < eur_cutoffs["oil_min_stbd"]] = 0.0
+    if qw_arr is not None:
+        qw_arr[qw_arr < 0.0] = 0.0
+    # Apply time mask
+    t_cut = t[mask_time]
+    qg_cut = qg_arr[mask_time] if qg is not None else None
+    qo_cut = qo_arr[mask_time] if qo is not None else None
+    qw_cut = qw_arr[mask_time] if qw_arr is not None else None
+
+    # ---- cumulative & EURs (unit-safe) ----
+    def _cum(y, tt):
+        if y is None:
+            return None
+        return cumulative_trapezoid(y, tt, initial=0.0)
+
+    cum_g_Mscf = _cum(qg_cut, t_cut)
+    cum_o_STB  = _cum(qo_cut, t_cut)
+    cum_w_STB  = _cum(qw_cut, t_cut) if qw_cut is not None else None
+
+    EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0  # (Mscf) / 1e6 -> BCF
+    EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # (STB)  / 1e6 -> MMBO
+    EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0
+
+    # Keep the cut series for plots too
+    t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
 
     # ---- Midland guardrails + basic PVT/GOR consistency check ----
     ok_eur, eur_msg = validate_midland_eur(
@@ -808,6 +879,12 @@ def run_simulation_engine(state):
         pb_psi=float(state.get("pb_psi", 1.0)),
         Rs_pb=float(state.get("Rs_pb_scf_stb", 0.0)),
     )
+
+    # Convert cum arrays for UI (BCF/MMBO/MMBL) if present
+    cum_g_BCF  = (cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None
+    cum_o_MMBO = (cum_o_STB  / 1e6) if cum_o_STB  is not None else None
+    cum_w_MMBL = (cum_w_STB  / 1e6) if cum_w_STB  is not None else None
+
     # ---- final dict back to UI ----
     final = dict(
         t=t,
@@ -824,11 +901,13 @@ def run_simulation_engine(state):
         eur_validation_msg=str(eur_msg),
         runtime_s=time.time() - t0,
     )
+
     # pass through 3D/QA arrays if present
     for k in ("press_matrix", "p_init_3d", "ooip_3d", "p_avg_psi", "pm_mid_psi"):
         if k in out:
             final[k] = out[k]
     return final
+
 
 
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
