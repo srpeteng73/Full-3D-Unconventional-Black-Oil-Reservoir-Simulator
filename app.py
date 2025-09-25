@@ -1438,9 +1438,9 @@ elif selected_tab == "Results":
     if sim is None:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
-        st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
+st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-        # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+# --- Sanity gate: block publishing if EURs are out-of-bounds ---
 eur_g = float(sim.get("EUR_g_BCF", 0.0))
 eur_o = float(sim.get("EUR_o_MMBO", 0.0))
 
@@ -1475,45 +1475,47 @@ if issues:
     )
     st.stop()
 
-        # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-        # (Gauge max scaled from play-aware sanity bounds)
-        gas_hi = b["gas_bcf"][1]
-        oil_hi = b["oil_mmbo"][1]
-        gmax   = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
-        omax   = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
+# --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
+eur_g = float(sim.get("EUR_g_BCF", 0.0))
+eur_o = float(sim.get("EUR_o_MMBO", 0.0))
 
-        import plotly.graph_objects as go
-        c1, c2 = st.columns(2)
-        with c1:
-            gfig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=eur_g,
-                number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
-                title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
-                gauge=dict(
-                    axis=dict(range=[0, gmax], tickwidth=1.2),
-                    bar=dict(color=COLOR_GAS, thickness=0.28),
-                    steps=[dict(range=[0, 0.6*gmax], color="rgba(0,0,0,0.05)")],
-                    threshold=dict(line=dict(color=COLOR_GAS, width=4), thickness=0.9, value=eur_g),
-                )
-            ))
-            gfig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
-            st.plotly_chart(gfig, use_container_width=True, theme=None)
-        with c2:
-            ofig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=eur_o,
-                number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
-                title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
-                gauge=dict(
-                    axis=dict(range=[0, omax], tickwidth=1.2),
-                    bar=dict(color=COLOR_OIL, thickness=0.28),
-                    steps=[dict(range=[0, 0.6*omax], color="rgba(0,0,0,0.05)")],
-                    threshold=dict(line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o),
-                )
-            ))
-            ofig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
-            st.plotly_chart(ofig, use_container_width=True, theme=None)
+gas_hi = b["gas_bcf"][1]
+oil_hi = b["oil_mmbo"][1]
+gmax   = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
+omax   = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
+
+c1, c2 = st.columns(2)
+with c1:
+    gfig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=eur_g,
+        number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
+        title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
+        gauge=dict(
+            axis=dict(range=[0, gmax], tickwidth=1.2),
+            bar=dict(color=COLOR_GAS, thickness=0.28),
+            steps=[dict(range=[0, 0.6*gmax], color="rgba(0,0,0,0.05)")],
+            threshold=dict(line=dict(color=COLOR_GAS, width=4), thickness=0.9, value=eur_g),
+        )
+    ))
+    gfig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
+    st.plotly_chart(gfig, use_container_width=True, theme=None)
+
+with c2:
+    ofig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=eur_o,
+        number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
+        title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
+        gauge=dict(
+            axis=dict(range=[0, omax], tickwidth=1.2),
+            bar=dict(color=COLOR_OIL, thickness=0.28),
+            steps=[dict(range=[0, 0.6*omax], color="rgba(0,0,0,0.05)")],
+            threshold=dict(line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o),
+        )
+    ))
+    ofig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
+    st.plotly_chart(ofig, use_container_width=True, theme=None)
 
         # --------- RATE vs TIME (log time, dual axis, pro styling) ----------
         from plotly.subplots import make_subplots
