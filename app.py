@@ -75,19 +75,26 @@ def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
     msgs = []
     ok = True
+
     if EUR_o_MMBO < lo_o or EUR_o_MMBO > hi_o:
         ok = False
         msgs.append(f"Oil EUR {EUR_o_MMBO:.2f} MMBO outside Midland sanity [{lo_o}, {hi_o}] MMBO.")
     if EUR_g_BCF < lo_g or EUR_g_BCF > hi_g:
         ok = False
         msgs.append(f"Gas EUR {EUR_g_BCF:.2f} BCF outside Midland sanity [{lo_g}, {hi_g}] BCF.")
-    # basic GOR sanity if oil > 0 and Rs_pb provided
+
+    # --- tolerance-aware PVT/GOR consistency ---
     if EUR_o_MMBO > 0 and Rs_pb not in (None, 0):
-        implied_GOR = (EUR_g_BCF*1e9) / (EUR_o_MMBO*1e6)  # scf/STB
-        # allow ~0.3x..3x around Rs_pb window
-        if implied_GOR > 3.0*float(Rs_pb) and (pb_psi or 0) > 1.0:
+        implied_GOR = (EUR_g_BCF * 1e9) / (EUR_o_MMBO * 1e6)  # scf/STB
+        limit = 3.0 * float(Rs_pb)  # ~3× Rs at pb
+        tol = 1e-6                  # tiny numerical slack
+        if implied_GOR > (limit + tol) and (pb_psi or 0) > 1.0:
             ok = False
-            msgs.append(f"Implied EUR GOR {implied_GOR:,.0f} scf/STB inconsistent with Rs(pb)≈{Rs_pb:,.0f} (runaway gas).")
+            msgs.append(
+                f"Implied EUR GOR {implied_GOR:,.0f} scf/STB inconsistent with Rs(pb)≈{Rs_pb:,.0f} "
+                f"(>{limit:,.0f})."
+            )
+
     return ok, " ".join(msgs) if msgs else "OK"
 
 def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
