@@ -1435,71 +1435,104 @@ elif selected_tab == "Results":
                 st.session_state.sim = sim_out
 
     sim = st.session_state.get("sim")
-    if sim is None:
-        st.info("Click **Run simulation** to compute and display the full 3D results.")
-    else:
-st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-# --- Sanity gate: block publishing if EURs are out-of-bounds ---
-eur_g = float(sim.get("EUR_g_BCF", 0.0))
-eur_o = float(sim.get("EUR_o_MMBO", 0.0))
+if sim is None:
+    st.info("Click **Run simulation** to compute and display the full 3D results.")
+else:
+    st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-play_name = st.session_state.get("play_sel", "")
-b = _sanity_bounds_for_play(play_name)
+    # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+    eur_g = float(sim.get("EUR_g_BCF", 0.0))
+    eur_o = float(sim.get("EUR_o_MMBO", 0.0))
 
-# Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against /0
-implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
+    play_name = st.session_state.get("play_sel", "")
+    b = _sanity_bounds_for_play(play_name)
 
-# Cap with tiny tolerance so equality doesn't trip the check
-gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
-tol = 1e-6  # allow equality within numerical noise
+    # Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against /0
+    implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
 
-issues = []
-if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-    issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
-if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
-    issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
-if implied_eur_gor > (gor_cap + tol):
-    issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
+    # Cap with tiny tolerance so equality doesn't trip the check
+    gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
+    tol = 1e-6  # allow equality within numerical noise
 
-if issues:
-    # Soft guidance if user picked Analytical on an oil-window play
-    hint = ""
-    chosen_engine = st.session_state.get("engine_type", "")
-    if "Analytical" in chosen_engine and b["max_eur_gor_scfstb"] <= 3000.0:
-        hint = " Tip: switch to an Implicit engine for oil-window plays."
-
-    st.error(
-        "Production results failed sanity checks and were not published.\n\n"
-        "Details:\n- " + "\n- ".join(issues) + hint
-    )
-    st.stop()
-
-# --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-eur_g = float(sim.get("EUR_g_BCF", 0.0))
-eur_o = float(sim.get("EUR_o_MMBO", 0.0))
-
-gas_hi = b["gas_bcf"][1]
-oil_hi = b["oil_mmbo"][1]
-gmax   = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
-omax   = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
-
-c1, c2 = st.columns(2)
-with c1:
-    gfig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=eur_g,
-        number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
-        title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
-        gauge=dict(
-            axis=dict(range=[0, gmax], tickwidth=1.2),
-            bar=dict(color=COLOR_GAS, thickness=0.28),
-            steps=[dict(range=[0, 0.6*gmax], color="rgba(0,0,0,0.05)")],
-            threshold=dict(line=dict(color=COLOR_GAS, width=4), thickness=0.9, value=eur_g),
+    issues = []
+    if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+        issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+    if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+        issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
+    if implied_eur_gor > (gor_cap + tol):
+        issues.append(
+            f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
         )
-    ))
-    gfig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
-    st.plotly_chart(gfig, use_container_width=True, theme=None)
+
+    if issues:
+        # Soft guidance if user picked Analytical on an oil-window play
+        hint = ""
+        chosen_engine = st.session_state.get("engine_type", "")
+        if "Analytical" in chosen_engine and b["max_eur_gor_scfstb"] <= 3000.0:
+            hint = " Tip: switch to an Implicit engine for oil-window plays."
+
+        st.error(
+            "Production results failed sanity checks and were not published.\n\n"
+            "Details:\n- " + "\n- ".join(issues) + hint
+        )
+        st.stop()
+
+    # ---- Validation gate (engine-side) ----
+    eur_valid = bool(sim.get("eur_valid", True))
+    eur_msg = sim.get("eur_validation_msg", "OK")
+    if not eur_valid:
+        st.error(
+            "Production results failed sanity checks and were not published.\n\n"
+            f"Details: {eur_msg}\n\n"
+            "Please review PVT, controls, and units; then re-run.",
+            icon="🚫"
+        )
+        st.stop()
+
+    # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
+    eur_g = float(sim.get("EUR_g_BCF", 0.0))
+    eur_o = float(sim.get("EUR_o_MMBO", 0.0))
+
+    gas_hi = b["gas_bcf"][1]
+    oil_hi = b["oil_mmbo"][1]
+    gmax = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
+    omax = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        gfig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=eur_g,
+            number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
+            title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
+            gauge=dict(
+                axis=dict(range=[0, gmax], tickwidth=1.2),
+                bar=dict(color=COLOR_GAS, thickness=0.28),
+                steps=[dict(range=[0, 0.6 * gmax], color="rgba(0,0,0,0.05)")],
+                threshold=dict(line=dict(color=COLOR_GAS, width=4), thickness=0.9, value=eur_g),
+            )
+        ))
+        gfig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
+        st.plotly_chart(gfig, use_container_width=True, theme=None)
+
+    with c2:
+        ofig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=eur_o,
+            number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
+            title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
+            gauge=dict(
+                axis=dict(range=[0, omax], tickwidth=1.2),
+                bar=dict(color=COLOR_OIL, thickness=0.28),
+                steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
+                threshold=dict(line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o),
+            )
+        ))
+        ofig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
+        st.plotly_chart(ofig, use_container_width=True, theme=None)
+
+    # (…keep the rest of the Results tab: rate/cumulative plots, etc., at this same indent level)
 
 with c2:
     ofig = go.Figure(go.Indicator(
