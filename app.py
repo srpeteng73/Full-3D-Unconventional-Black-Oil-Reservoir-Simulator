@@ -869,20 +869,25 @@ def run_simulation_engine(state):
     EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # (STB) /1e6 -> MMBO
     EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0
 
-    # ---- GOR-consistency cap for oil-window style plays ----
-    # Get play-specific sanity bounds (requires your helper defined above)
+      # ---- GOR-consistency cap for oil-window style plays ----
+    # Get play-specific sanity bounds (requires _sanity_bounds_for_play(play_name))
     b = _sanity_bounds_for_play(play_name)
     if b and EUR_o_MMBO > 0:
-        implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)  # scf/STB
-        if implied_eur_gor > b.get("max_eur_gor_scfstb", 2000.0):
-            # Limit total produced gas to <= max_gor * produced oil
-            max_gas_scf = b["max_eur_gor_scfstb"] * (EUR_o_MMBO * 1e6)  # scf
-            cur_gas_scf = (EUR_g_BCF * 1e9) / 1e3  # BCF -> scf (1 BCF = 1e9 scf)
+        # Implied EUR GOR (scf/STB)
+        implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
+
+        max_gor = float(b.get("max_eur_gor_scfstb", 2000.0))
+        if implied_eur_gor > max_gor:
+            # Limit total produced gas so EUR_gas (scf) <= max_gor * EUR_oil (STB)
+            max_gas_scf = max_gor * (EUR_o_MMBO * 1e6)      # oil MMBO -> STB, then × max GOR => scf
+            cur_gas_scf = EUR_g_BCF * 1e9                   # BCF -> scf  (1 BCF = 1e9 scf)
+
             scale = max(0.0, min(1.0, max_gas_scf / max(cur_gas_scf, 1e-12)))
-            if scale < 1.0:
-                qg_cut *= scale
-                cum_g_Mscf = _cum(qg_cut, t_cut)
-                EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6)
+            if scale < 1.0 and qg_cut is not None:
+                qg_cut = np.asarray(qg_cut, float) * scale
+                # Recompute cumulative & EUR with the scaled gas
+                cum_g_Mscf = cumulative_trapezoid(qg_cut, t_cut, initial=0.0)    # Mscf
+                EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf.size else 0.0
 
     # Keep the cut series for plots, QA, and Results tab
     t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
