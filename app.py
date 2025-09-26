@@ -176,6 +176,11 @@ def _setdefault(k, v):
         st.session_state[k] = v
 
 
+def _on_play_change():
+    # Clear prior results so the UI cannot show stale EURs
+    st.session_state.sim = None
+
+
 def _safe_rerun():
     if hasattr(st, "rerun"):
         st.rerun()
@@ -988,18 +993,15 @@ with st.sidebar:
         "black_oil" if "Black Oil" in model_choice else "unconventional"
     )
     # ---- Shale play selector with tiny resource tag on the right ----
-    st.markdown("Shale Play Preset")
-    sel_col, tag_col = st.columns([0.78, 0.22])
-    with sel_col:
-        # hide the inner label to keep the row compact
-        play = st.selectbox(
+           play = st.selectbox(
             "play_selector",
             PLAY_LIST,
             index=0,
             key="play_sel",
             label_visibility="collapsed",
+            on_change=_on_play_change,  # <-- clears cached sim when play changes
         )
-    with tag_col:
+ with tag_col:
         def _resource_label(name: str) -> str:
             s = name.lower()
             if "dry gas" in s or ("gas" in s and "oil" not in s and "condensate" not in s and "liquids" not in s):
