@@ -993,7 +993,7 @@ with st.sidebar:
         "black_oil" if "Black Oil" in model_choice else "unconventional"
     )
     # ---- Shale play selector with tiny resource tag on the right ----
-           play = st.selectbox(
+     play = st.selectbox(
             "play_selector",
             PLAY_LIST,
             index=0,
