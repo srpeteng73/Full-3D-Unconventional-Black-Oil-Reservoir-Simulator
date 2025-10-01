@@ -1746,8 +1746,6 @@ elif selected_tab == "Results":
         else:
             st.warning("Cumulative series not available.")
 
-***
-
 ### Part 2 of 2: Corrected Code
 
 
