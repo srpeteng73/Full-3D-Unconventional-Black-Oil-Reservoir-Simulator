@@ -1748,8 +1748,6 @@ else:
     st.warning("Cumulative series not available.")
 # ======== end Results tab semi-log plots ========
 
-#### Part 4: Main Application UI - Advanced and Visualization Tabs ####
-
 # #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
@@ -1913,6 +1911,7 @@ elif selected_tab == "3D Viewer":
         )
 
         st.plotly_chart(fig3d, use_container_width=True)
+
 
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
