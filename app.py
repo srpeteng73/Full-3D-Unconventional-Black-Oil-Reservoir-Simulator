@@ -1010,12 +1010,9 @@ with st.sidebar:
         "black_oil" if "Black Oil" in model_choice else "unconventional"
     )
 
-# ---- Shale play selector with a tiny resource tag on the right ----
-st.markdown("Shale Play Preset")
+    # ---- Shale play selector with a tiny resource tag on the right ----
+    st.markdown("### Shale Play Preset")
 
-sel_col, tag_col = st.columns([0.78, 0.22])
-
-with sel_col:
     # Keep currently selected play if present, otherwise default to the first item
     _current_play = st.session_state.get("play_sel", PLAY_LIST[0])
     try:
@@ -1024,7 +1021,7 @@ with sel_col:
         _default_idx = 0
 
     play = st.selectbox(
-        "play_selector",
+        "Select a Play",
         PLAY_LIST,
         index=_default_idx,
         key="play_sel",
@@ -1032,7 +1029,6 @@ with sel_col:
         on_change=_on_play_change,  # <-- clears results immediately on change
     )
 
-with tag_col:
     def _resource_label(name: str) -> str:
         s = (name or "").lower()
         if "dry gas" in s or ("gas" in s and "oil" not in s and "condensate" not in s and "liquids" not in s):
@@ -1048,7 +1044,7 @@ with tag_col:
     res = _resource_label(play)
     st.markdown(
         f"""
-        <div style="margin-top:6px; text-align:right;">
+        <div style="margin-top:-5px; text-align:right;">
           <span style="
             display:inline-block;
             padding:2px 8px;
@@ -1057,7 +1053,7 @@ with tag_col:
             border:1px solid #b6d4fe;
             font-size:11px;
             color:#0b5ed7;
-            white-space:nowrap;">{res}</span>
+            white-space:nowrap;">Resource: {res}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1090,13 +1086,20 @@ with tag_col:
 
     st.markdown("### Grid (ft)")
     c1, c2, c3 = st.columns(3)
-    st.number_input("nx", 1, 500, key="nx")
-    st.number_input("ny", 1, 500, key="ny")
-    st.number_input("nz", 1, 200, key="nz")
+    with c1:
+        st.number_input("nx", 1, 500, key="nx")
+    with c2:
+        st.number_input("ny", 1, 500, key="ny")
+    with c3:
+        st.number_input("nz", 1, 200, key="nz")
+
     c1, c2, c3 = st.columns(3)
-    st.number_input("dx (ft)", step=1.0, key="dx")
-    st.number_input("dy (ft)", step=1.0, key="dy")
-    st.number_input("dz (ft)", step=1.0, key="dz")
+    with c1:
+        st.number_input("dx (ft)", step=1.0, key="dx")
+    with c2:
+        st.number_input("dy (ft)", step=1.0, key="dy")
+    with c3:
+        st.number_input("dz (ft)", step=1.0, key="dz")
 
     st.markdown("### Heterogeneity & Anisotropy")
     st.selectbox("Facies style", ["Continuous (Gaussian)", "Speckled (high-variance)", "Layered (vertical bands)"], key="facies_style")
@@ -1184,10 +1187,10 @@ with tag_col:
     st.markdown("##### Omar Nur, Petroleum Engineer")
     st.markdown("---")
 
+
 state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
 
 #### Part 3: Main Application UI - Primary Workflow Tabs ####
-
 # --- Tab list ---
 tab_names = [
     "Setup Preview",
