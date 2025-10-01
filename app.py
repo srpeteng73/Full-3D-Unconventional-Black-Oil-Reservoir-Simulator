@@ -1745,13 +1745,12 @@ elif selected_tab == "Results":
             st.plotly_chart(fig_cum, use_container_width=True, theme=None)
         else:
             st.warning("Cumulative series not available.")
-```
 
 ***
 
 ### Part 2 of 2: Corrected Code
 
-```python
+
 # #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
