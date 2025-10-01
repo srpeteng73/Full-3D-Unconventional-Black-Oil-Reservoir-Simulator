@@ -992,204 +992,141 @@ def run_simulation_engine(state):
     return final
 
 
+# PASTE THIS NEW, COMPLETE SIDEBAR BLOCK IN ITS PLACE
+
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
-    st.markdown("### Engine & Presets")
-    # Engine Type
-    engine_type_ui = st.selectbox(
-        "Engine Type",
-        ENGINE_TYPES,
-        key="engine_type_ui",
-        help="Choose the calculation engine. Phase 1a/1b are the developing implicit engines; the analytical model is a fast proxy.",
-    )
-    st.session_state["engine_type"] = engine_type_ui
-    # Model Type
-    model_choice = st.selectbox("Model Type", VALID_MODEL_TYPES, key="sim_mode")
-    st.session_state.fluid_model = (
-        "black_oil" if "Black Oil" in model_choice else "unconventional"
-    )
+    
+    # --- All controls are now correctly inside the sidebar ---
 
-    # ---- Shale play selector with a tiny resource tag on the right ----
-    st.markdown("### Shale Play Preset")
+    with st.expander("Engine & Presets", expanded=True):
+        engine_type_ui = st.selectbox(
+            "Engine Type",
+            ENGINE_TYPES,
+            key="engine_type_ui",
+            help="Choose the calculation engine. Phase 1a/1b are the developing implicit engines; the analytical model is a fast proxy.",
+        )
+        st.session_state["engine_type"] = engine_type_ui
+        model_choice = st.selectbox("Model Type", VALID_MODEL_TYPES, key="sim_mode")
+        st.session_state.fluid_model = (
+            "black_oil" if "Black Oil" in model_choice else "unconventional"
+        )
 
-    # Keep currently selected play if present, otherwise default to the first item
-    _current_play = st.session_state.get("play_sel", PLAY_LIST[0])
-    try:
-        _default_idx = PLAY_LIST.index(_current_play)
-    except ValueError:
-        _default_idx = 0
+    with st.expander("Shale Play Preset", expanded=True):
+        _current_play = st.session_state.get("play_sel", PLAY_LIST[0])
+        try:
+            _default_idx = PLAY_LIST.index(_current_play)
+        except ValueError:
+            _default_idx = 0
 
-    play = st.selectbox(
-        "Select a Play",
-        PLAY_LIST,
-        index=_default_idx,
-        key="play_sel",
-        label_visibility="collapsed",
-        on_change=_on_play_change,  # <-- clears results immediately on change
-    )
+        play = st.selectbox(
+            "Select a Play",
+            PLAY_LIST,
+            index=_default_idx,
+            key="play_sel",
+            label_visibility="visible", # Use a visible label in the sidebar
+            on_change=_on_play_change,
+        )
 
-    def _resource_label(name: str) -> str:
-        s = (name or "").lower()
-        if "dry gas" in s or ("gas" in s and "oil" not in s and "condensate" not in s and "liquids" not in s):
-            return "Gas"
-        if "condensate" in s:
-            return "Condensate"
-        if "liquids" in s:
-            return "Liquids"
-        if "oil" in s:
-            return "Oil"
-        return "Mixed"
-
-    res = _resource_label(play)
-    st.markdown(
-        f"""
-        <div style="margin-top:-5px; text-align:right;">
-          <span style="
-            display:inline-block;
-            padding:2px 8px;
-            border-radius:999px;
-            background:#eef6ff;
-            border:1px solid #b6d4fe;
-            font-size:11px;
-            color:#0b5ed7;
-            white-space:nowrap;">Resource: {res}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Apply preset button (full width)
-    apply_clicked = st.button("Apply Preset", use_container_width=True, type="primary")
-    if apply_clicked:
-        payload = defaults.copy()
-        payload.update(PLAY_PRESETS[st.session_state.play_sel])
-        # Nudge to black-oil friendly defaults if needed
-        if st.session_state.fluid_model == "black_oil":
-            payload.update(
-                dict(
-                    Rs_pb_scf_stb=0.0,
-                    pb_psi=1.0,
-                    Bo_pb_rb_stb=1.00,
-                    mug_pb_cp=0.020,
-                    a_g=0.15,
-                    p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),
-                    pad_ctrl="BHP",
-                    pad_bhp_psi=min(
-                        float(payload.get("p_init_psi", 5200.0)) - 500.0, 3000.0
-                    ),
+        apply_clicked = st.button("Apply Preset", use_container_width=True, type="primary")
+        if apply_clicked:
+            payload = defaults.copy()
+            payload.update(PLAY_PRESETS[st.session_state.play_sel])
+            if st.session_state.fluid_model == "black_oil":
+                payload.update(
+                    dict(
+                        Rs_pb_scf_stb=0.0, pb_psi=1.0, Bo_pb_rb_stb=1.00,
+                        p_init_psi=max(3500.0, float(payload.get("p_init_psi", 5200.0))),
+                    )
                 )
-            )
-        st.session_state.sim = None
-        st.session_state.apply_preset_payload = payload
-        _safe_rerun()
+            st.session_state.sim = None
+            st.session_state.apply_preset_payload = payload
+            _safe_rerun()
 
-    st.markdown("### Grid (ft)")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.number_input("nx", 1, 500, key="nx")
-    with c2:
-        st.number_input("ny", 1, 500, key="ny")
-    with c3:
-        st.number_input("nz", 1, 200, key="nz")
+    with st.expander("Grid & Heterogeneity", expanded=False):
+        st.markdown("#### Grid (ft)")
+        c1, c2, c3 = st.columns(3)
+        with c1: st.number_input("nx", 1, 500, key="nx")
+        with c2: st.number_input("ny", 1, 500, key="ny")
+        with c3: st.number_input("nz", 1, 200, key="nz")
+        c1, c2, c3 = st.columns(3)
+        with c1: st.number_input("dx", step=1.0, key="dx")
+        with c2: st.number_input("dy", step=1.0, key="dy")
+        with c3: st.number_input("dz", step=1.0, key="dz")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.number_input("dx (ft)", step=1.0, key="dx")
-    with c2:
-        st.number_input("dy (ft)", step=1.0, key="dy")
-    with c3:
-        st.number_input("dz (ft)", step=1.0, key="dz")
+        st.markdown("#### Heterogeneity & Anisotropy")
+        st.selectbox("Facies style", ["Continuous (Gaussian)", "Speckled (high-variance)", "Layered (vertical bands)"], key="facies_style")
+        st.slider("k stdev", 0.0, 0.20, float(st.session_state.k_stdev), 0.01, key="k_stdev", help="Standard deviation for permeability field generation.")
+        st.slider("ϕ stdev", 0.0, 0.20, float(st.session_state.phi_stdev), 0.01, key="phi_stdev", help="Standard deviation for porosity field generation.")
+        st.slider("Anisotropy kx/ky", 0.5, 3.0, float(st.session_state.anis_kxky), 0.05, key="anis_kxky")
 
-    st.markdown("### Heterogeneity & Anisotropy")
-    st.selectbox("Facies style", ["Continuous (Gaussian)", "Speckled (high-variance)", "Layered (vertical bands)"], key="facies_style")
-    st.slider("k stdev (mD around 0.02)", 0.0, 0.20, float(st.session_state.k_stdev), 0.01, key="k_stdev")
-    st.slider("ϕ stdev", 0.0, 0.20, float(st.session_state.phi_stdev), 0.01, key="phi_stdev")
-    st.slider("Anisotropy kx/ky", 0.5, 3.0, float(st.session_state.anis_kxky), 0.05, key="anis_kxky")
+    with st.expander("Faults", expanded=False):
+        st.checkbox("Enable fault TMULT", value=bool(st.session_state.use_fault), key="use_fault")
+        fault_plane_choice = st.selectbox("Fault plane", ["i-plane (vertical)", "j-plane (vertical)"], index=0, key="fault_plane")
+        max_idx = int(st.session_state.nx) - 2 if 'i-plane' in fault_plane_choice else int(st.session_state.ny) - 2
+        if st.session_state.fault_index > max_idx: st.session_state.fault_index = max_idx
+        st.number_input("Plane index", 1, max(1, max_idx), key="fault_index")
+        st.number_input("Transmissibility multiplier", value=float(st.session_state.fault_tm), step=0.01, key="fault_tm")
 
-    st.markdown("### Faults")
-    st.checkbox("Enable fault TMULT", value=bool(st.session_state.use_fault), key="use_fault")
-    fault_plane_choice = st.selectbox("Fault plane", ["i-plane (vertical)", "j-plane (vertical)"], index=0, key="fault_plane")
-    if 'i-plane' in fault_plane_choice:
-        max_idx = int(st.session_state.nx) - 2
-    else:
-        max_idx = int(st.session_state.ny) - 2
-    if st.session_state.fault_index > max_idx:
-        st.session_state.fault_index = max_idx
-    st.number_input("Plane index", 1, max(1, max_idx), key="fault_index")
-    st.number_input("Transmissibility multiplier", value=float(st.session_state.fault_tm), step=0.01, key="fault_tm")
+    with st.expander("Pad / Wellbore & Frac", expanded=False):
+        st.number_input("Laterals", 1, 6, int(st.session_state.n_laterals), 1, key="n_laterals")
+        st.number_input("Lateral length (ft)", value=float(st.session_state.L_ft), step=50.0, key="L_ft")
+        st.number_input("Stage spacing (ft)", value=float(st.session_state.stage_spacing_ft), step=5.0, key="stage_spacing_ft")
+        st.number_input("Clusters per stage", 1, 12, int(st.session_state.clusters_per_stage), 1, key="clusters_per_stage")
+        st.number_input("Δp limited-entry (psi)", value=float(st.session_state.dP_LE_psi), step=5.0, key="dP_LE_psi")
+        st.number_input("Wellbore friction factor", value=float(st.session_state.f_fric), format="%.3f", step=0.005, key="f_fric")
+        st.number_input("Wellbore ID (ft)", value=float(st.session_state.wellbore_ID_ft), step=0.01, key="wellbore_ID_ft")
+        st.number_input("Frac half-length xf (ft)", value=float(st.session_state.xf_ft), step=5.0, key="xf_ft")
+        st.number_input("Frac height hf (ft)", value=float(st.session_state.hf_ft), step=5.0, key="hf_ft")
+        st.slider("Pad interference coeff.", 0.00, 0.80, float(st.session_state.pad_interf), 0.01, key="pad_interf")
 
-    st.markdown("### Pad / Wellbore & Frac")
-    st.number_input("Laterals", 1, 6, int(st.session_state.n_laterals), 1, key="n_laterals")
-    st.number_input("Lateral length (ft)", value=float(st.session_state.L_ft), step=50.0, key="L_ft")
-    st.number_input("Stage spacing (ft)", value=float(st.session_state.stage_spacing_ft), step=5.0, key="stage_spacing_ft")
-    st.number_input("Clusters per stage", 1, 12, int(st.session_state.clusters_per_stage), 1, key="clusters_per_stage")
-    st.number_input("Δp limited-entry (psi)", value=float(st.session_state.dP_LE_psi), step=5.0, key="dP_LE_psi")
-    st.number_input("Wellbore friction factor (pseudo)", value=float(st.session_state.f_fric), step=0.005, key="f_fric")
-    st.number_input("Wellbore ID (ft)", value=float(st.session_state.wellbore_ID_ft), step=0.01, key="wellbore_ID_ft")
-    st.number_input("Frac half-length xf (ft)", value=float(st.session_state.xf_ft), step=5.0, key="xf_ft")
-    st.number_input("Frac height hf (ft)", value=float(st.session_state.hf_ft), step=5.0, key="hf_ft")
-    st.slider("Pad interference coeff.", 0.00, 0.80, float(st.session_state.pad_interf), 0.01, key="pad_interf")
+    with st.expander("Controls & Boundary", expanded=False):
+        st.selectbox("Pad control", ["BHP", "RATE"], index=0, key="pad_ctrl")
+        st.number_input("Pad BHP (psi)", value=float(st.session_state.pad_bhp_psi), step=10.0, key="pad_bhp_psi")
+        st.number_input("Pad RATE (Mscf/d)", value=float(st.session_state.pad_rate_mscfd), step=1000.0, key="pad_rate_mscfd")
+        st.selectbox("Outer boundary", ["Infinite-acting", "Constant-p"], index=0, key="outer_bc")
+        st.number_input("Boundary pressure (psi)", value=float(st.session_state.p_outer_psi), step=10.0, key="p_outer_psi")
 
-    st.markdown("### Controls & Boundary")
-    st.selectbox("Pad control", ["BHP", "RATE"], index=0, key="pad_ctrl")
-    st.number_input("Pad BHP (psi)", value=float(st.session_state.pad_bhp_psi), step=10.0, key="pad_bhp_psi")
-    st.number_input("Pad RATE (Mscf/d)", value=float(st.session_state.pad_rate_mscfd), step=1000.0, key="pad_rate_mscfd")
-    st.selectbox("Outer boundary", ["Infinite-acting", "Constant-p"], index=0, key="outer_bc")
-    st.number_input("Boundary pressure (psi)", value=float(st.session_state.p_outer_psi), step=10.0, key="p_outer_psi")
-
-    st.markdown("### DFN (Discrete Fracture Network)")
-    st.checkbox("Use DFN-driven sink in solver", value=bool(st.session_state.use_dfn_sink), key="use_dfn_sink")
-    st.checkbox("Auto-generate DFN from stages when no upload", value=bool(st.session_state.use_auto_dfn), key="use_auto_dfn")
-    st.number_input("DFN influence radius (ft)", value=float(st.session_state.dfn_radius_ft), step=5.0, key="dfn_radius_ft")
-    st.number_input("DFN sink strength (psi)", value=float(st.session_state.dfn_strength_psi), step=10.0, key="dfn_strength_psi")
-    dfn_up = st.file_uploader("Upload DFN CSV: x0,y0,z0,x1,y1,z1[,k_mult,aperture_ft]", type=["csv"], key="dfn_csv")
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Load DFN from CSV"):
-            try:
-                if dfn_up is None:
-                    st.warning("Please choose a DFN CSV first.")
-                else:
+    with st.expander("DFN (Discrete Fracture Network)", expanded=False):
+        st.checkbox("Use DFN-driven sink in solver", value=bool(st.session_state.use_dfn_sink), key="use_dfn_sink")
+        st.checkbox("Auto-generate DFN from stages", value=bool(st.session_state.use_auto_dfn), key="use_auto_dfn")
+        st.number_input("DFN influence radius (ft)", value=float(st.session_state.dfn_radius_ft), step=5.0, key="dfn_radius_ft")
+        st.number_input("DFN sink strength (psi)", value=float(st.session_state.dfn_strength_psi), step=10.0, key="dfn_strength_psi")
+        dfn_up = st.file_uploader("Upload DFN CSV", type=["csv"], key="dfn_csv")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Load DFN"):
+                if dfn_up:
                     st.session_state.dfn_segments = parse_dfn_csv(dfn_up)
-                    st.success(f"Loaded DFN segments: {len(st.session_state.dfn_segments)}")
-            except Exception as e:
-                st.error(f"DFN parse error: {e}")
-    with c2:
-        if st.button("Generate DFN from stages"):
-            segs = gen_auto_dfn_from_stages(
-                int(st.session_state.nx),
-                int(st.session_state.ny),
-                int(st.session_state.nz),
-                float(st.session_state.dx),
-                float(st.session_state.dy),
-                float(st.session_state.dz),
-                float(st.session_state.L_ft),
-                float(st.session_state.stage_spacing_ft),
-                int(st.session_state.n_laterals),
-                float(st.session_state.hf_ft),
-            )
-            st.session_state.dfn_segments = segs
-            st.success(f"Auto-generated DFN segments: {0 if segs is None else len(segs)}")
+                    st.success(f"Loaded {len(st.session_state.dfn_segments)} segments")
+                else: st.warning("Please choose a CSV")
+        with c2:
+            if st.button("Generate DFN"):
+                segs = gen_auto_dfn_from_stages(
+                    int(st.session_state.nx), int(st.session_state.ny), int(st.session_state.nz),
+                    float(st.session_state.dx), float(st.session_state.dy), float(st.session_state.dz),
+                    float(st.session_state.L_ft), float(st.session_state.stage_spacing_ft),
+                    int(st.session_state.n_laterals), float(st.session_state.hf_ft),
+                )
+                st.session_state.dfn_segments = segs
+                st.success(f"Generated {0 if segs is None else len(segs)} segments")
 
-    st.markdown("### Solver & Profiling")
-    st.number_input("Newton tolerance", value=float(st.session_state.newton_tol), format="%.1e", key="newton_tol")
-    st.number_input("Transmissibility tolerance", value=float(st.session_state.trans_tol), format="%.1e", key="trans_tol")
-    st.number_input("Max Newton iterations", value=int(st.session_state.max_newton), step=1, key="max_newton")
-    st.number_input("Max linear solver iterations", value=int(st.session_state.max_lin), step=10, key="max_lin")
-    st.number_input("Threads (0 for auto)", value=int(st.session_state.threads), step=1, key="threads")
-    st.checkbox("Use OpenMP for parallelism", value=bool(st.session_state.use_omp), key="use_omp")
-    st.checkbox("Use Intel MKL for linear algebra", value=bool(st.session_state.use_mkl), key="use_mkl")
-    st.checkbox("Use PyAMG algebraic multigrid solver", value=bool(st.session_state.use_pyamg), key="use_pyamg")
-    st.checkbox("Use NVIDIA cuSPARSE (if GPU available)", value=bool(st.session_state.use_cusparse), key="use_cusparse")
+    with st.expander("Solver & Profiling", expanded=False):
+        st.number_input("Newton tolerance", value=float(st.session_state.newton_tol), format="%.1e", key="newton_tol")
+        st.number_input("Transmissibility tolerance", value=float(st.session_state.trans_tol), format="%.1e", key="trans_tol")
+        st.number_input("Max Newton iterations", value=int(st.session_state.max_newton), step=1, key="max_newton")
+        st.number_input("Max linear solver iterations", value=int(st.session_state.max_lin), step=10, key="max_lin")
+        st.number_input("Threads (0 for auto)", value=int(st.session_state.threads), step=1, key="threads")
+        st.checkbox("Use OpenMP", value=bool(st.session_state.use_omp), key="use_omp")
+        st.checkbox("Use Intel MKL", value=bool(st.session_state.use_mkl), key="use_mkl")
+        st.checkbox("Use PyAMG solver", value=bool(st.session_state.use_pyamg), key="use_pyamg")
+        st.checkbox("Use NVIDIA cuSPARSE", value=bool(st.session_state.use_cusparse), key="use_cusparse")
+        
     st.markdown("---")
     st.markdown("##### Developed by:")
     st.markdown("##### Omar Nur, Petroleum Engineer")
     st.markdown("---")
-
-
-state = {k: st.session_state[k] for k in defaults.keys() if k in st.session_state}
-
 #### Part 3: Main Application UI - Primary Workflow Tabs ####
 # --- Tab list ---
 tab_names = [
