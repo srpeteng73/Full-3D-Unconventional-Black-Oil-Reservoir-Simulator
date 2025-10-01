@@ -1,4 +1,4 @@
-#### Part 1: Application Setup and Core Utilities ####
+##### Part 1: Application Setup and Core Utilities ####
 
 import time
 import numpy as np
