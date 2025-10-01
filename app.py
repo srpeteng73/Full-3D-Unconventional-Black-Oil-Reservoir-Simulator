@@ -1,6 +1,5 @@
 ### Part 1 of 2: Corrected Code
 
-```python
 ##### Part 1: Application Setup and Core Utilities ####
 
 import time
