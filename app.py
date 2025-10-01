@@ -1,3 +1,6 @@
+### Part 1 of 2: Corrected Code
+
+```python
 ##### Part 1: Application Setup and Core Utilities ####
 
 import time
@@ -1644,110 +1647,112 @@ elif selected_tab == "Results":
             )
             st.plotly_chart(ofig, use_container_width=True, theme=None)
 
-       # ======== Results tab: semi-log plots (Rate & Cumulative) ========
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+        # ======== Results tab: semi-log plots (Rate & Cumulative) ========
+        # ----- RATE vs TIME (semi-log time; Gas = left y, Oil/Water = right y) -----
+        t  = sim.get("t")
+        qg = sim.get("qg")  # Mscf/d
+        qo = sim.get("qo")  # STB/d
+        qw = sim.get("qw")  # STB/d
 
-# ----- RATE vs TIME (semi-log time; Gas = left y, Oil/Water = right y) -----
-t  = sim.get("t")
-qg = sim.get("qg")  # Mscf/d
-qo = sim.get("qo")  # STB/d
-qw = sim.get("qw")  # STB/d
+        if t is not None and (qg is not None or qo is not None or qw is not None):
+            fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+            if qg is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2)),
+                    secondary_y=False,
+                )
+            if qo is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2)),
+                    secondary_y=True,
+                )
+            if qw is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot")),
+                    secondary_y=True,
+                )
 
-if t is not None and (qg is not None or qo is not None or qw is not None):
-    fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-    if qg is not None:
-        fig_rate.add_trace(
-            go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2)),
-            secondary_y=False,
-        )
-    if qo is not None:
-        fig_rate.add_trace(
-            go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2)),
-            secondary_y=True,
-        )
-    if qw is not None:
-        fig_rate.add_trace(
-            go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot")),
-            secondary_y=True,
-        )
+            fig_rate.update_layout(
+                template="plotly_white",
+                title_text="<b>Production Rate vs. Time</b>",
+                height=450,
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="right", x=1.0, bgcolor="rgba(255,255,255,0.7)"
+                ),
+                font=dict(size=13),
+                margin=dict(l=10, r=10, t=50, b=10),
+            )
+            fig_rate.update_xaxes(
+                type="log",
+                dtick=1,                              # decades
+                tickvals=[1, 10, 100, 1000, 10000],   # 10^0 ... 10^4 days
+                minor=dict(showgrid=True),
+                showgrid=True, gridwidth=1,
+                title="Time (days)",
+            )
+            fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False, showgrid=True, gridwidth=1)
+            fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True,  showgrid=False)
 
-    fig_rate.update_layout(
-        template="plotly_white",
-        title_text="<b>Production Rate vs. Time</b>",
-        height=450,
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02,
-            xanchor="right", x=1.0, bgcolor="rgba(255,255,255,0.7)"
-        ),
-        font=dict(size=13),
-        margin=dict(l=10, r=10, t=50, b=10),
-    )
-    fig_rate.update_xaxes(
-        type="log",
-        dtick=1,                              # decades
-        tickvals=[1, 10, 100, 1000, 10000],   # 10^0 ... 10^4 days
-        minor=dict(showgrid=True),
-        showgrid=True, gridwidth=1,
-        title="Time (days)",
-    )
-    fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False, showgrid=True, gridwidth=1)
-    fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True,  showgrid=False)
+            st.plotly_chart(fig_rate, use_container_width=True, theme=None)
+        else:
+            st.warning("Rate series not available.")
 
-    st.plotly_chart(fig_rate, use_container_width=True, theme=None)
-else:
-    st.warning("Rate series not available.")
+        # ----- CUMULATIVE (semi-log time; Gas = BCF left, Liquids = MMbbl right) -----
+        cum_g = sim.get("cum_g_BCF")   # array-like or None
+        cum_o = sim.get("cum_o_MMBO")  # array-like or None
+        cum_w = sim.get("cum_w_MMBL")  # array-like or None
 
-# ----- CUMULATIVE (semi-log time; Gas = BCF left, Liquids = MMbbl right) -----
-cum_g = sim.get("cum_g_BCF")   # array-like or None
-cum_o = sim.get("cum_o_MMBO")  # array-like or None
-cum_w = sim.get("cum_w_MMBL")  # array-like or None
+        if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
+            fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+            if cum_g is not None:
+                fig_cum.add_trace(
+                    go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3)),
+                    secondary_y=False,
+                )
+            if cum_o is not None:
+                fig_cum.add_trace(
+                    go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3)),
+                    secondary_y=True,
+                )
+            if cum_w is not None:
+                fig_cum.add_trace(
+                    go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot")),
+                    secondary_y=True,
+                )
 
-if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
-    fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-    if cum_g is not None:
-        fig_cum.add_trace(
-            go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3)),
-            secondary_y=False,
-        )
-    if cum_o is not None:
-        fig_cum.add_trace(
-            go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3)),
-            secondary_y=True,
-        )
-    if cum_w is not None:
-        fig_cum.add_trace(
-            go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot")),
-            secondary_y=True,
-        )
+            fig_cum.update_layout(
+                template="plotly_white",
+                title_text="<b>Cumulative Production</b>",
+                height=450,
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="right", x=1.0, bgcolor="rgba(255,255,255,0.7)"
+                ),
+                font=dict(size=13),
+                margin=dict(l=10, r=10, t=50, b=10),
+            )
+            fig_cum.update_xaxes(
+                type="log",
+                dtick=1,
+                tickvals=[1, 10, 100, 1000, 10000],
+                minor=dict(showgrid=True),
+                showgrid=True, gridwidth=1,
+                title="Time (days)",
+            )
+            fig_cum.update_yaxes(title_text="Gas (BCF)",        secondary_y=False, showgrid=True,  gridwidth=1)
+            fig_cum.update_yaxes(title_text="Liquids (MMbbl)",  secondary_y=True,  showgrid=False)
 
-    fig_cum.update_layout(
-        template="plotly_white",
-        title_text="<b>Cumulative Production</b>",
-        height=450,
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02,
-            xanchor="right", x=1.0, bgcolor="rgba(255,255,255,0.7)"
-        ),
-        font=dict(size=13),
-        margin=dict(l=10, r=10, t=50, b=10),
-    )
-    fig_cum.update_xaxes(
-        type="log",
-        dtick=1,
-        tickvals=[1, 10, 100, 1000, 10000],
-        minor=dict(showgrid=True),
-        showgrid=True, gridwidth=1,
-        title="Time (days)",
-    )
-    fig_cum.update_yaxes(title_text="Gas (BCF)",        secondary_y=False, showgrid=True,  gridwidth=1)
-    fig_cum.update_yaxes(title_text="Liquids (MMbbl)",  secondary_y=True,  showgrid=False)
+            st.plotly_chart(fig_cum, use_container_width=True, theme=None)
+        else:
+            st.warning("Cumulative series not available.")
+```
 
-    st.plotly_chart(fig_cum, use_container_width=True, theme=None)
-else:
-    st.warning("Cumulative series not available.")
-# ======== end Results tab semi-log plots ========
+***
 
+### Part 2 of 2: Corrected Code
+
+```python
 # #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
