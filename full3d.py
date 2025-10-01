@@ -508,8 +508,7 @@ def assemble_jacobian_and_residuals_blackoil(
 
             col_f = fbase + fi
             dP = P[c] - Pf[fi]
-            up_is_c = (dP >= 0.0)  # (kept for clarity)
-            up = c                 # use matrix saturations/mobilities
+            up = c # For matrix-fracture flow, properties are always taken from the matrix.
 
             invBo_up = 1.0 / max(Bo[up], 1e-12)
             invBg_up = 1.0 / max(Bg[up], 1e-12)
@@ -517,33 +516,78 @@ def assemble_jacobian_and_residuals_blackoil(
             lam_o_up, lam_w_up, lam_g_up = lam_o[up], lam_w[up], lam_g[up]
             Rs_up = Rs[up]
 
-            Fo = Tmf * lam_o_up * invBo_up * (P[c] - Pf[fi])
-            Fw = Tmf * lam_w_up * invBw_up * (P[c] - Pf[fi])
-            Fg = Tmf * (lam_g_up * invBg_up * (P[c] - Pf[fi]) + (Rs_up * lam_o_up * invBo_up) * (P[c] - Pf[fi]))
+            Fo = Tmf * lam_o_up * invBo_up * dP
+            Fw = Tmf * lam_w_up * invBw_up * dP
+            Fg = Tmf * (lam_g_up * invBg_up * dP + (Rs_up * lam_o_up * invBo_up) * dP)
 
-            R[_cell_idx(c)]    += Fo;    R[col_f] -= Fo
-            R[_cell_idx_sw(c)] += Fw;    R[col_f] -= Fw
-            R[_cell_idx_sg(c)] += Fg;    R[col_f] -= Fg
+            # Note: The fracture equation is for total fluid volume.
+            R[_cell_idx(c)]    += Fo
+            R[_cell_idx_sw(c)] += Fw
+            R[_cell_idx_sg(c)] += Fg
+            R[col_f]           -= (Fo + Fw + Fg) # Total volume flux into fracture
 
             coef_o = Tmf * lam_o_up * invBo_up
             coef_w = Tmf * lam_w_up * invBw_up
-            coef_g1 = Tmf * lam_g_up * invBg_up
-            coef_g2 = Tmf * (Rs_up * lam_o_up * invBo_up)
+            coef_g_total = Tmf * (lam_g_up * invBg_up + Rs_up * lam_o_up * invBo_up)
 
-            A[_cell_idx(c),  _cell_idx(c)] += coef_o
-            A[_cell_idx(c),  col_f]        -= coef_o
-            A[col_f,         _cell_idx(c)] -= coef_o
-            A[col_f,         col_f]        += coef_o
+            # Derivatives for matrix equations
+            A[_cell_idx(c),    _cell_idx(c)] += coef_o
+            A[_cell_idx(c),    col_f]        -= coef_o
+            A[_cell_idx_sw(c), _cell_idx(c)] += coef_w
+            A[_cell_idx_sw(c), col_f]        -= coef_w
+            A[_cell_idx_sg(c), _cell_idx(c)] += coef_g_total
+            A[_cell_idx_sg(c), col_f]        -= coef_g_total
 
-            A[_cell_idx_sw(c),  _cell_idx(c)] += coef_w
-            A[_cell_idx_sw(c),  col_f]        -= coef_w
-            A[col_f,            _cell_idx(c)] -= coef_w
-            A[col_f,            col_f]        += coef_w
+            # Derivatives for fracture equation (total volume conservation)
+            A[col_f, _cell_idx(c)] -= (coef_o + coef_w + coef_g_total)
+            A[col_f, col_f]       += (coef_o + coef_w + coef_g_total)
 
-            A[_cell_idx_sg(c),  _cell_idx(c)] += (coef_g1 + coef_g2)
-            A[_cell_idx_sg(c),  col_f]        -= (coef_g1 + coef_g2)
-            A[col_f,            _cell_idx(c)] -= (coef_g1 + coef_g2)
-            A[col_f,            col_f]        += (coef_g1 + coef_g2)
+    # -------------------- NEW: EDFM fracture ↔ fracture connections ------------------
+    # This block implements flow between connected fracture cells, completing the DFN model.
+    # It uses the 'frac_links' provided in the options dictionary.
+    frac_links = options.get("frac_links", []) or []
+    if Nf > 0 and len(frac_links) > 0:
+        # To simplify, we model inter-fracture flow as single-phase (water-like)
+        # using average fluid properties. This is a common and stable approach.
+        mu_w_avg = np.mean(mu_w)
+        Bw_avg = np.mean(Bw)
+        # Pre-calculate the mobility term for water
+        invBw_mu_w_avg = 1.0 / (max(Bw_avg, 1e-12) * max(mu_w_avg, 1e-12))
+
+        for link in frac_links:
+            i = int(link["i"])
+            j = int(link["j"])
+
+            # Ensure linked fractures are valid indices
+            if not (0 <= i < Nf and 0 <= j < Nf):
+                continue # Skip invalid link definitions
+
+            col_i = frac_map[i]
+            col_j = frac_map[j]
+
+            # Transmissibility for a fracture-fracture intersection (simplified model)
+            k_md = float(link.get("k_md", 50000.0))         # Permeability of the intersection
+            L_ft = float(link.get("L_ft", 100.0))          # Length of the intersection trace
+            aperture_ft = float(link.get("aperture_ft", 0.001)) # Effective aperture for flow
+            d_ft = float(link.get("d_ft", 10.0))            # Effective distance between fracture centers
+
+            # T = k * A / d, where A is the flow area (length * aperture)
+            area_ft2 = L_ft * aperture_ft
+            Tff_base = (max(k_md, 1e-30) * area_ft2) / max(d_ft, 1e-30)
+            Tff = Tff_base * invBw_mu_w_avg # Full transmissibility including fluid mobility
+
+            dP_ff = Pf[i] - Pf[j]
+            Fw_ff = Tff * dP_ff # Water-like flux between fractures
+
+            # Update Residuals: Flux leaves frac 'i' (- sign), enters frac 'j' (+ sign)
+            R[col_i] -= Fw_ff
+            R[col_j] += Fw_ff
+
+            # Update Jacobian: d(Flux)/d(Pf_i) and d(Flux)/d(Pf_j)
+            A[col_i, col_i] += Tff
+            A[col_i, col_j] -= Tff
+            A[col_j, col_i] -= Tff
+            A[col_j, col_j] += Tff
 
     # -------------------- boundary faces: fixed-P & aquifers ------------------
     kx_mat = np.asarray(rock.get("kx_md", 100.0)).reshape(nz, ny, nx)
@@ -574,6 +618,7 @@ def assemble_jacobian_and_residuals_blackoil(
         A[_cell_idx_sw(c), _cell_idx(c)]    += T * lam_w_c * invBw_c
         A[_cell_idx_sg(c), _cell_idx(c)]    += T * (lam_g_c * invBg_c + Rs_c * lam_o_c * invBo_c)
 
+        # Jacobian terms for PVT property derivatives
         A[_cell_idx(c), _cell_idx(c)]     += T * lam_o_c * dP * (-dBo_dP[c] / (max(Bo[c],1e-12)**2))
         A[_cell_idx_sw(c), _cell_idx(c)]  += T * lam_w_c * dP * (-dBw_dP[c] / (max(Bw[c],1e-12)**2))
         A[_cell_idx_sg(c), _cell_idx(c)]  += T * (
@@ -901,10 +946,17 @@ def _compute_well_rates(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
     kx = np.asarray(rock.get("kx_md")).reshape(nz, ny, nx)
     ky = np.asarray(rock.get("ky_md")).reshape(nz, ny, nx)
     qo=qg=qw=0.0
-    for w in prepared_wells:
+    for w_idx, w in enumerate(prepared_wells):
         ctrl = w["control"]; perfs = w["perfs"]
         pw_val = None
-        if ctrl=="BHP": pw_val = float(w.get("bhp_psi", w.get("limits",{}).get("pw", 2500.0)))
+        if ctrl=="BHP":
+            pw_val = float(w.get("bhp_psi", w.get("limits",{}).get("pw", 2500.0)))
+        elif well_solution_pw and w_idx in well_solution_pw:
+            pw_val = well_solution_pw[w_idx]
+        else:
+            # Fallback for rate control if pw not in solution (shouldn't happen post-solve)
+            continue
+            
         for p in perfs:
             i = int(p["i"]); j=int(p["j"]); k=int(p["k"]); c=lin(i,j,k)
             wi = peaceman_wi_cartesian(kx[k,j,i], ky[k,j,i], dz, dx, dy,
@@ -915,15 +967,7 @@ def _compute_well_rates(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
             lam_g=max(0.0, (Sg[c]**2)/mug)
             Bo_c=max(Bo[c],1e-12); Bg_c=max(Bg[c],1e-12); Bw_c=max(Bw[c],1e-12); Rs_c=Rs[c]
             co=wi*lam_o/Bo_c; cw=wi*lam_w/Bw_c; cg=wi*(lam_g/Bg_c + (Rs_c*lam_o)/Bo_c)
-            if ctrl=="BHP":
-                dP = P[c]-pw_val
-            else:
-                if well_solution_pw and id(w) in well_solution_pw:
-                    dP = P[c]-well_solution_pw[id(w)]
-                else:
-                    q_tgt = float(w.get("rate_mscfd", w.get("rate_stbd", 0.0)))
-                    coef = cg if ctrl=="RATE_GAS_MSCFD" else (co if ctrl=="RATE_OIL_STBD" else (co+cw))
-                    dP = q_tgt/max(coef,1e-30)
+            dP = P[c]-pw_val
             qo += co*dP; qg += cg*dP; qw += cw*dP
     return qo, qg, qw
 # core/full3d.py  — Part 4/4
@@ -1072,9 +1116,7 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
         Bo = np.asarray(pvt.Bo(P)); Bg = np.asarray(pvt.Bg(P)); Rs = np.asarray(pvt.Rs(P))
         mu_o = np.asarray(pvt.mu_o(P)); mu_g = np.asarray(pvt.mu_g(P))
         mu_w = np.asarray(pvt.mu_w(P));  Bw = np.asarray(pvt.Bw(P))
-        solved_pw = {}
-        for w_idx, col in well_unknown_map.items():
-            solved_pw[id(prepared_wells[w_idx])] = float(state_k[col])
+        solved_pw = {w_idx: float(state_k[col]) for w_idx, col in well_unknown_map.items()}
         qo, qg, qw = _compute_well_rates(P, Sw, Sg, So, Bo, Bg, Bw, Rs, mu_o, mu_g, mu_w,
                                          grid, rock, relperm, prepared_wells, solved_pw)
 
