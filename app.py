@@ -499,7 +499,9 @@ PLAY_PRESETS = {
     ),
 }
 PLAY_LIST = list(PLAY_PRESETS.keys())
-
+# Create a single 'state' dictionary from session_state for cleaner access
+# This makes the variable available globally for all tabs to use.
+state = {k: st.session_state.get(k, v) for k, v in defaults.items()}
 #### Part 2: Core Logic, Simulation Engine, and Sidebar UI ####
 
 # ------------------------ HELPER FUNCTIONS ------------------------
