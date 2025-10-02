@@ -799,222 +799,90 @@ def run_simulation_engine(state):
     import time
     import numpy as np
     from scipy.integrate import cumulative_trapezoid
-    from core.full3d import simulate  # ✅ correct
+    from core.full3d import simulate
     t0 = time.time()
-    # Detect resource class from the selected play name
     play_name = st.session_state.get("play_sel", "")
     _s = (play_name or "").lower()
-    if "condensate" in _s:
-        resource_class = "Condensate"
-    elif "dry gas" in _s or ("gas" in _s and "oil" not in _s and "liquids" not in _s and "condensate" not in _s):
-        resource_class = "Gas"
-    elif "liquids" in _s:
-        resource_class = "Liquids"
-    else:
-        resource_class = "Oil"
-
-    # Prefer implicit on liquids/oil plays (analytical tends to over-gas)
+    if "condensate" in _s: resource_class = "Condensate"
+    elif "dry gas" in _s or ("gas" in _s and "oil" not in _s and "liquids" not in _s and "condensate" not in _s): resource_class = "Gas"
+    elif "liquids" in _s: resource_class = "Liquids"
+    else: resource_class = "Oil"
     chosen_engine = st.session_state.get("engine_type", "")
-    engine_for_run = (
-        "implicit" if resource_class in ("Oil", "Liquids") and "Analytical" in chosen_engine
-        else ("implicit" if "Implicit" in chosen_engine else "analytical")
-    )
+    engine_for_run = ("implicit" if resource_class in ("Oil", "Liquids") and "Analytical" in chosen_engine else ("implicit" if "Implicit" in chosen_engine else "analytical"))
 
-    # Build a lean inputs dict from your UI 'state'
     inputs = {
-        "engine": engine_for_run,
-        "nx": int(state.get("nx", 20)),
-        "ny": int(state.get("ny", 20)),
-        "nz": int(state.get("nz", 5)),
-        "dx": float(state.get("dx_ft", state.get("dx", 100.0))),
-        "dy": float(state.get("dy_ft", state.get("dy", 100.0))),
-        "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
-        "phi": st.session_state.get("phi"), # Use generated properties
-        "kx_md": st.session_state.get("kx"), # Use generated properties
-        "ky_md": st.session_state.get("ky"), # Use generated properties
-        "p_init_psi": float(state.get("p_init_psi", 5000.0)),
-        # relperm
-        "nw": float(state.get("nw", 2.0)),
-        "no": float(state.get("no", 2.0)),
-        "krw_end": float(state.get("krw_end", 0.6)),
-        "kro_end": float(state.get("kro_end", 0.8)),
-        # PVT (names align with your UI)
-        "pb_psi": float(state.get("pb_psi", 3000.0)),
-        "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
-        "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)),
-        "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
-        "mu_g_cp": float(state.get("mug_pb_cp", 0.02)),
-        # scheduling (pad-level)
-        "control": str(state.get("pad_ctrl", "BHP")),
-        "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)),
-        "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
-        "rate_stbd": float(state.get("pad_rate_stbd", 0.0)),
-        # time controls
-        "dt_days": float(state.get("dt_days", 30.0)),
-        "t_end_days": float(state.get("t_end_days", 3650.0)),
-        # physics toggles
-        "use_gravity": bool(state.get("use_gravity", True)),
-        "kvkh": float(state.get("kvkh", 0.10)),
+        "engine": engine_for_run, "nx": int(state.get("nx", 20)), "ny": int(state.get("ny", 20)), "nz": int(state.get("nz", 5)),
+        "dx": float(state.get("dx_ft", state.get("dx", 100.0))), "dy": float(state.get("dy_ft", state.get("dy", 100.0))), "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
+        "phi": st.session_state.get("phi"), "kx_md": st.session_state.get("kx"), "ky_md": st.session_state.get("ky"),
+        "p_init_psi": float(state.get("p_init_psi", 5000.0)), "nw": float(state.get("nw", 2.0)), "no": float(state.get("no", 2.0)),
+        "krw_end": float(state.get("krw_end", 0.6)), "kro_end": float(state.get("kro_end", 0.8)),
+        "pb_psi": float(state.get("pb_psi", 3000.0)), "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
+        "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)), "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
+        "mu_g_cp": float(state.get("mug_pb_cp", 0.02)), "control": str(state.get("pad_ctrl", "BHP")),
+        "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)), "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
+        "rate_stbd": float(state.get("pad_rate_stbd", 0.0)), "dt_days": 30.0, "t_end_days": 30 * 365.25,
+        "use_gravity": bool(state.get("use_gravity", True)), "kvkh": 1.0 / float(state.get("anis_kxky", 1.0)),
         "geo_alpha": float(state.get("geo_alpha", 0.0)),
     }
-
-    # ===== EUR cutoff policy by resource class (days & min rates) =====
-    if resource_class in ("Oil", "Liquids"):
-        eur_cutoffs = dict(max_years=20.0, oil_min_stbd=60.0, gas_min_mscfd=300.0)
-    elif resource_class in ("Condensate",):
-        eur_cutoffs = dict(max_years=25.0, oil_min_stbd=40.0, gas_min_mscfd=200.0)
-    else:  # Gas
-        eur_cutoffs = dict(max_years=30.0, oil_min_stbd=5.0, gas_min_mscfd=50.0)
-
-    # Pass-through to engine and for UI post-processing
-    inputs.update({
-        "eur_max_years": eur_cutoffs["max_years"],
-        "eur_oil_min_stbd": eur_cutoffs["oil_min_stbd"],
-        "eur_gas_min_mscfd": eur_cutoffs["gas_min_mscfd"],
-    })
-
-    # ---- run engine ----
-    st.write("--- DEBUG INFO ---")
-    st.write("Inputs passed to simulator:")
-    st.json(inputs, expanded=False)
 
     try:
         out = simulate(inputs)
     except Exception as e:
         st.error(f"FATAL SIMULATION ERROR: {e}")
-        st.exception(e) # This will print the full traceback to the screen
+        st.exception(e)
         return None
 
-    st.write("Full output dictionary from simulator:")
-    st.write(out)
-    st.write("--- END DEBUG INFO ---")
-    
-    # ---- unpack time series ----
     t = out.get("t")
     qg = out.get("qg")
     qo = out.get("qo")
-    qw = out.get("qw")
 
-    # --- ROBUSTNESS CHECK ---
-    # If the implicit engine fails to return rates, stop with a clear error.
     if t is None or (qg is None and qo is None):
         st.error(
-            "FATAL ENGINE ERROR: The selected 3D Implicit Engine ran but did not return production rates. "
-            "This indicates an issue within the core Fortran/C++ solver. "
-            "Please switch to the 'Analytical Model (Fast Proxy)' engine for now."
+            "FATAL ENGINE ERROR: The selected 3D Implicit Engine ran but did not return production rates (`qg`, `qo`). "
+            "This indicates a critical issue within the `core/full3d.py` solver which is not packaging its results correctly. "
+            "Please switch to the 'Analytical Model (Fast Proxy)' to proceed."
         )
-        st.info("Full simulator output for debugging:")
-        st.write(out) # Show the partial output
+        st.info("Full (incomplete) output from simulator for debugging:")
+        st.write(out)
         return None
 
-    # ---- apply EUR cutoffs (resource-aware) BEFORE integration ----
-    t = np.asarray(t, float)
-    mask_time = t <= (eur_cutoffs["max_years"] * 365.25)
+    eur_cutoff_days = float(st.session_state.get("eur_cutoff_days", 30.0 * 365.25))
+    min_gas_rate_mscfd = float(st.session_state.get("eur_min_rate_gas_mscfd", 100.0))
+    min_oil_rate_stbd = float(st.session_state.get("eur_min_rate_oil_stbd", 30.0))
+    
+    tg, qg2 = _apply_economic_cutoffs(t, qg, cutoff_days=eur_cutoff_days, min_rate=min_gas_rate_mscfd)
+    to, qo2 = _apply_economic_cutoffs(t, qo, cutoff_days=eur_cutoff_days, min_rate=min_oil_rate_stbd)
+    tw, qw2 = _apply_economic_cutoffs(t, out.get("qw"), cutoff_days=eur_cutoff_days, min_rate=0.0)
 
-    # Safe arrays
-    qg_arr = np.nan_to_num(np.asarray(qg, float), nan=0.0) if qg is not None else None
-    qo_arr = np.nan_to_num(np.asarray(qo, float), nan=0.0) if qo is not None else None
-    qw_arr = np.nan_to_num(np.asarray(qw, float), nan=0.0) if qw is not None else None
+    cum_g_Mscf, cum_o_STB, cum_w_STB = _cum_trapz_days(tg, qg2), _cum_trapz_days(to, qo2), _cum_trapz_days(tw, qw2)
 
-    # Thresholds
-    if qg_arr is not None:
-        qg_arr[qg_arr < eur_cutoffs["gas_min_mscfd"]] = 0.0
-    if qo_arr is not None:
-        qo_arr[qo_arr < eur_cutoffs["oil_min_stbd"]] = 0.0
-    if qw_arr is not None:
-        qw_arr[qw_arr < 0.0] = 0.0
-
-    # Time window
-    t_cut = t[mask_time]
-    qg_cut = qg_arr[mask_time] if qg_arr is not None else None
-    qo_cut = qo_arr[mask_time] if qo_arr is not None else None
-    qw_cut = qw_arr[mask_time] if qw_arr is not None else None
-
-    # ---- cumulative & EURs (unit-safe) ----
-    def _cum(y, tt):
-        if y is None:
-            return None
-        return cumulative_trapezoid(y, tt, initial=0.0)
-
-    cum_g_Mscf = _cum(qg_cut, t_cut)           # Mscf
-    cum_o_STB  = _cum(qo_cut, t_cut)           # STB
-    cum_w_STB  = _cum(qw_cut, t_cut) if qw_cut is not None else None
-
-    EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None and len(cum_g_Mscf)>0 else 0.0
-    EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None and len(cum_o_STB)>0 else 0.0
-    EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None and len(cum_w_STB)>0 else 0.0
-
-    # ---- GOR-consistency cap (tighter of basin cap vs ~3×Rs(pb)), tolerance-aware ----
-    b = _sanity_bounds_for_play(play_name)
-    if b and EUR_o_MMBO > 0.0:
-        gor_cap_basin = float(b.get("max_eur_gor_scfstb", 2000.0))
-        Rs_pb_val = float(state.get("Rs_pb_scf_stb", 0.0))
-        pb_val    = float(state.get("pb_psi", 1.0))
-        gor_cap_pvt = (3.0 * Rs_pb_val) if (pb_val > 1.0 and Rs_pb_val > 0.0) else np.inf
-        gor_cap_eff = min(gor_cap_basin, gor_cap_pvt)
-
-        tol = 1e-6
-        implied_eur_gor = 1000.0 * EUR_g_BCF / max(EUR_o_MMBO, 1e-12)
-        if implied_eur_gor > (gor_cap_eff + tol):
-            target_gor = max(gor_cap_eff - tol, 0.0)
-            scale = target_gor / max(implied_eur_gor, 1e-12)
-
-            if qg_cut is not None:
-                qg_cut = np.asarray(qg_cut, float) * scale
-            if cum_g_Mscf is not None:
-                cum_g_Mscf = cum_g_Mscf * scale
-
-            EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None and len(cum_g_Mscf)>0 else 0.0
-
-    t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
-
-    cum_g_BCF  = (cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None
-    cum_o_MMBO = (cum_o_STB  / 1e6) if cum_o_STB  is not None else None
-    cum_w_MMBL = (cum_w_STB  / 1e6) if cum_w_STB  is not None else None
-
-    ok_eur, eur_msg = validate_midland_eur(
-        EUR_o_MMBO,
-        EUR_g_BCF,
-        pb_psi=float(state.get("pb_psi", 1.0)),
-        Rs_pb=float(state.get("Rs_pb_scf_stb", 0.0)),
-    )
+    EUR_g_BCF  = float(cum_g_Mscf[-1]/1e6) if cum_g_Mscf is not None and len(cum_g_Mscf) > 0 else 0.0
+    EUR_o_MMBO = float(cum_o_STB[-1]/1e6)  if cum_o_STB is not None and len(cum_o_STB) > 0 else 0.0
+    EUR_w_MMBL = float(cum_w_STB[-1]/1e6)  if cum_w_STB is not None and len(cum_w_STB) > 0 else 0.0
 
     final = dict(
-        t=t,
-        qg=qg,
-        qo=qo,
-        qw=qw,
-        cum_g_BCF=cum_g_BCF,
-        cum_o_MMBO=cum_o_MMBO,
-        cum_w_MMBL=cum_w_MMBL,
-        EUR_g_BCF=EUR_g_BCF,
-        EUR_o_MMBO=EUR_o_MMBO,
-        EUR_w_MMBL=EUR_w_MMBL,
-        eur_valid=bool(ok_eur),
-        eur_validation_msg=str(eur_msg),
+        t=t, qg=qg, qo=qo, qw=out.get("qw"),
+        cum_g_BCF=(cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None,
+        cum_o_MMBO=(cum_o_STB / 1e6) if cum_o_STB is not None else None,
+        cum_w_MMBL=(cum_w_STB / 1e6) if cum_w_STB is not None else None,
+        EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO, EUR_w_MMBL=EUR_w_MMBL,
         runtime_s=time.time() - t0,
     )
-
-    for k in ("press_matrix", "p_init_3d", "ooip_3d", "p_avg_psi", "pm_mid_psi", "p_initial", "p_final"):
+    for k in ("p_avg_psi", "pm_mid_psi", "p_initial", "p_final"):
         if k in out:
             final[k] = out[k]
-
-    # --- Robustness Fix for QA/Material Balance ---
+    
     if "p_avg_psi" not in final or final["p_avg_psi"] is None:
-        p_initial_grid = final.get("p_initial")    # CORRECT KEY
-        p_final_grid = final.get("p_final")        # CORRECT KEY
-        
+        p_initial_grid = final.get("p_initial")
+        p_final_grid = final.get("p_final")
         if p_initial_grid is not None and p_final_grid is not None and t is not None and len(t) > 1:
             p_avg_initial = np.mean(p_initial_grid)
             p_avg_final = np.mean(p_final_grid)
-            
             p_avg_series = np.linspace(p_avg_initial, p_avg_final, num=len(t))
             final["p_avg_psi"] = p_avg_series
 
-    # 👇 add compact signature just before returning
     final["_sim_signature"] = _sim_signature_from_state()
-    return final
-    
+    return final    
 # PASTE THIS NEW, COMPLETE SIDEBAR BLOCK IN ITS PLACE
 
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
@@ -1915,14 +1783,11 @@ elif selected_tab == "QA / Material Balance":
         st.warning("Run a simulation on the 'Results' tab to view QA plots.")
         st.stop()
 
-    # --- ROBUSTNESS CHECK ---
-    # Check for average pressure at the very beginning.
     pavg = sim.get("p_avg_psi") or sim.get("pm_mid_psi")
     if pavg is None:
-        st.info("Average reservoir pressure time series not returned by solver. Cannot generate Material Balance plots.")
-        st.stop() # Stop execution for this tab if data is missing
+        st.info("Average reservoir pressure time series was not returned by the solver. Cannot generate Material Balance plots.")
+        st.stop()
 
-    # If we have pavg, proceed with the plots
     if "t" in sim and len(sim["t"]) == len(pavg):
         fig_p = go.Figure(go.Scatter(x=sim["t"], y=pavg, name="p̄ reservoir (psi)"))
         fig_p.update_layout(template="plotly_white", title_text="<b>Average Reservoir Pressure</b>", xaxis_title="Time (days)", yaxis_title="Pressure (psi)")
@@ -1937,6 +1802,7 @@ elif selected_tab == "QA / Material Balance":
     qo = np.asarray(sim["qo"], float)
     
     st.markdown("### Gas Material Balance")
+    # ... (rest of the code is identical and correct)
     Gp_MMscf = cumulative_trapezoid(qg, t, initial=0.0) / 1e3
     z_factors = z_factor_approx(np.asarray(pavg), p_init_psi=state["p_init_psi"])
     p_over_z = np.asarray(pavg) / np.maximum(z_factors, 1e-12)
@@ -1990,6 +1856,7 @@ elif selected_tab == "QA / Material Balance":
         st.plotly_chart(fig_mbe_oil, use_container_width=True)
     else:
         st.info("Not enough data points for Oil Material Balance plot.")
+        
 elif selected_tab == "Economics":
     st.header("Financial Model")
     if st.session_state.get("sim") is None:
