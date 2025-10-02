@@ -906,6 +906,7 @@ if t is None or (qg is None and qo is None):
     st.info("Full simulator output for debugging:")
     st.write(out) # Show the partial output
     return None
+    
     # ---- apply EUR cutoffs (resource-aware) BEFORE integration ----
     t = np.asarray(t, float)
     mask_time = t <= (eur_cutoffs["max_years"] * 365.25)
