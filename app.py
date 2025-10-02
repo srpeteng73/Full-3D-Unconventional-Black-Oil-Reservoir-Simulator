@@ -12,7 +12,9 @@ import plotly.io as pio
 import streamlit as st
 from scipy import stats
 from scipy.integrate import cumulative_trapezoid
-import numpy_financial as npf  # Economics Tab
+from scipy.optimize import differential_evolution
+from scipy.interpolate import interp1d
+import numpy_financial as npf
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 
@@ -206,9 +208,7 @@ def _sim_signature_from_state():
     pinit = float(s.get("p_init_psi", 0.0))
     key = (play, engine, ctrl, bhp, r_m, r_o, pb, rs, bo, pinit)
     return hash(key)
-
-
-
+    
 def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
     """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
     x_max = state['nx'] * state['dx'] - state['L_ft']
@@ -1143,6 +1143,7 @@ tab_names = [
     "Economics",
     "EUR vs Lateral Length",
     "Field Match (CSV)",
+    "Automated Match", # <-- NEW TAB
     "Uncertainty & Monte Carlo",
     "Well Placement Optimization",
     "User’s Manual",
@@ -1983,54 +1984,114 @@ elif selected_tab == "QA / Material Balance":
     st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
 
 elif selected_tab == "Economics":
-    st.header("Economics")
+    st.header("Financial Model")
     if st.session_state.get("sim") is None:
-        st.info("Run a simulation first to populate economics.")
+        st.info("Run a simulation on the 'Results' tab first to populate the financial model.")
     else:
         sim = st.session_state["sim"]
-        t = np.asarray(sim["t"], float)
-        qo = np.nan_to_num(np.asarray(sim.get("qo")), nan=0.0)
-        qg = np.nan_to_num(np.asarray(sim.get("qg")), nan=0.0)
-        qw = np.nan_to_num(np.asarray(sim.get("qw")) if sim.get("qw") is not None else np.zeros_like(qo), nan=0.0)
-        st.subheader("Assumptions")
+        t = np.asarray(sim.get("t", []), float)
+        qo = np.nan_to_num(np.asarray(sim.get("qo", [])), nan=0.0)
+        qg = np.nan_to_num(np.asarray(sim.get("qg", [])), nan=0.0)
+        qw = np.nan_to_num(np.asarray(sim.get("qw", [])), nan=0.0)
+        
+        st.subheader("Economic Assumptions")
         c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            oil_price = st.number_input("Oil price ($/bbl)", 0.0, 500.0, 75.0, 1.0)
-        with c2:
-            gas_price = st.number_input("Gas price ($/Mcf)", 0.0, 50.0, 2.50, 0.1)
-        with c3:
-            opex_bpd = st.number_input("OPEX ($/bbl liquids)", 0.0, 200.0, 6.0, 0.5)
-        with c4:
-            wd_cost = st.number_input("Water disposal ($/bbl)", 0.0, 50.0, 1.5, 0.1)
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            royalty = st.number_input("Royalty (fraction)", 0.0, 0.99, 0.20, 0.01)
-        with c2:
-            tax = st.number_input("Severance tax (fraction)", 0.0, 0.99, 0.045, 0.005)
-        with c3:
-            disc = st.number_input("Discount rate (APR)", 0.0, 1.0, 0.10, 0.01)
-        # monthly cash flow from daily rates
-        days = np.diff(t, prepend=t[0])
-        oil_rev = qo * days * oil_price
-        gas_rev = qg * days * gas_price
-        gross = oil_rev + gas_rev
-        # costs
-        liquids = (qo + qw) * days
-        opex = liquids * opex_bpd
-        w_disp = qw * days * wd_cost
-        # royalty & tax
-        net_rev_int = gross * (1.0 - royalty)
-        taxes = net_rev_int * tax
-        cf = net_rev_int - (opex + w_disp) - taxes
-        # NPV (daily to years)
-        years = t / 365.25
-        disc_fac = (1.0 + disc) ** (years - years[0])
-        npv = float(np.nansum(cf / np.maximum(disc_fac, 1e-12)))
-        st.metric("NPV (approx.)", f"${npv:,.0f}")
-        fig_cf = go.Figure(go.Bar(x=t, y=cf/1e3, name="Cash Flow (k$)"))
-        fig_cf.update_layout(template="plotly_white", title_text="<b>Cash Flow (Approx.)</b>", xaxis_title="Time (days)", yaxis_title="k$")
-        st.plotly_chart(fig_cf, use_container_width=True, theme=None)
+        with c1: capex = st.number_input("CAPEX ($MM)", 1.0, 100.0, 15.0, 0.5, key="econ_capex") * 1e6
+        with c2: oil_price = st.number_input("Oil price ($/bbl)", 0.0, 500.0, 75.0, 1.0, key="econ_oil_price")
+        with c3: gas_price = st.number_input("Gas price ($/Mcf)", 0.0, 50.0, 2.50, 0.1, key="econ_gas_price")
+        with c4: disc_rate = st.number_input("Discount rate (fraction)", 0.0, 1.0, 0.10, 0.01, key="econ_disc")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: royalty = st.number_input("Royalty (fraction)", 0.0, 0.99, 0.20, 0.01, key="econ_royalty")
+        with c2: tax = st.number_input("Severance tax (fraction)", 0.0, 0.99, 0.045, 0.005, key="econ_tax")
+        with c3: opex_bpd = st.number_input("OPEX ($/bbl liquids)", 0.0, 200.0, 6.0, 0.5, key="econ_opex")
+        with c4: wd_cost = st.number_input("Water disposal ($/bbl)", 0.0, 50.0, 1.5, 0.1, key="econ_wd")
+        
+        # Build yearly cash flow dataframe
+        if len(t) > 1:
+            df = pd.DataFrame({'days': t, 'oil_stb_d': qo, 'gas_mscf_d': qg, 'water_stb_d': qw})
+            df['year'] = (df['days'] / 365.25).apply(np.floor).astype(int)
+            yearly_data = []
+            for year, group in df.groupby('year'):
+                days_in_year = group['days'].values
+                if len(days_in_year) > 1:
+                    yearly_data.append({
+                        'year': year,
+                        'oil_stb': np.trapz(group['oil_stb_d'].values, days_in_year),
+                        'gas_mscf': np.trapz(group['gas_mscf_d'].values, days_in_year),
+                        'water_stb': np.trapz(group['water_stb_d'].values, days_in_year),
+                    })
+            df_yearly = pd.DataFrame(yearly_data)
+        else:
+             df_yearly = pd.DataFrame(columns=['year', 'oil_stb', 'gas_mscf', 'water_stb'])
 
+        if not df_yearly.empty:
+            df_yearly['Revenue'] = (df_yearly['oil_stb'] * oil_price) + (df_yearly['gas_mscf'] * gas_price)
+            df_yearly['Royalty'] = df_yearly['Revenue'] * royalty
+            df_yearly['Taxes'] = (df_yearly['Revenue'] - df_yearly['Royalty']) * tax
+            df_yearly['OPEX'] = (df_yearly['oil_stb'] + df_yearly['water_stb']) * opex_bpd + (df_yearly['water_stb'] * wd_cost)
+            df_yearly['NCF_pre_capex'] = df_yearly['Revenue'] - df_yearly['Royalty'] - df_yearly['Taxes'] - df_yearly['OPEX']
+            cash_flows = [-capex] + df_yearly['NCF_pre_capex'].tolist()
+        else:
+            cash_flows = [-capex]
+
+        # --- Financial Metrics ---
+        try: npv = npf.npv(disc_rate, cash_flows)
+        except Exception: npv = np.nan
+        try: irr = npf.irr(cash_flows)
+        except Exception: irr = np.nan
+
+        # Rebuild dataframe for display and payout calculation
+        display_df = pd.DataFrame({'year': range(len(cash_flows)), 'Net Cash Flow': cash_flows})
+        display_df['year'] = display_df['year'] - 1 # Adjust year to start from -1 for CAPEX
+        display_df['Cumulative Cash Flow'] = display_df['Net Cash Flow'].cumsum()
+        
+        payout_period = np.nan
+        if (display_df['Cumulative Cash Flow'] > 0).any():
+            first_positive_idx = display_df[display_df['Cumulative Cash Flow'] > 0].index[0]
+            if first_positive_idx > 0:
+                last_neg_cum_flow = display_df['Cumulative Cash Flow'].iloc[first_positive_idx - 1]
+                first_pos_ncf = display_df['Net Cash Flow'].iloc[first_positive_idx]
+                payout_period = (display_df['year'].iloc[first_positive_idx-1]) + (-last_neg_cum_flow / first_pos_ncf if first_pos_ncf > 0 else np.inf)
+
+        st.subheader("Key Financial Metrics")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("NPV", f"${npv/1e6:,.2f} MM", help="Net Present Value at the specified discount rate.")
+        m2.metric("IRR", f"{irr:.1%}" if pd.notna(irr) and np.isfinite(irr) else "N/A", help="Internal Rate of Return.")
+        m3.metric("Payout Period (Years)", f"{payout_period:.2f}" if pd.notna(payout_period) else "N/A", help="Time until initial investment is recovered.")
+        
+        st.subheader("Cash Flow Details")
+        c1, c2 = st.columns(2)
+        with c1:
+            fig_ncf = px.bar(display_df, x='year', y='Net Cash Flow', title="<b>Yearly Net Cash Flow</b>", labels={'year':'Year', 'Net Cash Flow':'Cash Flow ($)'})
+            fig_ncf.update_layout(template='plotly_white', bargap=0.2)
+            st.plotly_chart(fig_ncf, use_container_width=True)
+        with c2:
+            fig_cum = px.line(display_df, x='year', y='Cumulative Cash Flow', title="<b>Cumulative Cash Flow</b>", markers=True, labels={'year':'Year', 'Cumulative Cash Flow':'Cash Flow ($)'})
+            fig_cum.add_hline(y=0, line_dash="dash", line_color="red")
+            fig_cum.update_layout(template='plotly_white')
+            st.plotly_chart(fig_cum, use_container_width=True)
+        
+        st.markdown("##### Yearly Cash Flow Table")
+        # Combine for full table view
+        if not df_yearly.empty:
+            full_table_df = df_yearly.copy()
+            full_table_df['year'] = full_table_df['year'].astype(int)
+            # Add the CAPEX row at year -1
+            capex_row = pd.DataFrame([{'year': -1, 'Net Cash Flow': -capex}])
+            display_data = pd.concat([capex_row, full_table_df], ignore_index=True)
+            display_data = display_data.fillna(0)
+            display_data['Cumulative Cash Flow'] = display_data['Net Cash Flow'].cumsum()
+            
+            # Select and order columns for display
+            display_cols = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX', 'Net Cash Flow', 'Cumulative Cash Flow']
+            st.dataframe(display_data[display_cols].style.format({
+                'oil_stb': '{:,.0f}', 'gas_mscf': '{:,.0f}', 'water_stb': '{:,.0f}',
+                'Revenue': '${:,.0f}', 'Royalty': '${:,.0f}', 'Taxes': '${:,.0f}',
+                'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
+            }), use_container_width=True)
+        else:
+            st.dataframe(display_df)
+            
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     c1, c2 = st.columns([3, 1])
@@ -2082,6 +2143,117 @@ elif selected_tab == "Field Match (CSV)":
                 )
         elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
             st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+elif selected_tab == "Automated Match":
+    st.header("Automated History Matching")
+    st.info("This module uses a genetic algorithm (Differential Evolution) to automatically find the best parameters to match historical data.")
+
+    # --- 1. Load Data ---
+    with st.expander("1. Load Historical Data", expanded=True):
+        uploaded_file_match = st.file_uploader("Upload field production CSV", type="csv", key="auto_match_uploader")
+        if uploaded_file_match:
+            try:
+                st.session_state.field_data_auto_match = pd.read_csv(uploaded_file_match)
+                st.success("File loaded successfully.")
+            except Exception as e:
+                st.error(f"Error reading CSV file: {e}")
+        
+        field_data = st.session_state.get("field_data_auto_match")
+        if field_data is not None:
+            st.dataframe(field_data.head())
+            # Validate columns
+            if not ({'Day', 'Oil_Rate_STBpd'}.issubset(field_data.columns) or {'Day', 'Gas_Rate_Mscfd'}.issubset(field_data.columns)):
+                st.error("CSV must contain 'Day' and at least one of 'Oil_Rate_STBpd' or 'Gas_Rate_Mscfd'.")
+                field_data = None # Invalidate data
+    
+    if field_data is not None:
+        # --- 2. Select Parameters ---
+        with st.expander("2. Select Parameters and Define Bounds", expanded=True):
+            param_options = {'xf_ft': (100.0, 500.0), 'hf_ft': (50.0, 300.0), 'k_stdev': (0.0, 0.2), 'pad_interf': (0.0, 0.8), 'p_init_psi': (3000.0, 8000.0)}
+            selected_params = st.multiselect("Parameters to vary:", options=list(param_options.keys()), default=['xf_ft', 'k_stdev'])
+            
+            bounds, valid_bounds = {}, True
+            if selected_params:
+                cols = st.columns(len(selected_params))
+                for i, param in enumerate(selected_params):
+                    with cols[i]:
+                        st.markdown(f"**{param}**")
+                        min_val, max_val = st.slider("Range", param_options[param][0], param_options[param][1], (param_options[param][0], param_options[param][1]), key=f"range_{param}")
+                        if min_val >= max_val:
+                            st.error("Min must be less than Max.")
+                            valid_bounds = False
+                        bounds[param] = (min_val, max_val)
+
+        # --- 3. Configure and Run ---
+        with st.expander("3. Configure and Run Optimization", expanded=True):
+            error_metric = st.selectbox("Error Metric to Minimize", ["RMSE (Oil)", "RMSE (Gas)", "RMSE (Combined)"])
+            max_iter = st.slider("Max Iterations", 5, 50, 15)
+            
+            run_auto_match = st.button("🚀 Run Automated Match", use_container_width=True, type="primary", disabled=not (valid_bounds and selected_params))
+            
+            if run_auto_match:
+                # Objective function for the optimizer
+                def objective_function(params, param_names, base_state, field_data, error_metric):
+                    temp_state = base_state.copy()
+                    for name, value in zip(param_names, params):
+                        temp_state[name] = value
+                    
+                    sim_result = fallback_fast_solver(temp_state, np.random.default_rng())
+                    
+                    t_sim, qo_sim, qg_sim = sim_result['t'], sim_result['qo'], sim_result['qg']
+                    t_field = field_data['Day'].values
+                    
+                    f_qo = interp1d(t_sim, qo_sim, bounds_error=False, fill_value="extrapolate")
+                    f_qg = interp1d(t_sim, qg_sim, bounds_error=False, fill_value="extrapolate")
+                    qo_sim_interp, qg_sim_interp = f_qo(t_field), f_qg(t_field)
+
+                    error_oil, error_gas = 0, 0
+                    if 'Oil_Rate_STBpd' in field_data.columns:
+                        qo_field = field_data['Oil_Rate_STBpd'].values
+                        error_oil = np.sqrt(np.mean((qo_sim_interp - qo_field)**2))
+                    if 'Gas_Rate_Mscfd' in field_data.columns:
+                        qg_field = field_data['Gas_Rate_Mscfd'].values
+                        error_gas = np.sqrt(np.mean((qg_sim_interp - qg_field)**2))
+
+                    if "Combined" in error_metric: return error_oil + error_gas
+                    elif "Oil" in error_metric: return error_oil
+                    else: return error_gas
+
+                with st.spinner("Running optimization... This may take several minutes."):
+                    param_names, bounds_list = list(bounds.keys()), [bounds[p] for p in bounds.keys()]
+                    result = differential_evolution(objective_function, bounds=bounds_list, args=(param_names, state.copy(), field_data, error_metric), maxiter=max_iter, disp=True)
+                    st.session_state.auto_match_result = result
+        
+        # --- 4. Display Results ---
+        if 'auto_match_result' in st.session_state:
+            st.markdown("---")
+            st.header("Optimization Results")
+            result = st.session_state.auto_match_result
+            
+            c1, c2 = st.columns([1,2])
+            with c1:
+                st.metric("Final Error (RMSE)", f"{result.fun:.2f}")
+                st.markdown("##### Best-Fit Parameters:")
+                best_params_df = pd.DataFrame({'Parameter': list(bounds.keys()), 'Value': result.x})
+                st.table(best_params_df.style.format({'Value': '{:.2f}'}))
+            
+            with c2:
+                # Run one final simulation with the best parameters
+                best_state = state.copy()
+                for name, value in zip(list(bounds.keys()), result.x):
+                    best_state[name] = value
+                
+                final_sim = fallback_fast_solver(best_state, np.random.default_rng())
+                
+                fig_match = make_subplots(specs=[[{"secondary_y": True}]])
+                if 'Gas_Rate_Mscfd' in field_data.columns:
+                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color=COLOR_GAS, symbol='cross')), secondary_y=False)
+                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qg'], mode='lines', name='Best Match Gas', line=dict(color=COLOR_GAS, width=3)), secondary_y=False)
+                if 'Oil_Rate_STBpd' in field_data.columns:
+                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color=COLOR_OIL, symbol='x')), secondary_y=True)
+                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qo'], mode='lines', name='Best Match Oil', line=dict(color=COLOR_OIL, width=3)), secondary_y=True)
+                
+                fig_match.update_layout(title="<b>Final History Match</b>", template="plotly_white", xaxis_title="Time (days)")
+                st.plotly_chart(fig_match, use_container_width=True)
 
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
@@ -2284,22 +2456,49 @@ elif selected_tab == "User’s Manual":
     st.markdown("---")
     st.markdown("""
     ### 1. Introduction
-    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This tool helps you explore reservoir behavior and forecast production for MSW wells.
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 2. Quick Start
-    1) Pick a **Preset** in the sidebar and click **Apply Preset**
-    2) **Generate 3D property volumes** (Tab: "Generate 3D property volumes")
-    3) Run **Results → Run simulation**
-    4) Review plots; iterate parameters as needed
-    """)
-    st.markdown("---")
-    st.markdown("""
-    ### 3. History Matching Workflow
-    Use **Field Match (CSV)** to load historical data, adjust parameters in the sidebar, and rerun until simulated rates align with measured points.
-    """)
+    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
 
+    ### 2. Quick Start Guide
+    1.  **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
+    2.  **Apply Preset:** Click the **Apply Preset** button. This will load typical reservoir, fluid, and completion parameters for that play into the sidebar.
+    3.  **Generate Geology:** Go to the **Generate 3D property volumes** tab and click the large button. This creates the 3D permeability and porosity grids required for the simulation.
+    4.  **Run Simulation:** Navigate to the **Results** tab and click **Run simulation**.
+    5.  **Analyze:** Review the EUR gauges, rate-time plots, and cumulative production charts.
+    6.  **Iterate:** Adjust parameters in the sidebar (e.g., Frac half-length `xf_ft` or Pad BHP `pad_bhp_psi`) and re-run the simulation to see the impact.
+
+    ### 3. Key Tabs Explained
+
+    #### **Results Tab**
+    This is the primary dashboard for viewing simulation output. It provides EURs for oil and gas, along with standard production plots. The simulation is only run when you click the "Run simulation" button on this tab.
+
+    #### **Economics Tab**
+    This tab provides a full financial model based on the production profile from the **Results** tab.
+    -   **Inputs:** Enter your project's total upfront capital expenditure (CAPEX), commodity price decks, operating costs (OPEX), and fiscal terms (royalty, tax).
+    -   **Metrics:** The model automatically calculates key financial metrics:
+        -   **NPV (Net Present Value):** The value of all future cash flows, discounted to the present.
+        -   **IRR (Internal Rate of Return):** The discount rate at which the NPV of the project is zero.
+        -   **Payout Period:** The time it takes for the cumulative cash flow to turn positive, recovering the initial investment.
+    -   **Outputs:** View yearly and cumulative cash flow charts, plus a detailed annual table, to assess project profitability.
+
+    #### **Field Match & Automated Match Tabs**
+    These tabs are designed for history matching against real-world production data.
+    -   **Field Match (CSV):** For manual history matching. Upload a CSV with historical production data (columns must include 'Day', and either 'Oil_Rate_STBpd' or 'Gas_Rate_Mscfd'). Adjust sidebar parameters and re-run simulations until the simulated curves visually align with the field data markers.
+    -   **Automated Match:** Let the simulator find the best match for you using a genetic algorithm.
+        1.  Upload your historical data.
+        2.  Select which parameters you want the algorithm to tune (e.g., `xf_ft`, `k_stdev`).
+        3.  Define the minimum and maximum bounds for each selected parameter. The algorithm will search for a solution within this range.
+        4.  Click "Run Automated Match". The algorithm will run many simulations to find the parameter set that minimizes the error (RMSE) between the simulation and your data.
+
+    #### **3D & Slice Viewers**
+    Visualize the reservoir properties.
+    -   **3D Viewer:** Renders an interactive 3D isosurface plot of properties like permeability, porosity, or pressure after a simulation. Use the sliders to adjust the downsampling and the value being displayed.
+    -   **Slice Viewer:** Shows 2D cross-sections of the 3D property grids, allowing you to inspect heterogeneity layer by layer in any of the three principal directions (X, Y, or Z).
+
+    ### 4. Input Validation
+    The application includes input validation to improve user experience and prevent errors.
+    -   In the **Automated Match** tab, the interface will warn you if a minimum bound is set higher than its corresponding maximum bound.
+    -   On the **Results** tab, sanity checks are performed to ensure the final EURs are reasonable for the selected play type. If the results are physically inconsistent (e.g., an oil well producing an unrealistic amount of gas), an error message will be displayed, and the results will be withheld to prevent misinterpretation.
+    """)
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
