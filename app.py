@@ -972,10 +972,11 @@ with st.sidebar:
         st.number_input("Frac height hf (ft)", value=float(st.session_state.hf_ft), step=5.0, key="hf_ft")
         st.slider("Pad interference coeff.", 0.00, 0.80, float(st.session_state.pad_interf), 0.01, key="pad_interf")
 
-    # CORRECTED CODE
+   # CORRECTED CODE
     with st.expander("Controls & Boundary", expanded=False):
-    # All controls have been moved to the "Control Panel" tab to avoid key conflicts.
-    st.info("All controls have been moved to the 'Control Panel' tab.")
+        # All controls have been moved to the "Control Panel" tab to avoid key conflicts.
+        st.info("All controls have been moved to the 'Control Panel' tab.")
+    
     
     with st.expander("DFN (Discrete Fracture Network)", expanded=False):
         st.checkbox("Use DFN-driven sink in solver", value=bool(st.session_state.use_dfn_sink), key="use_dfn_sink")
