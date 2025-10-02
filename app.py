@@ -1689,9 +1689,6 @@ elif selected_tab == "Results":
         else:
             st.warning("Cumulative series not available.")
 
-### Part 2 of 2: Corrected Code
-
-
 # #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
@@ -2015,6 +2012,7 @@ elif selected_tab == "Economics":
             yearly_data = []
             for year, group in df.groupby('year'):
                 days_in_year = group['days'].values
+                # CORRECTED PART: Only perform trapezoidal integration if there are at least 2 points
                 if len(days_in_year) > 1:
                     yearly_data.append({
                         'year': year,
