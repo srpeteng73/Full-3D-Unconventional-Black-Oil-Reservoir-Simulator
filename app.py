@@ -873,7 +873,7 @@ def run_simulation_engine(state):
         "eur_gas_min_mscfd": eur_cutoffs["gas_min_mscfd"],
     })
 
-    # ---- run engine ----
+   # ---- run engine ----
     st.write("--- DEBUG INFO ---")
     st.write("Inputs passed to simulator:")
     st.json(inputs, expanded=False)
