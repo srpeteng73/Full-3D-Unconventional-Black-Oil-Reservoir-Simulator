@@ -874,12 +874,21 @@ def run_simulation_engine(state):
     })
 
     # ---- run engine ----
+    st.write("--- DEBUG INFO ---")
+    st.write("Inputs passed to simulator:")
+    st.json(inputs, expanded=False)
+
     try:
         out = simulate(inputs)
     except Exception as e:
-        st.error(f"Simulation error: {e}")
+        st.error(f"FATAL SIMULATION ERROR: {e}")
+        st.exception(e) # This will print the full traceback to the screen
         return None
 
+    st.write("Full output dictionary from simulator:")
+    st.write(out)
+    st.write("--- END DEBUG INFO ---")
+    
     # TEMPORARY DIAGNOSTIC: Print the keys returned by the simulator
     st.info(f"Simulator output keys: {list(out.keys())}")
     # ---- unpack time series ----
@@ -2107,6 +2116,10 @@ elif selected_tab == "Economics":
             'Revenue': '${:,.0f}', 'Royalty': '${:,.0f}', 'Taxes': '${:,.0f}',
             'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
         }), use_container_width=True)
+
+elif selected_tab == "EUR vs Lateral Length":
+    st.header("EUR vs Lateral Length Sensitivity")
+    st.info("This feature is not yet implemented. It will allow you to run multiple simulations to see how EUR changes with lateral length.")
 
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
