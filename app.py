@@ -829,9 +829,9 @@ def run_simulation_engine(state):
         "dx": float(state.get("dx_ft", state.get("dx", 100.0))),
         "dy": float(state.get("dy_ft", state.get("dy", 100.0))),
         "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
-        "phi": float(state.get("phi", 0.08)),
-        "kx_md": float(state.get("kx_md", 100.0)),
-        "ky_md": float(state.get("ky_md", 100.0)),
+        "phi": st.session_state.get("phi"), # Use generated properties
+        "kx_md": st.session_state.get("kx"), # Use generated properties
+        "ky_md": st.session_state.get("ky"), # Use generated properties
         "p_init_psi": float(state.get("p_init_psi", 5000.0)),
         # relperm
         "nw": float(state.get("nw", 2.0)),
@@ -873,7 +873,7 @@ def run_simulation_engine(state):
         "eur_gas_min_mscfd": eur_cutoffs["gas_min_mscfd"],
     })
 
-   # ---- run engine ----
+    # ---- run engine ----
     st.write("--- DEBUG INFO ---")
     st.write("Inputs passed to simulator:")
     st.json(inputs, expanded=False)
@@ -890,23 +890,23 @@ def run_simulation_engine(state):
     st.write("--- END DEBUG INFO ---")
     
     # ---- unpack time series ----
-t = out.get("t")
-qg = out.get("qg")
-qo = out.get("qo")
-qw = out.get("qw")
+    t = out.get("t")
+    qg = out.get("qg")
+    qo = out.get("qo")
+    qw = out.get("qw")
 
-# --- ROBUSTNESS CHECK ---
-# If the implicit engine fails to return rates, stop with a clear error.
-if t is None or (qg is None and qo is None):
-    st.error(
-        "FATAL ENGINE ERROR: The selected 3D Implicit Engine ran but did not return production rates. "
-        "This indicates an issue within the core Fortran/C++ solver. "
-        "Please switch to the 'Analytical Model (Fast Proxy)' engine for now."
-    )
-    st.info("Full simulator output for debugging:")
-    st.write(out) # Show the partial output
-    return None
-    
+    # --- ROBUSTNESS CHECK ---
+    # If the implicit engine fails to return rates, stop with a clear error.
+    if t is None or (qg is None and qo is None):
+        st.error(
+            "FATAL ENGINE ERROR: The selected 3D Implicit Engine ran but did not return production rates. "
+            "This indicates an issue within the core Fortran/C++ solver. "
+            "Please switch to the 'Analytical Model (Fast Proxy)' engine for now."
+        )
+        st.info("Full simulator output for debugging:")
+        st.write(out) # Show the partial output
+        return None
+
     # ---- apply EUR cutoffs (resource-aware) BEFORE integration ----
     t = np.asarray(t, float)
     mask_time = t <= (eur_cutoffs["max_years"] * 365.25)
@@ -1000,7 +1000,6 @@ if t is None or (qg is None and qo is None):
             final[k] = out[k]
 
     # --- Robustness Fix for QA/Material Balance ---
-    # If the solver does not return a p_avg_psi time series, create a simplified one.
     if "p_avg_psi" not in final or final["p_avg_psi"] is None:
         p_initial_grid = final.get("p_initial")    # CORRECT KEY
         p_final_grid = final.get("p_final")        # CORRECT KEY
@@ -1015,6 +1014,7 @@ if t is None or (qg is None and qo is None):
     # 👇 add compact signature just before returning
     final["_sim_signature"] = _sim_signature_from_state()
     return final
+    
 # PASTE THIS NEW, COMPLETE SIDEBAR BLOCK IN ITS PLACE
 
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
