@@ -1340,19 +1340,21 @@ elif selected_tab == "Results":
             key="eur_min_rate_oil_stbd",
         )
 
-    run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
-    if run_clicked:
-        if "kx" not in st.session_state:
-            st.info("Rock properties not found. Generating them first...")
-            generate_property_volumes(state)
-        with st.spinner("Running full 3D simulation..."):
-            sim_out = run_simulation_engine(state)
-            if sim_out is None:
-                st.session_state.sim = None
-                # The run_simulation_engine function will now show the error, no need to repeat
-            else:
-                st.session_state.sim = sim_out
-
+    # DEFINITIVE FIX
+run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
+if run_clicked:
+    # ALWAYS CLEAR THE PREVIOUS RESULT BEFORE A NEW RUN
+    st.session_state.sim = None 
+    
+    if "kx" not in st.session_state:
+        st.info("Rock properties not found. Generating them first...")
+        generate_property_volumes(state)
+    with st.spinner("Running full 3D simulation..."):
+        sim_out = run_simulation_engine(state)
+        # Only update the session state if the simulation was successful
+        if sim_out is not None:
+            st.session_state.sim = sim_out
+            
     # ---- fetch sim & guard against stale signatures ----
     sim = st.session_state.get("sim")
     cur_sig  = _sim_signature_from_state()
