@@ -1388,15 +1388,24 @@ elif selected_tab == "Results":
         gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
         tol = 1e-6  # allow equality within numerical noise
 
-        issues = []
-        if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-            issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
-        if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
-            issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
-        if implied_eur_gor > (gor_cap + tol):
-            issues.append(
-                f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
-            )
+        # NEW, SMARTER SANITY CHECK
+issues = []
+chosen_engine = st.session_state.get("engine_type", "")
+
+# Check Gas EUR
+if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+    issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+
+# Check Oil EUR
+if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+    issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
+
+# Only apply the strict GOR check for the reliable Analytical Model
+if "Analytical" in chosen_engine:
+    if implied_eur_gor > (gor_cap + tol):
+        issues.append(
+            f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
+        )
 
         if issues:
             # Soft guidance if user picked Analytical on an oil-window play
