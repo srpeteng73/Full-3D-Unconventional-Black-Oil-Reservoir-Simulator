@@ -1989,9 +1989,16 @@ elif selected_tab == "Economics":
     else:
         sim = st.session_state["sim"]
         t = np.asarray(sim.get("t", []), float)
-        qo = np.nan_to_num(np.asarray(sim.get("qo", [])), nan=0.0)
-        qg = np.nan_to_num(np.asarray(sim.get("qg", [])), nan=0.0)
-        qw = np.nan_to_num(np.asarray(sim.get("qw", [])), nan=0.0)
+
+        # --- DEFINITIVE FIX: Handle potentially missing simulation outputs ---
+        # If a rate stream is None from the simulator, create a zero-array of the correct length.
+        qo_raw = sim.get("qo")
+        qg_raw = sim.get("qg")
+        qw_raw = sim.get("qw")
+
+        qo = np.nan_to_num(np.asarray(qo_raw), nan=0.0) if qo_raw is not None else np.zeros_like(t)
+        qg = np.nan_to_num(np.asarray(qg_raw), nan=0.0) if qg_raw is not None else np.zeros_like(t)
+        qw = np.nan_to_num(np.asarray(qw_raw), nan=0.0) if qw_raw is not None else np.zeros_like(t)
         
         st.subheader("Economic Assumptions")
         c1, c2, c3, c4 = st.columns(4)
@@ -2042,7 +2049,6 @@ elif selected_tab == "Economics":
             irr = np.nan
 
         # --- Payout Calculation & Final DataFrame for Display ---
-        # Start with CAPEX at year -1 (or 0 if no production)
         if cash_flows:
             display_df = pd.DataFrame({'year': range(-1, len(cash_flows)-1), 'Net Cash Flow': cash_flows})
         else:
@@ -2052,11 +2058,12 @@ elif selected_tab == "Economics":
         
         payout_period = np.nan
         if (display_df['Cumulative Cash Flow'] > 0).any():
-            first_positive_idx = display_df[display_df['Cumulative Cash Flow'] > 0].index[0]
-            if first_positive_idx > 0:
-                last_neg_cum_flow = display_df['Cumulative Cash Flow'].iloc[first_positive_idx - 1]
-                current_year_ncf = display_df['Net Cash Flow'].iloc[first_positive_idx]
-                payout_period = (display_df['year'].iloc[first_positive_idx-1]) + (-last_neg_cum_flow / current_year_ncf if current_year_ncf > 0 else np.inf)
+            # Find the first index where cumulative cash flow is positive
+            first_positive_idx_loc = display_df['Cumulative Cash Flow'].gt(0).idxmax()
+            if first_positive_idx_loc > 0 and display_df['Cumulative Cash Flow'].iloc[first_positive_idx_loc-1] < 0:
+                last_neg_cum_flow = display_df['Cumulative Cash Flow'].iloc[first_positive_idx_loc - 1]
+                current_year_ncf = display_df['Net Cash Flow'].iloc[first_positive_idx_loc]
+                payout_period = (display_df['year'].iloc[first_positive_idx_loc-1]) + (-last_neg_cum_flow / current_year_ncf if current_year_ncf > 0 else np.inf)
 
         st.subheader("Key Financial Metrics")
         m1, m2, m3 = st.columns(3)
@@ -2077,9 +2084,7 @@ elif selected_tab == "Economics":
             st.plotly_chart(fig_cum, use_container_width=True)
         
         st.markdown("##### Yearly Cash Flow Table")
-        # Combine production data with financial data for the final table
         if not df_yearly.empty:
-            # Merge production data (df_yearly) with financial data (display_df)
             full_table_df = pd.merge(df_yearly, display_df, on='year', how='right').fillna(0)
             display_cols = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX', 'Net Cash Flow', 'Cumulative Cash Flow']
             st.dataframe(full_table_df[display_cols].style.format({
@@ -2088,7 +2093,8 @@ elif selected_tab == "Economics":
                 'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
             }), use_container_width=True)
         else:
-            st.dataframe(display_df)            
+
+            st.dataframe(display_df)
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     c1, c2 = st.columns([3, 1])
