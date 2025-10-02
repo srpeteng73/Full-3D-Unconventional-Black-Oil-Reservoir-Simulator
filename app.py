@@ -1207,35 +1207,29 @@ elif selected_tab == "Control Panel":
             help="Choose BHP control or a rate target.",
         )
         if st.session_state.control == "BHP":
-            st.number_input("BHP (psi)", 500.0, 15000.0, float(st.session_state.get("bhp_psi", 2500.0)), 50.0, key="bhp_psi")
-            st.session_state.rate_mscfd = st.session_state.get("rate_mscfd", 0.0)
-            st.session_state.rate_stbd = st.session_state.get("rate_stbd", 0.0)
+            st.number_input("BHP (psi)", 500.0, 15000.0, float(st.session_state.get("bhp_psi", 2500.0)), 50.0, key="pad_bhp_psi")
         elif st.session_state.control == "RATE_GAS_MSCFD":
-            st.number_input("Gas rate (Mscf/d)", 0.0, 500000.0, float(st.session_state.get("rate_mscfd", 5000.0)), 100.0, key="rate_mscfd")
+            st.number_input("Gas rate (Mscf/d)", 0.0, 500000.0, float(st.session_state.get("rate_mscfd", 5000.0)), 100.0, key="pad_rate_mscfd")
         elif st.session_state.control == "RATE_OIL_STBD":
-            st.number_input("Oil rate (STB/d)", 0.0, 20000.0, float(st.session_state.get("rate_stbd", 800.0)), 10.0, key="rate_stbd")
+            st.number_input("Oil rate (STB/d)", 0.0, 20000.0, float(st.session_state.get("rate_stbd", 800.0)), 10.0, key="pad_rate_stbd")
         elif st.session_state.control == "RATE_LIQ_STBD":
-            st.number_input("Liquid rate (STB/d)", 0.0, 40000.0, float(st.session_state.get("rate_stbd", 1200.0)), 10.0, key="rate_stbd")
+            st.number_input("Liquid rate (STB/d)", 0.0, 40000.0, float(st.session_state.get("rate_stbd", 1200.0)), 10.0, key="pad_rate_stbd")
     with c2:
         st.checkbox("Use gravity", bool(st.session_state.get("use_gravity", True)), key="use_gravity")
         st.number_input("kv/kh", 0.01, 1.0, float(st.session_state.get("kvkh", 0.10)), 0.01, "%.2f", key="kvkh")
         st.number_input("Geomech α (1/psi)", 0.0, 1e-3, float(st.session_state.get("geo_alpha", 0.0)), 1e-5, "%.5f", key="geo_alpha")
-    st.markdown("#### Well & Frac Summary")
+    st.markdown("#### Control Summary")
     summary = {
-        "Control": st.session_state.get("control"),
-        "BHP (psi)": st.session_state.get("bhp_psi"),
-        "Gas rate (Mscf/d)": st.session_state.get("rate_mscfd"),
-        "Oil/Liq rate (STB/d)": st.session_state.get("rate_stbd"),
+        "Control": st.session_state.get("pad_ctrl"),
+        "BHP (psi)": st.session_state.get("pad_bhp_psi"),
+        "Gas rate (Mscf/d)": st.session_state.get("pad_rate_mscfd"),
+        "Oil/Liq rate (STB/d)": st.session_state.get("pad_rate_stbd"),
         "Use gravity": st.session_state.get("use_gravity"),
         "kv/kh": st.session_state.get("kvkh"),
         "Geomech α (1/psi)": st.session_state.get("geo_alpha"),
     }
-    try:
-        summary.update({"xf_ft": state.get("xf_ft"), "hf_ft": state.get("hf_ft"), "stage_spacing_ft": state.get("stage_spacing_ft")})
-    except Exception:
-        pass
     st.write(summary)
-
+    
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("Use this tab to (re)generate φ/k grids based on sidebar parameters.")
@@ -1356,7 +1350,7 @@ elif selected_tab == "Results":
             sim_out = run_simulation_engine(state)
             if sim_out is None:
                 st.session_state.sim = None
-                st.error("Simulation failed. Check sidebar parameters and logs.")
+                # The run_simulation_engine function will now show the error, no need to repeat
             else:
                 st.session_state.sim = sim_out
 
@@ -1372,7 +1366,8 @@ elif selected_tab == "Results":
     if sim is None:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
-        st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
+        if sim.get("runtime_s") is not None:
+             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
         # --- Sanity gate: block publishing if EURs are out-of-bounds ---
         eur_g = float(sim.get("EUR_g_BCF", 0.0))
@@ -1381,39 +1376,33 @@ elif selected_tab == "Results":
         play_name = st.session_state.get("play_sel", "")
         b = _sanity_bounds_for_play(play_name)
 
-        # Implied EUR GOR (scf/STB) = 1000 * (BCF / MMBO), guard against divide-by-zero
         implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
-
-        # Cap with tiny tolerance so equality doesn't trip the check
         gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
-        tol = 1e-6  # allow equality within numerical noise
+        tol = 1e-6
 
-        # NEW, SMARTER SANITY CHECK
-issues = []
-chosen_engine = st.session_state.get("engine_type", "")
+        # --- CORRECTED SANITY CHECK BLOCK ---
+        issues = []
+        chosen_engine = st.session_state.get("engine_type", "")
 
-# Check Gas EUR
-if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-    issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
-
-# Check Oil EUR
-if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
-    issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
-
-# Only apply the strict GOR check for the reliable Analytical Model
-if "Analytical" in chosen_engine:
-    if implied_eur_gor > (gor_cap + tol):
-        issues.append(
-            f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
-        )
-
+        # Check Gas EUR
+        if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+            issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+        
+        # Check Oil EUR
+        if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+            issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
+        
+        # Only apply the strict GOR check for the reliable Analytical Model
+        if "Analytical" in chosen_engine:
+            if implied_eur_gor > (gor_cap + tol):
+                issues.append(
+                    f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
+                )
+        
+        # --- END OF CORRECTED SANITY CHECK BLOCK ---
+        
         if issues:
-            # Soft guidance if user picked Analytical on an oil-window play
-            hint = ""
-            chosen_engine = st.session_state.get("engine_type", "")
-            if "Analytical" in chosen_engine and b["max_eur_gor_scfstb"] <= 3000.0:
-                hint = " Tip: switch to an Implicit engine for oil-window plays."
-
+            hint = " Tip: Try increasing the 'Pad BHP (psi)' in the sidebar to be closer to the 'pb_psi' to reduce gas production."
             st.error(
                 "Production results failed sanity checks and were not published.\n\n"
                 "Details:\n- " + "\n- ".join(issues) + hint
@@ -1488,105 +1477,62 @@ if "Analytical" in chosen_engine:
             st.plotly_chart(ofig, use_container_width=True, theme=None)
 
         # ======== Results tab: semi-log plots (Rate & Cumulative) ========
-        # ----- RATE vs TIME (semi-log time; Gas = left y, Oil/Water = right y) -----
         t  = sim.get("t")
-        qg = sim.get("qg")  # Mscf/d
-        qo = sim.get("qo")  # STB/d
-        qw = sim.get("qw")  # STB/d
+        qg = sim.get("qg")
+        qo = sim.get("qo")
+        qw = sim.get("qw")
 
         if t is not None and (qg is not None or qo is not None or qw is not None):
             fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
             if qg is not None:
-                fig_rate.add_trace(
-                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2)),
-                    secondary_y=False,
-                )
+                fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)), secondary_y=False)
             if qo is not None:
-                fig_rate.add_trace(
-                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2)),
-                    secondary_y=True,
-                )
+                fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)), secondary_y=True)
             if qw is not None:
-                fig_rate.add_trace(
-                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot")),
-                    secondary_y=True,
-                )
-
+                fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)), secondary_y=True)
+            
             fig_rate.update_layout(
                 template="plotly_white",
                 title_text="<b>Production Rate vs. Time</b>",
                 height=450,
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1.0, bgcolor="rgba(255,255,255,0.7)"
-                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
                 font=dict(size=13),
                 margin=dict(l=10, r=10, t=50, b=10),
             )
-            fig_rate.update_xaxes(
-                type="log",
-                dtick=1,                              # decades
-                tickvals=[1, 10, 100, 1000, 10000],   # 10^0 ... 10^4 days
-                minor=dict(showgrid=True),
-                showgrid=True, gridwidth=1,
-                title="Time (days)",
-            )
-            fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False, showgrid=True, gridwidth=1)
-            fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True,  showgrid=False)
-
+            fig_rate.update_xaxes(type="log", dtick=1, tickvals=[1, 10, 100, 1000, 10000], title="Time (days)")
+            fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False)
+            fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
             st.plotly_chart(fig_rate, use_container_width=True, theme=None)
         else:
             st.warning("Rate series not available.")
 
-        # ----- CUMULATIVE (semi-log time; Gas = BCF left, Liquids = MMbbl right) -----
-        cum_g = sim.get("cum_g_BCF")   # array-like or None
-        cum_o = sim.get("cum_o_MMBO")  # array-like or None
-        cum_w = sim.get("cum_w_MMBL")  # array-like or None
+        cum_g = sim.get("cum_g_BCF")
+        cum_o = sim.get("cum_o_MMBO")
+        cum_w = sim.get("cum_w_MMBL")
 
         if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
             fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
             if cum_g is not None:
-                fig_cum.add_trace(
-                    go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3)),
-                    secondary_y=False,
-                )
+                fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3, color=COLOR_GAS)), secondary_y=False)
             if cum_o is not None:
-                fig_cum.add_trace(
-                    go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3)),
-                    secondary_y=True,
-                )
+                fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3, color=COLOR_OIL)), secondary_y=True)
             if cum_w is not None:
-                fig_cum.add_trace(
-                    go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot")),
-                    secondary_y=True,
-                )
-
+                fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot", color=COLOR_WATER)), secondary_y=True)
+            
             fig_cum.update_layout(
                 template="plotly_white",
                 title_text="<b>Cumulative Production</b>",
                 height=450,
-                legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1.0, bgcolor="rgba(255,255,255,0.7)"
-                ),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
                 font=dict(size=13),
                 margin=dict(l=10, r=10, t=50, b=10),
             )
-            fig_cum.update_xaxes(
-                type="log",
-                dtick=1,
-                tickvals=[1, 10, 100, 1000, 10000],
-                minor=dict(showgrid=True),
-                showgrid=True, gridwidth=1,
-                title="Time (days)",
-            )
-            fig_cum.update_yaxes(title_text="Gas (BCF)",        secondary_y=False, showgrid=True,  gridwidth=1)
-            fig_cum.update_yaxes(title_text="Liquids (MMbbl)",  secondary_y=True,  showgrid=False)
-
+            fig_cum.update_xaxes(type="log", dtick=1, tickvals=[1, 10, 100, 1000, 10000], title="Time (days)")
+            fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False)
+            fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
             st.plotly_chart(fig_cum, use_container_width=True, theme=None)
         else:
             st.warning("Cumulative series not available.")
-
 # #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
