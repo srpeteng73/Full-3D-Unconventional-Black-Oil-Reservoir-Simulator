@@ -889,17 +889,23 @@ def run_simulation_engine(state):
     st.write(out)
     st.write("--- END DEBUG INFO ---")
     
-    # TEMPORARY DIAGNOSTIC: Print the keys returned by the simulator
-    st.info(f"Simulator output keys: {list(out.keys())}")
     # ---- unpack time series ----
-    t = out.get("t")
-    qg = out.get("qg")  # expected Mscf/d
-    qo = out.get("qo")  # STB/d
-    qw = out.get("qw")  # STB/d
-    if t is None or (qg is None and qo is None):
-        st.error("Engine did not return time series.")
-        return None
+t = out.get("t")
+qg = out.get("qg")
+qo = out.get("qo")
+qw = out.get("qw")
 
+# --- ROBUSTNESS CHECK ---
+# If the implicit engine fails to return rates, stop with a clear error.
+if t is None or (qg is None and qo is None):
+    st.error(
+        "FATAL ENGINE ERROR: The selected 3D Implicit Engine ran but did not return production rates. "
+        "This indicates an issue within the core Fortran/C++ solver. "
+        "Please switch to the 'Analytical Model (Fast Proxy)' engine for now."
+    )
+    st.info("Full simulator output for debugging:")
+    st.write(out) # Show the partial output
+    return None
     # ---- apply EUR cutoffs (resource-aware) BEFORE integration ----
     t = np.asarray(t, float)
     mask_time = t <= (eur_cutoffs["max_years"] * 365.25)
@@ -1903,99 +1909,86 @@ elif selected_tab == "Slice Viewer":
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     sim = st.session_state.get("sim")
+
     if sim is None:
         st.warning("Run a simulation on the 'Results' tab to view QA plots.")
         st.stop()
-    # --- Average reservoir pressure series (new: p_avg_psi fallback to pm_mid_psi)
+
+    # --- ROBUSTNESS CHECK ---
+    # Check for average pressure at the very beginning.
     pavg = sim.get("p_avg_psi") or sim.get("pm_mid_psi")
     if pavg is None:
-        st.info("Average reservoir pressure time series not returned by solver.")
-        st.stop()
-    # Quick pressure vs time plot
+        st.info("Average reservoir pressure time series not returned by solver. Cannot generate Material Balance plots.")
+        st.stop() # Stop execution for this tab if data is missing
+
+    # If we have pavg, proceed with the plots
     if "t" in sim and len(sim["t"]) == len(pavg):
         fig_p = go.Figure(go.Scatter(x=sim["t"], y=pavg, name="p̄ reservoir (psi)"))
         fig_p.update_layout(template="plotly_white", title_text="<b>Average Reservoir Pressure</b>", xaxis_title="Time (days)", yaxis_title="Pressure (psi)")
         st.plotly_chart(fig_p, use_container_width=True, theme=None)
-    # --- Guard for rates needed below
+    
     if not all(k in sim for k in ("t", "qg", "qo")) or len(sim["t"]) < 2:
-        st.warning("Simulation data is missing required arrays ('t', 'qg', 'qo') for this analysis.")
+        st.warning("Simulation data is missing required rate arrays ('qg', 'qo') for this analysis.")
         st.stop()
+
     t = np.asarray(sim["t"], float)
-    qg = np.asarray(sim["qg"], float)  # Mscf/d
-    qo = np.asarray(sim["qo"], float)  # STB/d
-    # ============================== GAS MATERIAL BALANCE ==============================
+    qg = np.asarray(sim["qg"], float)
+    qo = np.asarray(sim["qo"], float)
+    
     st.markdown("### Gas Material Balance")
-    # Cumulative gas on x-axis in MMscf (units: qg[Mscf/d] ⨉ dt[d] → Mscf → /1e3 → MMscf)
-    Gp_Mscf = cumulative_trapezoid(qg, t, initial=0.0)  # Mscf
-    Gp_MMscf = Gp_Mscf / 1e3  # MMscf
-    # P/Z
+    Gp_MMscf = cumulative_trapezoid(qg, t, initial=0.0) / 1e3
     z_factors = z_factor_approx(np.asarray(pavg), p_init_psi=state["p_init_psi"])
     p_over_z = np.asarray(pavg) / np.maximum(z_factors, 1e-12)
-    # Linear fit (ignore early transients: start at 25% of points)
     fit_start = max(1, len(Gp_MMscf) // 4)
-    slope, intercept, _, _, _ = stats.linregress(Gp_MMscf[fit_start:], p_over_z[fit_start:])
-    # GIIP from P/Z line intercept (Gp at P/Z = 0). Convert MMscf→BCF (/1000).
-    giip_bcf = max(0.0, -intercept / slope / 1000.0) if slope != 0 else 0.0
-    # Simulator EUR (fallback compute if not provided)
-    sim_eur_g_bcf = sim.get("EUR_g_BCF")
-    if sim_eur_g_bcf is None:
-        sim_eur_g_bcf = np.trapz(qg, t) / 1e6  # Mscf → BCF
-    c1, c2 = st.columns(2)
-    c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF")
-    c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=(f"{(giip_bcf - sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim" if sim_eur_g_bcf > 0 else None))
-    # Plot P/Z vs cumulative gas (MMscf)
-    fig_pz_gas = go.Figure()
-    fig_pz_gas.add_trace(go.Scatter(x=Gp_MMscf, y=p_over_z, mode="markers", name="P/Z Data"))
-    x_fit = np.array([0.0, giip_bcf * 1000.0])  # MMscf
-    y_fit = slope * x_fit + intercept
-    fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines", name="Linear Extrapolation", line=dict(dash="dash")))
-    xmax = max(Gp_MMscf.max(), (giip_bcf * 1000.0) * 1.05)
-    fig_pz_gas.update_layout(
-        title="<b>P/Z vs. Cumulative Gas Production</b>",
-        xaxis_title="Gp - Cumulative Gas Production (MMscf)",
-        yaxis_title="P/Z",
-        template="plotly_white",
-        xaxis_range=[0, xmax]
-    )
-    st.plotly_chart(fig_pz_gas, use_container_width=True, theme="streamlit")
+    if len(Gp_MMscf[fit_start:]) > 1:
+        slope, intercept, _, _, _ = stats.linregress(Gp_MMscf[fit_start:], p_over_z[fit_start:])
+        giip_bcf = max(0.0, -intercept / slope / 1000.0) if slope != 0 else 0.0
+        sim_eur_g_bcf = sim.get("EUR_g_BCF", np.trapz(qg, t) / 1e6)
+        c1, c2 = st.columns(2)
+        c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF")
+        c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=(f"{(giip_bcf - sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim" if sim_eur_g_bcf > 0 else None))
+        fig_pz_gas = go.Figure()
+        fig_pz_gas.add_trace(go.Scatter(x=Gp_MMscf, y=p_over_z, mode="markers", name="P/Z Data"))
+        x_fit = np.array([0.0, giip_bcf * 1000.0])
+        y_fit = slope * x_fit + intercept
+        fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines", name="Linear Extrapolation", line=dict(dash="dash")))
+        fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white")
+        st.plotly_chart(fig_pz_gas, use_container_width=True)
+    else:
+        st.info("Not enough data points for Gas Material Balance plot.")
+    
     st.markdown("---")
-    # ============================== OIL MATERIAL BALANCE ==============================
     st.markdown("### Oil Material Balance")
-    # Cumulative oil (STB) and gas (scf)
-    Np_STB = cumulative_trapezoid(qo, t, initial=0.0)  # STB
-    Gp_scf = cumulative_trapezoid(qg * 1_000.0, t, initial=0.0)  # scf (qg in Mscf/d)
-    # Instantaneous produced GOR Rp (scf/STB)
-    Rp = np.divide(Gp_scf, Np_STB, out=np.zeros_like(Gp_scf), where=Np_STB > 1e-3)  # safe divide
-    # PVT from average reservoir pressure series
-    Bo = Bo_of_p(pavg, state["pb_psi"], state["Bo_pb_rb_stb"])  # rb/STB
-    Rs = Rs_of_p(pavg, state["pb_psi"], state["Rs_pb_scf_stb"])  # scf/STB
-    Bg = Bg_of_p(pavg)  # rb/scf
-    # Initial PVT at p_init
+    Np_STB = cumulative_trapezoid(qo, t, initial=0.0)
+    Gp_scf = cumulative_trapezoid(qg * 1_000.0, t, initial=0.0)
+    Rp = np.divide(Gp_scf, Np_STB, out=np.zeros_like(Gp_scf), where=Np_STB > 1e-3)
+    Bo = Bo_of_p(pavg, state["pb_psi"], state["Bo_pb_rb_stb"])
+    Rs = Rs_of_p(pavg, state["pb_psi"], state["Rs_pb_scf_stb"])
+    Bg = Bg_of_p(pavg)
     p_init = state["p_init_psi"]
     Boi = Bo_of_p(p_init, state["pb_psi"], state["Bo_pb_rb_stb"])
     Rsi = Rs_of_p(p_init, state["pb_psi"], state["Rs_pb_scf_stb"])
-    # Havlena–Odeh: F = Np_STB * (Bo + (Rp - Rs) * Bg) # rb
     F = Np_STB * (Bo + (Rp - Rs) * Bg)
-    Et = (Bo - Boi) + (Rsi - Rs) * Bg  # rb/STB
+    Et = (Bo - Boi) + (Rsi - Rs) * Bg
     fit_start_oil = max(1, len(F) // 4)
-    slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_oil:], F[fit_start_oil:])
-    ooip_mmstb = max(0.0, slope_oil / 1e6)  # rb / (rb/STB) -> STB; /1e6 for MMSTB
-    sim_eur_o_mmstb = sim.get("EUR_o_MMBO")
-    if sim_eur_o_mmstb is None:
-        sim_eur_o_mmstb = np.trapz(qo, t) / 1e6  # STB → MMSTB
-    rec_factor = (sim_eur_o_mmstb / ooip_mmstb * 100.0) if ooip_mmstb > 0 else 0.0
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB")
-    c2.metric("Material Balance OOIP (F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
-    c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
-    fig_mbe_oil = go.Figure()
-    fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode="markers", name="F vs Et Data"))
-    x_fit_oil = np.array([0.0, np.nanmax(Et)])
-    y_fit_oil = slope_oil * x_fit_oil
-    fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode="lines", name=f"Slope (OOIP) = {ooip_mmstb:.2f} MMSTB", line=dict(dash="dash")))
-    fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena–Odeh)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
-    st.plotly_chart(fig_mbe_oil, use_container_width=True, theme="streamlit")
-
+    if len(F[fit_start_oil:]) > 1:
+        slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_oil:], F[fit_start_oil:])
+        ooip_mmstb = max(0.0, slope_oil / 1e6)
+        sim_eur_o_mmstb = sim.get("EUR_o_MMBO", np.trapz(qo, t) / 1e6)
+        rec_factor = (sim_eur_o_mmstb / ooip_mmstb * 100.0) if ooip_mmstb > 0 else 0.0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB")
+        c2.metric("Material Balance OOIP (F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
+        c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
+        fig_mbe_oil = go.Figure()
+        fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode="markers", name="F vs Et Data"))
+        x_fit_oil = np.array([0.0, np.nanmax(Et)])
+        y_fit_oil = slope_oil * x_fit_oil
+        fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode="lines", name=f"Slope (OOIP) = {ooip_mmstb:.2f} MMSTB", line=dict(dash="dash")))
+        fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena–Odeh)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
+        st.plotly_chart(fig_mbe_oil, use_container_width=True)
+    else:
+        st.info("Not enough data points for Oil Material Balance plot.")
 elif selected_tab == "Economics":
     st.header("Financial Model")
     if st.session_state.get("sim") is None:
