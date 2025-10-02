@@ -795,7 +795,6 @@ def _sim_signature_from_state():
     return hash(key)
 
 
-# --- Engine wrapper (drop-in replacement with cutoffs + GOR cap) ---
 def run_simulation_engine(state):
     import time
     import numpy as np
@@ -843,8 +842,8 @@ def run_simulation_engine(state):
         "pb_psi": float(state.get("pb_psi", 3000.0)),
         "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
         "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)),
-        "mu_o_cp": float(state.get("mu_o_cp", 1.2)),
-        "mu_g_cp": float(state.get("mu_g_cp", 0.02)),
+        "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
+        "mu_g_cp": float(state.get("mug_pb_cp", 0.02)),
         # scheduling (pad-level)
         "control": str(state.get("pad_ctrl", "BHP")),
         "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)),
@@ -923,9 +922,9 @@ def run_simulation_engine(state):
     cum_o_STB  = _cum(qo_cut, t_cut)           # STB
     cum_w_STB  = _cum(qw_cut, t_cut) if qw_cut is not None else None
 
-    EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0  # Mscf → BCF
-    EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None else 0.0  # STB  → MMBO
-    EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None else 0.0  # STB  → MMBL
+    EUR_g_BCF  = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None and len(cum_g_Mscf)>0 else 0.0
+    EUR_o_MMBO = float(cum_o_STB[-1]  / 1e6) if cum_o_STB  is not None and len(cum_o_STB)>0 else 0.0
+    EUR_w_MMBL = float(cum_w_STB[-1]  / 1e6) if cum_w_STB  is not None and len(cum_w_STB)>0 else 0.0
 
     # ---- GOR-consistency cap (tighter of basin cap vs ~3×Rs(pb)), tolerance-aware ----
     b = _sanity_bounds_for_play(play_name)
@@ -942,24 +941,19 @@ def run_simulation_engine(state):
             target_gor = max(gor_cap_eff - tol, 0.0)
             scale = target_gor / max(implied_eur_gor, 1e-12)
 
-            # Scale gas series/cumulative in the same (cut) window
             if qg_cut is not None:
                 qg_cut = np.asarray(qg_cut, float) * scale
             if cum_g_Mscf is not None:
                 cum_g_Mscf = cum_g_Mscf * scale
 
-            # Recompute EUR_g_BCF after scaling
-            EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None else 0.0
+            EUR_g_BCF = float(cum_g_Mscf[-1] / 1e6) if cum_g_Mscf is not None and len(cum_g_Mscf)>0 else 0.0
 
-    # Keep the (possibly scaled) cut series for plots/outputs
     t, qg, qo, qw = t_cut, qg_cut, qo_cut, qw_cut
 
-    # ---- package cumulative series in output units for plotting ----
     cum_g_BCF  = (cum_g_Mscf / 1e6) if cum_g_Mscf is not None else None
     cum_o_MMBO = (cum_o_STB  / 1e6) if cum_o_STB  is not None else None
     cum_w_MMBL = (cum_w_STB  / 1e6) if cum_w_STB  is not None else None
 
-    # ---- engine-side validation (Midland-type sanity + PVT GOR) ----
     ok_eur, eur_msg = validate_midland_eur(
         EUR_o_MMBO,
         EUR_g_BCF,
@@ -967,7 +961,6 @@ def run_simulation_engine(state):
         Rs_pb=float(state.get("Rs_pb_scf_stb", 0.0)),
     )
 
-    # ---- final dict back to UI ----
     final = dict(
         t=t,
         qg=qg,
@@ -984,15 +977,31 @@ def run_simulation_engine(state):
         runtime_s=time.time() - t0,
     )
 
-    # pass through 3D/QA arrays if present
     for k in ("press_matrix", "p_init_3d", "ooip_3d", "p_avg_psi", "pm_mid_psi"):
         if k in out:
             final[k] = out[k]
 
+    # --- Robustness Fix for QA/Material Balance ---
+    # If the solver does not return a p_avg_psi time series, create a simplified one.
+    # This is crucial for the Material Balance tab to function with all engines.
+    if "p_avg_psi" not in final or final["p_avg_psi"] is None:
+        p_initial = final.get("p_init_3d")
+        p_final_grid = final.get("press_matrix")
+        
+        # Check if we have the necessary 3D pressure grids
+        if p_initial is not None and p_final_grid is not None and t is not None and len(t) > 1:
+            # Calculate the initial and final average pressures from the 3D grid
+            p_avg_initial = np.mean(p_initial)
+            p_avg_final = np.mean(p_final_grid)
+            
+            # Create a simple linear interpolation of average pressure over time
+            # This is an approximation but allows the Material Balance plots to work.
+            p_avg_series = np.linspace(p_avg_initial, p_avg_final, num=len(t))
+            final["p_avg_psi"] = p_avg_series
+
     # 👇 add compact signature just before returning
     final["_sim_signature"] = _sim_signature_from_state()
     return final
-
 
 # PASTE THIS NEW, COMPLETE SIDEBAR BLOCK IN ITS PLACE
 
