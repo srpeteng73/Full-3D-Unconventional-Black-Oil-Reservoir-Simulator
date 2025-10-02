@@ -977,32 +977,26 @@ def run_simulation_engine(state):
         runtime_s=time.time() - t0,
     )
 
-    for k in ("press_matrix", "p_init_3d", "ooip_3d", "p_avg_psi", "pm_mid_psi"):
+    for k in ("press_matrix", "p_init_3d", "ooip_3d", "p_avg_psi", "pm_mid_psi", "p_initial", "p_final"):
         if k in out:
             final[k] = out[k]
 
     # --- Robustness Fix for QA/Material Balance ---
     # If the solver does not return a p_avg_psi time series, create a simplified one.
-    # This is crucial for the Material Balance tab to function with all engines.
     if "p_avg_psi" not in final or final["p_avg_psi"] is None:
-        p_initial = final.get("p_init_3d")
-        p_final_grid = final.get("press_matrix")
+        p_initial_grid = final.get("p_initial")    # CORRECT KEY
+        p_final_grid = final.get("p_final")        # CORRECT KEY
         
-        # Check if we have the necessary 3D pressure grids
-        if p_initial is not None and p_final_grid is not None and t is not None and len(t) > 1:
-            # Calculate the initial and final average pressures from the 3D grid
-            p_avg_initial = np.mean(p_initial)
+        if p_initial_grid is not None and p_final_grid is not None and t is not None and len(t) > 1:
+            p_avg_initial = np.mean(p_initial_grid)
             p_avg_final = np.mean(p_final_grid)
             
-            # Create a simple linear interpolation of average pressure over time
-            # This is an approximation but allows the Material Balance plots to work.
             p_avg_series = np.linspace(p_avg_initial, p_avg_final, num=len(t))
             final["p_avg_psi"] = p_avg_series
 
     # 👇 add compact signature just before returning
     final["_sim_signature"] = _sim_signature_from_state()
     return final
-
 # PASTE THIS NEW, COMPLETE SIDEBAR BLOCK IN ITS PLACE
 
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
