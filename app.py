@@ -972,13 +972,12 @@ with st.sidebar:
         st.number_input("Frac height hf (ft)", value=float(st.session_state.hf_ft), step=5.0, key="hf_ft")
         st.slider("Pad interference coeff.", 0.00, 0.80, float(st.session_state.pad_interf), 0.01, key="pad_interf")
 
-  with st.expander("Controls & Boundary", expanded=False):
+ with st.expander("Controls & Boundary", expanded=False):
         st.selectbox("Pad control", ["BHP", "RATE"], key="pad_ctrl")
         st.number_input("Pad BHP (psi)", value=float(st.session_state.pad_bhp_psi), step=10.0, key="pad_bhp_psi")
         st.number_input("Pad RATE (Mscf/d)", value=float(st.session_state.pad_rate_mscfd), step=1000.0, key="pad_rate_mscfd")
         st.selectbox("Outer boundary", ["Infinite-acting", "Constant-p"], key="outer_bc")
         st.number_input("Boundary pressure (psi)", value=float(st.session_state.p_outer_psi), step=10.0, key="p_outer_psi")
-    
     
     with st.expander("DFN (Discrete Fracture Network)", expanded=False):
         st.checkbox("Use DFN-driven sink in solver", value=bool(st.session_state.use_dfn_sink), key="use_dfn_sink")
