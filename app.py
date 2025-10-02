@@ -1990,8 +1990,7 @@ elif selected_tab == "Economics":
         sim = st.session_state["sim"]
         t = np.asarray(sim.get("t", []), float)
 
-        # --- DEFINITIVE FIX: Handle potentially missing simulation outputs ---
-        # If a rate stream is None from the simulator, create a zero-array of the correct length.
+        # Handle potentially missing simulation outputs by creating zero-arrays
         qo_raw = sim.get("qo")
         qg_raw = sim.get("qg")
         qw_raw = sim.get("qw")
@@ -2045,20 +2044,15 @@ elif selected_tab == "Economics":
         npv = npf.npv(disc_rate, cash_flows) if cash_flows else 0
         try:
             irr = npf.irr(cash_flows) if len(cash_flows) > 1 else np.nan
-        except:
+        except ValueError:
             irr = np.nan
 
         # --- Payout Calculation & Final DataFrame for Display ---
-        if cash_flows:
-            display_df = pd.DataFrame({'year': range(-1, len(cash_flows)-1), 'Net Cash Flow': cash_flows})
-        else:
-            display_df = pd.DataFrame(columns=['year', 'Net Cash Flow'])
-
+        display_df = pd.DataFrame({'year': range(-1, len(cash_flows)-1), 'Net Cash Flow': cash_flows})
         display_df['Cumulative Cash Flow'] = display_df['Net Cash Flow'].cumsum()
         
         payout_period = np.nan
         if (display_df['Cumulative Cash Flow'] > 0).any():
-            # Find the first index where cumulative cash flow is positive
             first_positive_idx_loc = display_df['Cumulative Cash Flow'].gt(0).idxmax()
             if first_positive_idx_loc > 0 and display_df['Cumulative Cash Flow'].iloc[first_positive_idx_loc-1] < 0:
                 last_neg_cum_flow = display_df['Cumulative Cash Flow'].iloc[first_positive_idx_loc - 1]
@@ -2083,18 +2077,32 @@ elif selected_tab == "Economics":
             fig_cum.update_layout(template='plotly_white')
             st.plotly_chart(fig_cum, use_container_width=True)
         
+        # --- DEFINITIVE FIX FOR TABLE DISPLAY ---
         st.markdown("##### Yearly Cash Flow Table")
+        # Start with the financial-only dataframe
+        final_table = display_df.copy()
+        
+        # If there is production data, merge it in.
         if not df_yearly.empty:
-            full_table_df = pd.merge(df_yearly, display_df, on='year', how='right').fillna(0)
-            display_cols = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX', 'Net Cash Flow', 'Cumulative Cash Flow']
-            st.dataframe(full_table_df[display_cols].style.format({
-                'oil_stb': '{:,.0f}', 'gas_mscf': '{:,.0f}', 'water_stb': '{:,.0f}',
-                'Revenue': '${:,.0f}', 'Royalty': '${:,.0f}', 'Taxes': '${:,.0f}',
-                'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
-            }), use_container_width=True)
-        else:
+            # We only need the production and revenue columns from df_yearly
+            cols_to_merge = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX']
+            final_table = pd.merge(final_table, df_yearly[cols_to_merge], on='year', how='left')
 
-            st.dataframe(display_df)
+        # Ensure all required columns exist, filling with 0 if they don't
+        display_cols = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX', 'Net Cash Flow', 'Cumulative Cash Flow']
+        for col in display_cols:
+            if col not in final_table.columns:
+                final_table[col] = 0
+        
+        # Reorder columns to the desired display order and fill any remaining NaNs
+        final_table = final_table[display_cols].fillna(0)
+        
+        st.dataframe(final_table.style.format({
+            'oil_stb': '{:,.0f}', 'gas_mscf': '{:,.0f}', 'water_stb': '{:,.0f}',
+            'Revenue': '${:,.0f}', 'Royalty': '${:,.0f}', 'Taxes': '${:,.0f}',
+            'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
+        }), use_container_width=True)
+
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     c1, c2 = st.columns([3, 1])
