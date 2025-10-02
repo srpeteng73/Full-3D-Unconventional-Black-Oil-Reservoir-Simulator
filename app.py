@@ -880,6 +880,8 @@ def run_simulation_engine(state):
         st.error(f"Simulation error: {e}")
         return None
 
+    # TEMPORARY DIAGNOSTIC: Print the keys returned by the simulator
+    st.info(f"Simulator output keys: {list(out.keys())}")
     # ---- unpack time series ----
     t = out.get("t")
     qg = out.get("qg")  # expected Mscf/d
