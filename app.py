@@ -14,6 +14,7 @@ from scipy.interpolate import interp1d
 import numpy_financial as npf
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
+import warnings  # trap analytical power warnings for Arps
 
 # ==== EUR & Validation helpers ===============================================
 from scipy.integrate import cumulative_trapezoid as _ctr
@@ -722,8 +723,21 @@ def _get_sim_preview():
     tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     try:
-        result = fallback_fast_solver(tmp, rng_preview)
-        return result
+        # --- SAFETY NET FOR PREVIEW ---
+        # We explicitly watch for the classic Arps power failure:
+        # RuntimeWarning: invalid value encountered in power
+        # That happens if (1 + b*D*t) becomes negative and is raised to 1/b.
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always", RuntimeWarning)
+            result = fallback_fast_solver(tmp, rng_preview)
+            # If the solver emitted a "power" invalid warning, attempt one sanitized retry.
+            bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
+            if bad_power or _looks_nan_like(result):
+                tmp2 = _sanitize_decline_params(tmp.copy())
+                result = fallback_fast_solver(tmp2, rng_preview)
+            # Ensure no NaNs leak into charts
+            result = _nan_guard_result(result)
+            return result
     except Exception as e:
         st.error("ERROR IN PREVIEW SOLVER (_get_sim_preview):")
         st.exception(e)
