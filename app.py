@@ -1282,6 +1282,8 @@ elif selected_tab == "Generate 3D property volumes":
     else:
         st.info("Click the button above to generate initial property volumes.")
         
+
+
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000, state["p_min_bhp_psi"]), max(2000, state["p_init_psi"] + 1000), 120)
