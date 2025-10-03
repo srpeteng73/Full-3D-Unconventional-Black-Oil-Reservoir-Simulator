@@ -882,84 +882,111 @@ def run_simulation_engine(state):
     from scipy.integrate import cumulative_trapezoid
     from core.full3d import simulate
     from engines.fast import fallback_fast_solver
+
     t0 = time.time()
 
     # --- FINAL ROBUSTNESS CHECK FOR INPUTS ---
     if state.get('stage_spacing_ft', 0) <= 0:
-        st.error(f"FATAL INPUT ERROR: 'Stage spacing (ft)' must be a positive number. Current value: {state.get('stage_spacing_ft')}")
+        st.error(
+            "FATAL INPUT ERROR: 'Stage spacing (ft)' must be a positive number. "
+            f"Current value: {state.get('stage_spacing_ft')}"
+        )
         return None
     if state.get('L_ft', 0) <= 0:
-        st.error(f"FATAL INPUT ERROR: 'Lateral length (ft)' must be a positive number. Current value: {state.get('L_ft')}")
+        st.error(
+            "FATAL INPUT ERROR: 'Lateral length (ft)' must be a positive number. "
+            f"Current value: {state.get('L_ft')}"
+        )
         return None
     # --- END OF CHECK ---
 
+    # --- choose engine & run ---
     chosen_engine = st.session_state.get("engine_type", "")
     out = None
 
-   try:
-    if "Analytical" in chosen_engine:
-        # Call the fast analytical solver
-        rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
+    try:
+        if "Analytical" in chosen_engine:
+            # Call the fast analytical solver
+            rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
 
-        # --- CRASH-PROOF ANALYTICAL CALL PATH ---
-        # 1) Run once while listening for the "invalid value encountered in power" warning
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always", RuntimeWarning)
-            out = fallback_fast_solver(state, rng)
-            bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
+            # --- CRASH-PROOF ANALYTICAL CALL PATH ---
+            # 1) Run once while listening for the "invalid value encountered in power" warning
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", RuntimeWarning)
+                out = fallback_fast_solver(state, rng)
+                bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
 
-            # 2) If we saw the classic Arps failure OR the output looks NaN-ish, sanitize & retry
-            if bad_power or _looks_nan_like(out):
-                st.info(
-                    "Analytical model encountered an unstable hyperbolic power term. "
-                    "Retrying with safe decline parameters …"
-                )
-                safe_state = _sanitize_decline_params(state.copy())
-                out = fallback_fast_solver(safe_state, rng)
+                # 2) If we saw the classic Arps failure OR the output looks NaN-ish, sanitize & retry
+                if bad_power or _looks_nan_like(out):
+                    st.info(
+                        "Analytical model encountered an unstable hyperbolic power term. "
+                        "Retrying with safe decline parameters …"
+                    )
+                    safe_state = _sanitize_decline_params(state.copy())
+                    out = fallback_fast_solver(safe_state, rng)
 
-            # 3) Guard against any remaining NaNs so plotting & EUR calc don't crash
-            out = _nan_guard_result(out)
-    else:
-        # (implicit engine path goes here)
-        ...
-except Exception as e:
-    st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
-    st.exception(e)
-    return None
- 
-    else:
+                # 3) Guard against any remaining NaNs so plotting & EUR calc don't crash
+                out = _nan_guard_result(out)
+        else:
             # Call the full 3D implicit simulator
             inputs = {
-                "engine": "implicit", "nx": int(state.get("nx", 20)), "ny": int(state.get("ny", 20)), "nz": int(state.get("nz", 5)),
-                "dx": float(state.get("dx_ft", state.get("dx", 100.0))), "dy": float(state.get("dy_ft", state.get("dy", 100.0))), "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
-                "phi": st.session_state.get("phi"), "kx_md": st.session_state.get("kx"), "ky_md": st.session_state.get("ky"),
-                "p_init_psi": float(state.get("p_init_psi", 5000.0)), "nw": float(state.get("nw", 2.0)), "no": float(state.get("no", 2.0)),
-                "krw_end": float(state.get("krw_end", 0.6)), "kro_end": float(state.get("kro_end", 0.8)),
-                "pb_psi": float(state.get("pb_psi", 3000.0)), "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
-                "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)), "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
-                "mu_g_cp": float(state.get("mug_pb_cp", 0.02)), "control": str(state.get("pad_ctrl", "BHP")),
-                "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)), "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
-                "rate_stbd": float(state.get("pad_rate_stbd", 0.0)), "dt_days": 30.0, "t_end_days": 30 * 365.25,
-                "use_gravity": bool(state.get("use_gravity", True)), "kvkh": 1.0 / float(state.get("anis_kxky", 1.0)),
+                "engine": "implicit",
+                "nx": int(state.get("nx", 20)),
+                "ny": int(state.get("ny", 20)),
+                "nz": int(state.get("nz", 5)),
+                "dx": float(state.get("dx_ft", state.get("dx", 100.0))),
+                "dy": float(state.get("dy_ft", state.get("dy", 100.0))),
+                "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
+                "phi": st.session_state.get("phi"),
+                "kx_md": st.session_state.get("kx"),
+                "ky_md": st.session_state.get("ky"),
+                "p_init_psi": float(state.get("p_init_psi", 5000.0)),
+                "nw": float(state.get("nw", 2.0)),
+                "no": float(state.get("no", 2.0)),
+                "krw_end": float(state.get("krw_end", 0.6)),
+                "kro_end": float(state.get("kro_end", 0.8)),
+                "pb_psi": float(state.get("pb_psi", 3000.0)),
+                "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
+                "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)),
+                "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
+                "mu_g_cp": float(state.get("mug_pb_cp", 0.02)),
+                "control": str(state.get("pad_ctrl", "BHP")),
+                "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)),
+                "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
+                "rate_stbd": float(state.get("pad_rate_stbd", 0.0)),
+                "dt_days": 30.0,
+                "t_end_days": 30 * 365.25,
+                "use_gravity": bool(state.get("use_gravity", True)),
+                "kvkh": 1.0 / float(state.get("anis_kxky", 1.0)),
                 "geo_alpha": float(state.get("geo_alpha", 0.0)),
             }
-            # --- pull arrays from engine output ---
-t  = out.get("t")
-qg = out.get("qg")
-qo = out.get("qo")
+            out = simulate(inputs)
 
-# --- FINAL NaN/Inf GUARD (protects downstream EUR & plots) ---
-# If the engine returned numbers but some are NaN/Inf, replace them with 0.0 so
-# the economic cutoffs and integrals won't fail or render stale/blank charts.
-t  = np.nan_to_num(np.asarray(t,  float), nan=0.0, posinf=0.0, neginf=0.0) if t  is not None else None
-qg = np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0) if qg is not None else None
-qo = np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0) if qo is not None else None
+    except Exception as e:
+        st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
+        st.exception(e)
+        return None
+
+    # --- pull arrays from engine output ---
+    t = out.get("t")
+    qg = out.get("qg")
+    qo = out.get("qo")
+
+    # Final guard: if the engine returned numbers but some are NaN/inf, replace them
+    # so the downstream EUR integrals won't explode and UI won't carry stale plots.
+    t = np.nan_to_num(np.asarray(t, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
 
     if t is None or (qg is None and qo is None):
-        st.error(f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`).")
+        st.error(
+            f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`)."
+        )
         st.info("Full (incomplete) output from simulator for debugging:")
         st.write(out)
         return None
+
+    # ... continue with EUR calc and the rest of your function ...
         
     eur_cutoff_days = float(st.session_state.get("eur_cutoff_days", 30.0 * 365.25))
     min_gas_rate_mscfd = float(st.session_state.get("eur_min_rate_gas_mscfd", 100.0))
