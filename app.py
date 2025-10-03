@@ -1257,31 +1257,7 @@ elif selected_tab == "Control Panel":
     }
     st.write(summary)
     
-elif selected_tab == "Generate 3D property volumes":
-    st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
-    st.info("Use this tab to (re)generate φ/k grids based on sidebar parameters.")
-    
-    if st.button("Generate New Property Volumes", use_container_width=True, type="primary"):
-        generate_property_volumes(state)
-        
-    st.markdown("---")
-    
-    if st.session_state.get('kx') is not None:
-        st.markdown("### Mid-Layer Property Maps")
-        kx_display = get_k_slice(st.session_state.kx, state['nz'] // 2)
-        ky_display = get_k_slice(st.session_state.ky, state['nz'] // 2)
-        phi_display = get_k_slice(st.session_state.phi, state['nz'] // 2)
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.plotly_chart(px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis", labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"), use_container_width=True)
-        with c2:
-            st.plotly_chart(px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis", labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"), use_container_width=True)
-            
-        st.plotly_chart(px.imshow(phi_display, origin="lower", color_continuous_scale="Magma", labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"), use_container_width=True)
-    else:
-        st.info("Click the button above to generate initial property volumes.")
-        
+
 
 
 elif selected_tab == "PVT (Black-Oil)":
