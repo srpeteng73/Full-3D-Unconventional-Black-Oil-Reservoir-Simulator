@@ -1,5 +1,8 @@
 import numpy as np
 import streamlit as st # Import streamlit for logging
+# Forcing a redeploy on Streamlit Cloud
+import time
+
 
 __all__ = ["fallback_fast_solver"]
 
