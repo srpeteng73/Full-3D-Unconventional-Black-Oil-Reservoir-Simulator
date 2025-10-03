@@ -743,6 +743,72 @@ def _get_sim_preview():
         st.exception(e)
         # Return a dummy structure to prevent crashing the UI layout
         return {'t': [0], 'qg': [0], 'qo': [0], 'EUR_g_BCF': 0, 'EUR_o_MMBO': 0}
+# ------------------------ Arps/decline safety helpers (ANALYTICAL ONLY) ------------------------
+def _sanitize_decline_params(state_like: dict) -> dict:
+    """
+    Human note: Some builds feed different names for hyperbolic parameters.
+    We defensively scan keys for anything that LOOKS like a hyperbolic 'b' or a decline rate,
+    clamp 'b' into a safe (0,1) interval, and force any negative declines positive.
+    This keeps (1 + b*D*t) from ever going negative during power().
+    """
+    SAFE_B_MIN, SAFE_B_MAX = 1.0e-6, 0.95
+
+    def _clip_b(x):
+        try:
+            xv = float(x)
+            return min(max(xv, SAFE_B_MIN), SAFE_B_MAX)
+        except Exception:
+            return x
+
+    def _abs_decline(x):
+        try:
+            return abs(float(x))
+        except Exception:
+            return x
+
+    for k in list(state_like.keys()):
+        lk = k.lower()
+        # Common patterns we've seen across fast proxies
+        if lk in ("b", "b_oil", "b_gas", "b_liq", "b_decline", "b_hyp", "bhyp", "bexp"):
+            state_like[k] = _clip_b(state_like[k])
+        # Decline rates frequently show up as D, Di, D1, decline_*, etc.
+        if lk in ("d", "di", "d1", "decline", "decline_rate") or ("decline" in lk):
+            state_like[k] = _abs_decline(state_like[k])
+
+    # Optional: mark that we sanitized to help debug later
+    state_like["__analytical_sanitized__"] = True
+    return state_like
+
+
+def _looks_nan_like(result: dict) -> bool:
+    """Return True if any primary arrays contain NaNs or infs."""
+    if not isinstance(result, dict):
+        return True
+    for key in ("t", "qg", "qo"):
+        if key in result and result[key] is not None:
+            arr = np.asarray(result[key], float)
+            if not np.all(np.isfinite(arr)):
+                return True
+    return False
+
+
+def _nan_guard_result(result: dict) -> dict:
+    """
+    Replace NaNs/infs in rate vectors so the UI can draw safely.
+    We do NOT change EURs here; the engine will re-compute them later in 'Results'.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    out = dict(result)
+    for key in ("t", "qg", "qo", "qw"):
+        if key in out and out[key] is not None:
+            arr = np.asarray(out[key], float)
+            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            out[key] = arr
+    return out
+# -----------------------------------------------------------------------------------------------
+
 
 def generate_property_volumes(state):
     """Generates kx, ky, and phi volumes based on sidebar settings and stores them in session_state."""
@@ -810,6 +876,7 @@ def _sim_signature_from_state():
 
 
 def run_simulation_engine(state):
+    import warnings
     import time
     import numpy as np
     from scipy.integrate import cumulative_trapezoid
@@ -829,13 +896,38 @@ def run_simulation_engine(state):
     chosen_engine = st.session_state.get("engine_type", "")
     out = None
 
-    try:
-        if "Analytical" in chosen_engine:
-            # Call the fast analytical solver
-            rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
-            # The global 'state' dictionary already has all the latest values.
+   try:
+    if "Analytical" in chosen_engine:
+        # Call the fast analytical solver
+        rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
+
+        # --- CRASH-PROOF ANALYTICAL CALL PATH ---
+        # 1) Run once while listening for the "invalid value encountered in power" warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always", RuntimeWarning)
             out = fallback_fast_solver(state, rng)
-        else:
+            bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
+
+            # 2) If we saw the classic Arps failure OR the output looks NaN-ish, sanitize & retry
+            if bad_power or _looks_nan_like(out):
+                st.info(
+                    "Analytical model encountered an unstable hyperbolic power term. "
+                    "Retrying with safe decline parameters …"
+                )
+                safe_state = _sanitize_decline_params(state.copy())
+                out = fallback_fast_solver(safe_state, rng)
+
+            # 3) Guard against any remaining NaNs so plotting & EUR calc don't crash
+            out = _nan_guard_result(out)
+    else:
+        # (implicit engine path goes here)
+        ...
+except Exception as e:
+    st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
+    st.exception(e)
+    return None
+ 
+    else:
             # Call the full 3D implicit simulator
             inputs = {
                 "engine": "implicit", "nx": int(state.get("nx", 20)), "ny": int(state.get("ny", 20)), "nz": int(state.get("nz", 5)),
@@ -851,19 +943,17 @@ def run_simulation_engine(state):
                 "use_gravity": bool(state.get("use_gravity", True)), "kvkh": 1.0 / float(state.get("anis_kxky", 1.0)),
                 "geo_alpha": float(state.get("geo_alpha", 0.0)),
             }
-            out = simulate(inputs)
-    except Exception as e:
-        st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
-        st.exception(e)
-        return None
-    
-    if out is None:
-        st.error("Engine ran but returned no output.")
-        return None
+            # --- pull arrays from engine output ---
+t  = out.get("t")
+qg = out.get("qg")
+qo = out.get("qo")
 
-    t = out.get("t")
-    qg = out.get("qg")
-    qo = out.get("qo")
+# --- FINAL NaN/Inf GUARD (protects downstream EUR & plots) ---
+# If the engine returned numbers but some are NaN/Inf, replace them with 0.0 so
+# the economic cutoffs and integrals won't fail or render stale/blank charts.
+t  = np.nan_to_num(np.asarray(t,  float), nan=0.0, posinf=0.0, neginf=0.0) if t  is not None else None
+qg = np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0) if qg is not None else None
+qo = np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0) if qo is not None else None
 
     if t is None or (qg is None and qo is None):
         st.error(f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`).")
