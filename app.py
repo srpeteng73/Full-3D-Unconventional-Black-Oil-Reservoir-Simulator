@@ -803,10 +803,10 @@ def run_simulation_engine(state):
     import numpy as np
     from scipy.integrate import cumulative_trapezoid
     from core.full3d import simulate
+    from engines.fast import fallback_fast_solver
     t0 = time.time()
 
     # --- FINAL ROBUSTNESS CHECK FOR INPUTS ---
-    # Check for invalid values that can cause division by zero or other errors in the solvers.
     if state.get('stage_spacing_ft', 0) <= 0:
         st.error(f"FATAL INPUT ERROR: 'Stage spacing (ft)' must be a positive number. Current value: {state.get('stage_spacing_ft')}")
         return None
@@ -815,60 +815,47 @@ def run_simulation_engine(state):
         return None
     # --- END OF CHECK ---
 
-    # Detect resource class from the selected play name
-    play_name = st.session_state.get("play_sel", "")
-    _s = (play_name or "").lower()
-    if "condensate" in _s: resource_class = "Condensate"
-    elif "dry gas" in _s or ("gas" in _s and "oil" not in _s and "liquids" not in _s and "condensate" not in _s): resource_class = "Gas"
-    elif "liquids" in _s: resource_class = "Liquids"
-    else: resource_class = "Oil"
     chosen_engine = st.session_state.get("engine_type", "")
-    engine_for_run = ("implicit" if resource_class in ("Oil", "Liquids") and "Analytical" in chosen_engine else ("implicit" if "Implicit" in chosen_engine else "analytical"))
-    
-    # Decide which simulator to call based on the selected engine
-    if "Analytical" in chosen_engine:
-        try:
-            # Use the fast analytical solver
-            rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
-            sim_inputs = {k: st.session_state.get(k, v) for k, v in defaults.items()}
-            out = fallback_fast_solver(sim_inputs, rng)
-        except Exception as e:
-            st.error(f"FATAL ERROR in Analytical Model: {e}")
-            st.exception(e)
-            return None
-    else: # Use the 3D Implicit engine
-        # Build the inputs for the full 3D simulator
-        inputs = {
-            "engine": engine_for_run, "nx": int(state.get("nx", 20)), "ny": int(state.get("ny", 20)), "nz": int(state.get("nz", 5)),
-            "dx": float(state.get("dx_ft", state.get("dx", 100.0))), "dy": float(state.get("dy_ft", state.get("dy", 100.0))), "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
-            "phi": st.session_state.get("phi"), "kx_md": st.session_state.get("kx"), "ky_md": st.session_state.get("ky"),
-            "p_init_psi": float(state.get("p_init_psi", 5000.0)), "nw": float(state.get("nw", 2.0)), "no": float(state.get("no", 2.0)),
-            "krw_end": float(state.get("krw_end", 0.6)), "kro_end": float(state.get("kro_end", 0.8)),
-            "pb_psi": float(state.get("pb_psi", 3000.0)), "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
-            "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)), "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
-            "mu_g_cp": float(state.get("mug_pb_cp", 0.02)), "control": str(state.get("pad_ctrl", "BHP")),
-            "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)), "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
-            "rate_stbd": float(state.get("pad_rate_stbd", 0.0)), "dt_days": 30.0, "t_end_days": 30 * 365.25,
-            "use_gravity": bool(state.get("use_gravity", True)), "kvkh": 1.0 / float(state.get("anis_kxky", 1.0)),
-            "geo_alpha": float(state.get("geo_alpha", 0.0)),
-        }
-        try:
-            out = simulate(inputs)
-        except Exception as e:
-            st.error(f"FATAL 3D SIMULATION ERROR: {e}")
-            st.exception(e)
-            return None
+    out = None
 
-    # ---- Post-processing (common for all engines) ----
+    try:
+        if "Analytical" in chosen_engine:
+            # Call the fast analytical solver
+            rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
+            # The global 'state' dictionary already has all the latest values.
+            out = fallback_fast_solver(state, rng)
+        else:
+            # Call the full 3D implicit simulator
+            inputs = {
+                "engine": "implicit", "nx": int(state.get("nx", 20)), "ny": int(state.get("ny", 20)), "nz": int(state.get("nz", 5)),
+                "dx": float(state.get("dx_ft", state.get("dx", 100.0))), "dy": float(state.get("dy_ft", state.get("dy", 100.0))), "dz": float(state.get("dz_ft", state.get("dz", 50.0))),
+                "phi": st.session_state.get("phi"), "kx_md": st.session_state.get("kx"), "ky_md": st.session_state.get("ky"),
+                "p_init_psi": float(state.get("p_init_psi", 5000.0)), "nw": float(state.get("nw", 2.0)), "no": float(state.get("no", 2.0)),
+                "krw_end": float(state.get("krw_end", 0.6)), "kro_end": float(state.get("kro_end", 0.8)),
+                "pb_psi": float(state.get("pb_psi", 3000.0)), "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.2)),
+                "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 600.0)), "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
+                "mu_g_cp": float(state.get("mug_pb_cp", 0.02)), "control": str(state.get("pad_ctrl", "BHP")),
+                "bhp_psi": float(state.get("pad_bhp_psi", 2500.0)), "rate_mscfd": float(state.get("pad_rate_mscfd", 0.0)),
+                "rate_stbd": float(state.get("pad_rate_stbd", 0.0)), "dt_days": 30.0, "t_end_days": 30 * 365.25,
+                "use_gravity": bool(state.get("use_gravity", True)), "kvkh": 1.0 / float(state.get("anis_kxky", 1.0)),
+                "geo_alpha": float(state.get("geo_alpha", 0.0)),
+            }
+            out = simulate(inputs)
+    except Exception as e:
+        st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
+        st.exception(e)
+        return None
+    
+    if out is None:
+        st.error("Engine ran but returned no output.")
+        return None
+
     t = out.get("t")
     qg = out.get("qg")
     qo = out.get("qo")
 
     if t is None or (qg is None and qo is None):
-        st.error(
-            f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`). "
-            "This indicates a critical issue within the core solver. Please check the logs or try another engine."
-        )
+        st.error(f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`).")
         st.info("Full (incomplete) output from simulator for debugging:")
         st.write(out)
         return None
@@ -910,8 +897,7 @@ def run_simulation_engine(state):
             final["p_avg_psi"] = p_avg_series
 
     final["_sim_signature"] = _sim_signature_from_state()
-    return final
-    
+    return final    
 
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
