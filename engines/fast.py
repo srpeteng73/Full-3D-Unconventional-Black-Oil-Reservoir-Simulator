@@ -1,8 +1,5 @@
 import numpy as np
 import streamlit as st # Import streamlit for logging
-# Forcing a redeploy on Streamlit Cloud
-import time
-
 
 __all__ = ["fallback_fast_solver"]
 
@@ -45,9 +42,6 @@ def fallback_fast_solver(state, rng=None):
         dict(t, qg, qo, EUR_g_BCF, EUR_o_MMBO)
     """
     try:
-        # --- DIAGNOSTIC LOGGING ---
-        st.warning("ENTERING fallback_fast_solver in engines/fast.py")
-
         # Time base (days)
         t = np.linspace(1.0, 30.0 * 365.0, 360)
 
@@ -75,16 +69,20 @@ def fallback_fast_solver(state, rng=None):
             qi_g_base, qi_o_base = 8000.0, 1600.0
             rich_g = 1.0 + 0.05 * np.clip(richness, 0.0, 1.4)
             rich_o = 1.0 + 0.08 * np.clip(richness, 0.0, 1.4)
-            Di_g_yr, b_g = 0.45, 0.80
-            Di_o_yr, b_o = 0.42, 0.95
+            Di_g_yr = 0.45
+            b_g = np.clip(0.80, 0, 0.99) # DEFINITIVE FIX: Constrain b-factor
+            Di_o_yr = 0.42
+            b_o = np.clip(0.95, 0, 0.99) # DEFINITIVE FIX: Constrain b-factor
             qi_g_min, qi_g_max = 2000.0, 18000.0
             qi_o_min, qi_o_max = 700.0, 3500.0
         else:
             qi_g_base, qi_o_base = 12000.0, 1000.0
             rich_g = 1.0 + 0.30 * np.clip(richness, 0.0, 1.4)
             rich_o = 1.0 + 0.12 * np.clip(richness, 0.0, 1.4)
-            Di_g_yr, b_g = 0.60, 0.85
-            Di_o_yr, b_o = 0.50, 1.00
+            Di_g_yr = 0.60
+            b_g = np.clip(0.85, 0, 0.99) # DEFINITIVE FIX: Constrain b-factor
+            Di_o_yr = 0.50
+            b_o = np.clip(1.00, 0, 0.99) # DEFINITIVE FIX: Constrain b-factor
             qi_g_min, qi_g_max = 3000.0, 28000.0
             qi_o_min, qi_o_max = 400.0, 2500.0
 
@@ -94,13 +92,12 @@ def fallback_fast_solver(state, rng=None):
         Di_g = Di_g_yr / 365.0
         Di_o = Di_o_yr / 365.0
 
+        # Arps hyperbolic declines - now mathematically safe
         qg = qi_g / (1.0 + b_g * Di_g * t) ** (1.0 / b_g)
         qo = qi_o / (1.0 + b_o * Di_o * t) ** (1.0 / b_o)
 
         EUR_g_BCF  = np.trapz(qg, t) / 1e6
         EUR_o_MMBO = np.trapz(qo, t) / 1e6
-
-        st.warning("EXITING fallback_fast_solver NORMALLY.")
         
         return dict(
             t=t, qg=qg, qo=qo,
