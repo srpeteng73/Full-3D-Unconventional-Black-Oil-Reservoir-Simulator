@@ -839,26 +839,44 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
-def _sanity_bounds_for_play(play_name: str):
+def _sanity_bounds_for_play(play_name: str) -> dict:
+    """
+    Return sanity bounds (oil MMBO, gas BCF, and EUR-based GOR cap) by play.
+    Defaults are conservative; Midland is restored to realistic oil-window ranges.
+    """
     s = (play_name or "").lower()
-    # Default
+
+    # Default (conservative, generic oil-window-ish)
     bounds = dict(oil_mmbo=(0.3, 1.5), gas_bcf=(0.3, 3.0), max_eur_gor_scfstb=2000.0)
+
+    # --- Oil-window (tight oil) plays ---
     if "midland" in s:
-        # temporarily widen high side for debugging analytical
-        bounds = dict(oil_mmbo=(0.3, 2.5), gas_bcf=(0.2, 12.0), max_eur_gor_scfstb=6000.0)
-    
-    return bounds
-    
-    r
-    if "midland" in s or "delaware" in s or "eagle ford" in s or "niobrara" in s or "tuscaloosa" in s:
-        # Oil windows in US shale
-        bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
+        # Restore realistic Midland bounds
+        return dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
+
+    if (
+        "delaware" in s
+        or "eagle ford" in s
+        or "niobrara" in s
+        or "tuscaloosa" in s
+    ):
+        return dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
+
+    # --- Condensate / liquids-rich plays ---
     if "condensate" in s or "utica" in s or "montney" in s or "duvernay" in s:
-        # condensate/liquids-rich
-        bounds = dict(oil_mmbo=(0.1, 1.8), gas_bcf=(0.8, 8.0), max_eur_gor_scfstb=5000.0)
-    if "dry gas" in s or "haynesville" in s or "marcellus" in s or "horn river" in s or "barnett (gas)" in s:
-        # dry gas
-        bounds = dict(oil_mmbo=(0.0, 0.5), gas_bcf=(2.0, 20.0), max_eur_gor_scfstb=50000.0)
+        return dict(oil_mmbo=(0.1, 1.8), gas_bcf=(0.8, 8.0), max_eur_gor_scfstb=5000.0)
+
+    # --- Dry gas plays ---
+    if (
+        "dry gas" in s
+        or "haynesville" in s
+        or "marcellus" in s
+        or "horn river" in s
+        or "barnett (gas)" in s
+    ):
+        return dict(oil_mmbo=(0.0, 0.5), gas_bcf=(2.0, 20.0), max_eur_gor_scfstb=50000.0)
+
+    # Fallback to default if no category matched
     return bounds
 
 def _sim_signature_from_state():
@@ -1647,33 +1665,134 @@ if run_clicked:
             )
             st.plotly_chart(ofig, use_container_width=True, theme=None)
 
-        # ======== Results tab: semi-log plots (Rate & Cumulative) ========
+               # ======== Results tab: semi-log plots (Rate & Cumulative) ========
         t  = sim.get("t")
         qg = sim.get("qg")
         qo = sim.get("qo")
         qw = sim.get("qw")
 
+        def _decade_lines(yvals):
+            """Return decade-spaced horizontal levels spanning positive data in yvals."""
+            if yvals is None:
+                return []
+            arr = np.asarray(yvals, float)
+            arr = arr[np.isfinite(arr) & (arr > 0)]
+            if arr.size == 0:
+                return []
+            y_min = float(np.nanmin(arr))
+            y_max = float(np.nanmax(arr))
+            # Guard equal min/max
+            if not np.isfinite(y_min) or not np.isfinite(y_max) or y_min <= 0 or y_max <= 0:
+                return []
+            if y_max / y_min < 1.01:
+                return [y_min]
+            lo_exp = int(np.floor(np.log10(y_min)))
+            hi_exp = int(np.ceil(np.log10(y_max)))
+            return [10.0 ** e for e in range(lo_exp, hi_exp + 1)]
+
         if t is not None and (qg is not None or qo is not None or qw is not None):
+            # --- Semi-log industry style with reference lines & cycles annotation ---
+            t_arr = np.asarray(t, float)
+            t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
+            t_max = float(np.nanmax(t_arr)) if t_arr.size else 10.0
+            n_cycles = max(0.0, np.log10(max(t_max / max(t_min, 1e-12), 1.0)))
+
+            decade_ticks = [1, 10, 100, 1000, 10000, 100000]
+            decade_ticks = [x for x in decade_ticks if x >= max(1, t_min / 1.0001) and x <= t_max * 1.0001]
+
             fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
             if qg is not None:
-                fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)), secondary_y=False)
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)),
+                    secondary_y=False,
+                )
             if qo is not None:
-                fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)), secondary_y=True)
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)),
+                    secondary_y=True,
+                )
             if qw is not None:
-                fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)), secondary_y=True)
-            
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)),
+                    secondary_y=True,
+                )
+
+            # Vertical decade boundaries (time)
+            vshapes = [
+                dict(
+                    type="line", x0=dt, x1=dt, yref="paper", y0=0.0, y1=1.0,
+                    line=dict(width=1, color="rgba(0,0,0,0.10)", dash="dot"),
+                )
+                for dt in decade_ticks
+            ]
+
+            # Horizontal decade levels for gas (y) and liquids (y2)
+            y_gas_lines = _decade_lines(qg)
+            y_liq_lines = _decade_lines(
+                np.concatenate([np.asarray(x, float) for x in [qo, qw] if x is not None]) if (qo is not None or qw is not None) else None
+            )
+            hshapes = []
+            for yv in y_gas_lines:
+                hshapes.append(
+                    dict(
+                        type="line", xref="paper", x0=0.0, x1=1.0, yref="y", y0=yv, y1=yv,
+                        line=dict(width=1, color="rgba(0,0,0,0.12)", dash="dot"),
+                    )
+                )
+            for yv in y_liq_lines:
+                hshapes.append(
+                    dict(
+                        type="line", xref="paper", x0=0.0, x1=1.0, yref="y2", y0=yv, y1=yv,
+                        line=dict(width=1, color="rgba(0,0,0,0.12)", dash="dot"),
+                    )
+                )
+
             fig_rate.update_layout(
                 template="plotly_white",
                 title_text="<b>Production Rate vs. Time</b>",
-                height=450,
+                height=460,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
                 font=dict(size=13),
                 margin=dict(l=10, r=10, t=50, b=10),
+                shapes=vshapes + hshapes,
+                annotations=[
+                    dict(
+                        xref="paper", yref="paper", x=0.01, y=1.08, showarrow=False,
+                        text=f"Log cycles (x-axis): {n_cycles:.2f}",
+                        font=dict(size=12, color="#444"),
+                    )
+                ],
             )
-            fig_rate.update_xaxes(type="log", dtick=1, tickvals=[1, 10, 100, 1000, 10000], title="Time (days)")
-            fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False)
-            fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
+            fig_rate.update_xaxes(
+                type="log",
+                dtick=1,
+                tickvals=decade_ticks,
+                title="Time (days)",
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.12)",
+            )
+            fig_rate.update_yaxes(
+                title_text="Gas rate (Mscf/d)",
+                secondary_y=False,
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.15)",
+            )
+            fig_rate.update_yaxes(
+                title_text="Liquid rates (STB/d)",
+                secondary_y=True,
+                showgrid=False,
+            )
             st.plotly_chart(fig_rate, use_container_width=True, theme=None)
+
+            # Explanation (Rate)
+            with st.expander("How to read this plot"):
+                st.markdown(
+                    "- **Semi-log X** emphasizes early-time behavior and decline trends.\n"
+                    "- **Vertical dotted lines** mark decade boundaries in time (1, 10, 100, … days).\n"
+                    "- **Horizontal dotted lines** are decade levels for the active y-axes (gas left, liquids right).\n"
+                    "- **Log cycles** = number of decades spanned on the x-axis.\n"
+                    "- Slope changes can indicate **boundary effects** or **flow regime transitions**."
+                )
         else:
             st.warning("Rate series not available.")
 
@@ -1682,28 +1801,111 @@ if run_clicked:
         cum_w = sim.get("cum_w_MMBL")
 
         if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
+            # --- Semi-log cumulative with reference lines & cycles annotation ---
+            t_arr = np.asarray(t, float)
+            t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
+            t_max = float(np.nanmax(t_arr)) if t_arr.size else 10.0
+            n_cycles = max(0.0, np.log10(max(t_max / max(t_min, 1e-12), 1.0)))
+
+            decade_ticks = [1, 10, 100, 1000, 10000, 100000]
+            decade_ticks = [x for x in decade_ticks if x >= max(1, t_min / 1.0001) and x <= t_max * 1.0001]
+
             fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
             if cum_g is not None:
-                fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3, color=COLOR_GAS)), secondary_y=False)
+                fig_cum.add_trace(
+                    go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3, color=COLOR_GAS)),
+                    secondary_y=False,
+                )
             if cum_o is not None:
-                fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3, color=COLOR_OIL)), secondary_y=True)
+                fig_cum.add_trace(
+                    go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3, color=COLOR_OIL)),
+                    secondary_y=True,
+                )
             if cum_w is not None:
-                fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot", color=COLOR_WATER)), secondary_y=True)
-            
+                fig_cum.add_trace(
+                    go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot", color=COLOR_WATER)),
+                    secondary_y=True,
+                )
+
+            # Vertical decade boundaries (time)
+            vshapes = [
+                dict(
+                    type="line", x0=dt, x1=dt, yref="paper", y0=0.0, y1=1.0,
+                    line=dict(width=1, color="rgba(0,0,0,0.10)", dash="dot"),
+                )
+                for dt in decade_ticks
+            ]
+
+            # Horizontal decade levels for cumulative gas (y) and liquids (y2)
+            y_cum_g_lines = _decade_lines(cum_g)
+            y_cum_liq_lines = _decade_lines(
+                np.concatenate([np.asarray(x, float) for x in [cum_o, cum_w] if x is not None]) if (cum_o is not None or cum_w is not None) else None
+            )
+            hshapes = []
+            for yv in y_cum_g_lines:
+                hshapes.append(
+                    dict(
+                        type="line", xref="paper", x0=0.0, x1=1.0, yref="y", y0=yv, y1=yv,
+                        line=dict(width=1, color="rgba(0,0,0,0.12)", dash="dot"),
+                    )
+                )
+            for yv in y_cum_liq_lines:
+                hshapes.append(
+                    dict(
+                        type="line", xref="paper", x0=0.0, x1=1.0, yref="y2", y0=yv, y1=yv,
+                        line=dict(width=1, color="rgba(0,0,0,0.12)", dash="dot"),
+                    )
+                )
+
             fig_cum.update_layout(
                 template="plotly_white",
                 title_text="<b>Cumulative Production</b>",
-                height=450,
+                height=460,
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
                 font=dict(size=13),
                 margin=dict(l=10, r=10, t=50, b=10),
+                shapes=vshapes + hshapes,
+                annotations=[
+                    dict(
+                        xref="paper", yref="paper", x=0.01, y=1.08, showarrow=False,
+                        text=f"Log cycles (x-axis): {n_cycles:.2f}",
+                        font=dict(size=12, color="#444"),
+                    )
+                ],
             )
-            fig_cum.update_xaxes(type="log", dtick=1, tickvals=[1, 10, 100, 1000, 10000], title="Time (days)")
-            fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False)
-            fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
+            fig_cum.update_xaxes(
+                type="log",
+                dtick=1,
+                tickvals=decade_ticks,
+                title="Time (days)",
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.12)",
+            )
+            fig_cum.update_yaxes(
+                title_text="Gas (BCF)",
+                secondary_y=False,
+                showgrid=True,
+                gridcolor="rgba(0,0,0,0.15)",
+            )
+            fig_cum.update_yaxes(
+                title_text="Liquids (MMbbl)",
+                secondary_y=True,
+                showgrid=False,
+            )
             st.plotly_chart(fig_cum, use_container_width=True, theme=None)
+
+            # Explanation (Cumulative)
+            with st.expander("How to read this plot"):
+                st.markdown(
+                    "- **Semi-log X** shows cumulative recovery growth per time decade.\n"
+                    "- **Vertical dotted lines** mark time decades; **horizontal dotted lines** show decade levels on each y-axis.\n"
+                    "- **Cum Gas (left)** and **Cum Oil/Water (right)** connect directly to EUR.\n"
+                    "- Curves should be smooth/monotonic; **kinks** may reflect operating changes or model limits."
+                )
         else:
             st.warning("Cumulative series not available.")
+
+
 # #### Part 4: Main Application UI - Advanced and Visualization Tabs ####
 
 elif selected_tab == "3D Viewer":
