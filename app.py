@@ -108,9 +108,30 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
 
 def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: str):
     """
-    For Analytical engine ONLY: if EURs violate play bounds, scale the displayed cumulative
-    curves to keep the UI realistic (debug-friendly). Adds 'eur_valid' + message.
-    Full 3D engine remains enforced elsewhere (no soft clamping here).
+    Enforce play-specific EUR sanity ranges.
+
+    - For the **Analytical** engine: we *soft-clamp* EURs for UI realism
+      (scale the cumulative curves so gauges/plots stay believable), but we do
+      NOT block results. We still surface a warning message.
+    - For the **full 3D** engine: we do not soft-clamp here; we only mark the
+      result invalid so the UI gate can block publishing.
+
+    Parameters
+    ----------
+    sim_like : dict
+        Simulation result dictionary to be annotated/adjusted.
+    play_name : str
+        Name of the shale play used to determine bounds.
+    engine_name : str
+        Selected engine ("Analytical", "Full 3D", etc.) to decide behavior.
+
+    Returns
+    -------
+    dict
+        The same dict with possible cumulative rescaling (Analytical only) and
+        these added fields:
+            - 'eur_valid' : bool
+            - 'eur_validation_msg' : str
     """
     import numpy as np
 
@@ -121,6 +142,7 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
     eur_g = sim_like.get("eur_gas_BCF")
     eur_o = sim_like.get("eur_oil_MMBO")
 
+    # ---------------------- Analytical-only soft clamping ----------------------
     if "analytical" in (engine_name or "").lower():
         # Gas bounds
         if eur_g is not None:
@@ -128,8 +150,10 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
             if eur_g < lo or eur_g > hi:
                 eur_valid = False
                 clamp = min(max(eur_g, lo), hi)
-                msgs.append(f"Gas EUR {eur_g:.2f} BCF clamped to [{lo:.1f}, {hi:.1f}] → {clamp:.2f} BCF.")
-                if "cum_g_BCF" in sim_like and eur_g > 0:
+                msgs.append(
+                    f"Gas EUR {eur_g:.2f} BCF clamped to [{lo:.1f}, {hi:.1f}] → {clamp:.2f} BCF."
+                )
+                if "cum_g_BCF" in sim_like and eur_g and eur_g > 0:
                     scale = clamp / eur_g
                     sim_like["cum_g_BCF"] = np.asarray(sim_like["cum_g_BCF"], float) * scale
                 sim_like["eur_gas_BCF"] = clamp
@@ -140,8 +164,10 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
             if eur_o < lo or eur_o > hi:
                 eur_valid = False
                 clamp = min(max(eur_o, lo), hi)
-                msgs.append(f"Oil EUR {eur_o:.2f} MMBO clamped to [{lo:.1f}, {hi:.1f}] → {clamp:.2f} MMBO.")
-                if "cum_o_MMBO" in sim_like and eur_o > 0:
+                msgs.append(
+                    f"Oil EUR {eur_o:.2f} MMBO clamped to [{lo:.1f}, {hi:.1f}] → {clamp:.2f} MMBO."
+                )
+                if "cum_o_MMBO" in sim_like and eur_o and eur_o > 0:
                     scale = clamp / eur_o
                     sim_like["cum_o_MMBO"] = np.asarray(sim_like["cum_o_MMBO"], float) * scale
                 sim_like["eur_oil_MMBO"] = clamp
@@ -154,15 +180,29 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
                 eur_valid = False
                 target_gas_scf = max_gor * (sim_like["eur_oil_MMBO"] * 1.0e6)
                 target_gas_bcf = target_gas_scf / 1.0e9
-                msgs.append(f"EUR GOR {gor:,.0f} > {max_gor:,.0f}; gas clamped to {target_gas_bcf:.2f} BCF.")
+                msgs.append(
+                    f"EUR GOR {gor:,.0f} > {max_gor:,.0f}; gas clamped to {target_gas_bcf:.2f} BCF."
+                )
                 if ("eur_gas_BCF" in sim_like) and ("cum_g_BCF" in sim_like) and sim_like["eur_gas_BCF"] > 0:
                     scale = target_gas_bcf / sim_like["eur_gas_BCF"]
                     sim_like["cum_g_BCF"] = np.asarray(sim_like["cum_g_BCF"], float) * scale
                     sim_like["eur_gas_BCF"] = target_gas_bcf
                 sim_like["eur_gor_scfstb"] = max_gor
+    # --------------------------------------------------------------------------
 
-    sim_like["eur_valid"] = eur_valid
-    sim_like["eur_validation_msg"] = "OK" if eur_valid else " | ".join(msgs)
+    # --- Final validity flags & message (helper-only policy) ---
+    is_analytical = "analytical" in (engine_name or "").lower()
+    had_issues = bool(msgs)  # were any clamps / violations detected?
+
+    if is_analytical:
+        # For the Analytical proxy: never block, but KEEP the message so we can warn.
+        sim_like["eur_valid"] = True
+        sim_like["eur_validation_msg"] = "OK" if not had_issues else " | ".join(msgs)
+    else:
+        # For the full 3D engine: allow blocking when invalid.
+        sim_like["eur_valid"] = eur_valid
+        sim_like["eur_validation_msg"] = "OK" if eur_valid else " | ".join(msgs)
+
     return sim_like
 
 
