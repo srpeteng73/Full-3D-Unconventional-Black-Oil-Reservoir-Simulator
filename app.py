@@ -1083,26 +1083,55 @@ def run_simulation_engine(state):
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
         st.exception(e)
         return None
-
-    # --- pull arrays from engine output ---
-    t = out.get("t")
+   
+        # --- pull arrays from engine output ---
+    t  = out.get("t")
     qg = out.get("qg")
     qo = out.get("qo")
+    qw = out.get("qw")
 
-    # Final guard: if the engine returned numbers but some are NaN/inf, replace them
-    # so the downstream EUR integrals won't explode and UI won't carry stale plots.
-    t = np.nan_to_num(np.asarray(t, float), nan=0.0, posinf=0.0, neginf=0.0)
+    # Final guard: replace NaNs/infs so plotting & EUR calc don't crash
+    t  = np.nan_to_num(np.asarray(t,  float), nan=0.0, posinf=0.0, neginf=0.0) if t is not None else None
     qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
     qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
 
-    if t is None or (qg is None and qo is None):
-        st.error(
-            f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`)."
-        )
+    if t is None or (qg is None and qo is None and qw is None):
+        st.error(f"FATAL ENGINE ERROR: The '{chosen_engine}' ran but did not return production rates (`qg`, `qo`, `qw`).")
         st.info("Full (incomplete) output from simulator for debugging:")
         st.write(out)
         return None
+   
+# --- Compute cumulative volumes & EURs (authoritative, unit-correct) ---
+sim = dict(out)  # start with engine output, then enrich
+sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
 
+# --- Apply play bounds for Analytical UI realism (non-destructive clamp) ---
+current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+engine_name  = st.session_state.get("engine_type", "")
+sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
+
+return sim
+  
+    
+    # --- Build sim dict and compute EURs/cumulatives ---
+    sim = dict(out) if isinstance(out, dict) else {}
+    sim["t"], sim["qg"], sim["qo"], sim["qw"] = t, qg, qo, qw
+
+    # 1) Numerically integrate to cum arrays + EURs
+    sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
+
+    # 2) Apply play-specific soft bounds (Analytical only)
+    play_name   = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+    engine_name = chosen_engine
+    sim = _apply_play_bounds_to_results(sim, play_name, engine_name)
+
+    return sim
+
+
+
+
+    
     # ... continue with EUR calc and the rest of your function ...
         
     eur_cutoff_days = float(st.session_state.get("eur_cutoff_days", 30.0 * 365.25))
