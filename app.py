@@ -1915,6 +1915,23 @@ if selected_tab == "Results":
             )
     else:
         st.warning("Cumulative series not available.")
+# if selected_tab == "Results":
+#     ...YOUR FULL RESULTS CODE...
+#     st.warning("Cumulative series not available.")
+# ← Results block ends here
+
+# ======== END Results tab ========
+
+elif selected_tab == "3D Viewer":
+    # Paste your actual 3D Viewer code here
+    pass
+
+elif selected_tab == "Slice Viewer":
+    # Paste your actual Slice Viewer code here
+    pass
+
+# (Any further elif/else go here, all aligned with the first `if selected_tab == ...`)
+
 
 # ======== 3D Viewer tab ========
 elif selected_tab == "3D Viewer":
