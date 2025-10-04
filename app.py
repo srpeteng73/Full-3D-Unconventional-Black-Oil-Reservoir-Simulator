@@ -58,6 +58,9 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     """
     import numpy as np
     from scipy.integrate import cumulative_trapezoid
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
 
     out = {}
 
@@ -207,9 +210,10 @@ def fmt_qty(v, unit):
 
 
 # ---------------------- Plot Style Pack (Gas=RED, Oil=GREEN) ----------------------
-COLOR_GAS = "#d62728"  # red
-COLOR_OIL = "#2ca02c"  # green
-COLOR_WATER = "#1f77b4"  # blue
+COLOR_GAS = COLOR_GAS if "COLOR_GAS" in globals() else "#1f77b4"
+COLOR_OIL = COLOR_OIL if "COLOR_OIL" in globals() else "#ff7f0e"
+COLOR_WATER = COLOR_WATER if "COLOR_WATER" in globals() else "#2ca02c"
+
 
 # Clean global template
 pio.templates.default = "plotly_white"
@@ -901,7 +905,6 @@ def _nan_guard_result(result: dict) -> dict:
     return out
 # -----------------------------------------------------------------------------------------------
 
-
 def generate_property_volumes(state):
     """Generates kx, ky, and phi volumes based on sidebar settings and stores them in session_state."""
     rng = np.random.default_rng(int(st.session_state.rng_seed))
@@ -1123,7 +1126,6 @@ def run_simulation_engine(state):
 
 
   
-    
     # --- Build sim dict and compute EURs/cumulatives ---
     sim = dict(out) if isinstance(out, dict) else {}
     sim["t"], sim["qg"], sim["qo"], sim["qw"] = t, qg, qo, qw
@@ -1137,10 +1139,6 @@ def run_simulation_engine(state):
     sim = _apply_play_bounds_to_results(sim, play_name, engine_name)
 
     return sim
-
-
-
-
     
     # ... continue with EUR calc and the rest of your function ...
         
