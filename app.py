@@ -47,31 +47,123 @@ def _apply_economic_cutoffs(t, y, *, cutoff_days=None, min_rate=0.0):
             mask[first:] = False
     return t[mask], y[mask]
 
-def compute_cum_and_eur_fixed(
-    t, qg=None, qo=None, qw=None,
-    eur_cutoff_days=30.0*365.25,      # 30 years max horizon
-    min_gas_rate_mscfd=100.0,         # gas floor
-    min_oil_rate_stbd=30.0,           # oil floor
-):
-    tg, qg2 = _apply_economic_cutoffs(t, qg, cutoff_days=eur_cutoff_days, min_rate=min_gas_rate_mscfd)
-    to, qo2 = _apply_economic_cutoffs(t, qo, cutoff_days=eur_cutoff_days, min_rate=min_oil_rate_stbd)
-    tw, qw2 = _apply_economic_cutoffs(t, qw, cutoff_days=eur_cutoff_days, min_rate=0.0)
+def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
+    """
+    Compute cumulative volumes and EURs from rate vectors.
+    t  : days (1D)
+    qg : gas rate, Mscf/d
+    qo : oil rate, STB/d
+    qw : water rate, STB/d
+    Returns dict with cum arrays and EURs (gas in BCF, oil/water in MMbbl).
+    """
+    import numpy as np
+    from scipy.integrate import cumulative_trapezoid
 
-    cum_g_Mscf = _cum_trapz_days(tg, qg2) if qg2 is not None else None
-    cum_o_STB  = _cum_trapz_days(to, qo2) if qo2 is not None else None
-    cum_w_STB  = _cum_trapz_days(tw, qw2) if qw2 is not None else None
+    out = {}
 
-    EUR_g_BCF  = float(cum_g_Mscf[-1]/1e6) if _np.ndim(cum_g_Mscf) and len(cum_g_Mscf) else 0.0
-    EUR_o_MMBO = float(cum_o_STB[-1]/1e6)  if _np.ndim(cum_o_STB)  and len(cum_o_STB)  else 0.0
-    EUR_w_MMBL = float(cum_w_STB[-1]/1e6)  if _np.ndim(cum_w_STB)  and len(cum_w_STB)  else 0.0
+    # Coerce & guard
+    t = np.asarray(t, float)
+    if t.size == 0:
+        return out
+    t = np.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)
+    t = np.maximum(t, 0.0)
 
-    return dict(
-        t_g=tg, t_o=to, t_w=tw,
-        cum_g_BCF=(cum_g_Mscf/1e6) if cum_g_Mscf is not None else None,
-        cum_o_MMBO=(cum_o_STB/1e6)  if cum_o_STB  is not None else None,
-        cum_w_MMBL=(cum_w_STB/1e6)  if cum_w_STB  is not None else None,
-        EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO, EUR_w_MMBL=EUR_w_MMBL,
-    )
+    def _clean(y):
+        if y is None:
+            return None
+        y = np.asarray(y, float)
+        y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+        y = np.maximum(y, 0.0)
+        return y
+
+    qg = _clean(qg)
+    qo = _clean(qo)
+    qw = _clean(qw)
+
+    # Integrate to cumulative (area under rate vs time)
+    if qg is not None:
+        cumg_mscf = cumulative_trapezoid(qg, t, initial=0.0)   # Mscf
+        out["cum_g_BCF"] = cumg_mscf / 1.0e6                   # BCF
+        out["eur_gas_BCF"] = float(out["cum_g_BCF"][-1])
+    if qo is not None:
+        cumo_stb = cumulative_trapezoid(qo, t, initial=0.0)    # STB
+        out["cum_o_MMBO"] = cumo_stb / 1.0e6                   # MMbbl
+        out["eur_oil_MMBO"] = float(out["cum_o_MMBO"][-1])
+    if qw is not None:
+        cumw_stb = cumulative_trapezoid(qw, t, initial=0.0)    # STB
+        out["cum_w_MMBL"] = cumw_stb / 1.0e6                   # MMbbl
+        out["eur_water_MMBL"] = float(out["cum_w_MMBL"][-1])
+
+    # Implied EUR GOR (scf/STB) if both exist
+    if ("eur_gas_BCF" in out) and ("eur_oil_MMBO" in out) and out["eur_oil_MMBO"] > 0:
+        gas_scf = out["eur_gas_BCF"] * 1.0e9    # BCF -> scf
+        oil_stb = out["eur_oil_MMBO"] * 1.0e6   # MMbbl -> STB
+        out["eur_gor_scfstb"] = float(gas_scf / oil_stb)
+
+    return out
+
+
+def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: str):
+    """
+    For Analytical engine ONLY: if EURs violate play bounds, scale the displayed cumulative
+    curves to keep the UI realistic (debug-friendly). Adds 'eur_valid' + message.
+    Full 3D engine remains enforced elsewhere (no soft clamping here).
+    """
+    import numpy as np
+
+    bounds = _sanity_bounds_for_play(play_name)
+    eur_valid = True
+    msgs = []
+
+    eur_g = sim_like.get("eur_gas_BCF")
+    eur_o = sim_like.get("eur_oil_MMBO")
+
+    if "analytical" in (engine_name or "").lower():
+        # Gas bounds
+        if eur_g is not None:
+            lo, hi = bounds["gas_bcf"]
+            if eur_g < lo or eur_g > hi:
+                eur_valid = False
+                clamp = min(max(eur_g, lo), hi)
+                msgs.append(f"Gas EUR {eur_g:.2f} BCF clamped to [{lo:.1f}, {hi:.1f}] → {clamp:.2f} BCF.")
+                if "cum_g_BCF" in sim_like and eur_g > 0:
+                    scale = clamp / eur_g
+                    sim_like["cum_g_BCF"] = np.asarray(sim_like["cum_g_BCF"], float) * scale
+                sim_like["eur_gas_BCF"] = clamp
+
+        # Oil bounds
+        if eur_o is not None:
+            lo, hi = bounds["oil_mmbo"]
+            if eur_o < lo or eur_o > hi:
+                eur_valid = False
+                clamp = min(max(eur_o, lo), hi)
+                msgs.append(f"Oil EUR {eur_o:.2f} MMBO clamped to [{lo:.1f}, {hi:.1f}] → {clamp:.2f} MMBO.")
+                if "cum_o_MMBO" in sim_like and eur_o > 0:
+                    scale = clamp / eur_o
+                    sim_like["cum_o_MMBO"] = np.asarray(sim_like["cum_o_MMBO"], float) * scale
+                sim_like["eur_oil_MMBO"] = clamp
+
+        # Optional: enforce a max EUR GOR
+        if ("eur_gor_scfstb" in sim_like) and ("eur_oil_MMBO" in sim_like):
+            gor = float(sim_like["eur_gor_scfstb"])
+            max_gor = bounds.get("max_eur_gor_scfstb", None)
+            if max_gor and gor > max_gor and sim_like.get("eur_oil_MMBO", 0) > 0:
+                eur_valid = False
+                target_gas_scf = max_gor * (sim_like["eur_oil_MMBO"] * 1.0e6)
+                target_gas_bcf = target_gas_scf / 1.0e9
+                msgs.append(f"EUR GOR {gor:,.0f} > {max_gor:,.0f}; gas clamped to {target_gas_bcf:.2f} BCF.")
+                if ("eur_gas_BCF" in sim_like) and ("cum_g_BCF" in sim_like) and sim_like["eur_gas_BCF"] > 0:
+                    scale = target_gas_bcf / sim_like["eur_gas_BCF"]
+                    sim_like["cum_g_BCF"] = np.asarray(sim_like["cum_g_BCF"], float) * scale
+                    sim_like["eur_gas_BCF"] = target_gas_bcf
+                sim_like["eur_gor_scfstb"] = max_gor
+
+    sim_like["eur_valid"] = eur_valid
+    sim_like["eur_validation_msg"] = "OK" if eur_valid else " | ".join(msgs)
+    return sim_like
+
+
+
 
 def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
