@@ -948,6 +948,13 @@ def _sanity_bounds_for_play(play_name: str):
     return bounds
 
 def run_simulation_engine(state):
+    """
+    Run either the Analytical proxy or the full 3D simulator, then:
+      - guard against NaNs/Infs,
+      - compute authoritative cumulative volumes & EURs (correct units),
+      - soft-clamp Analytical results to play bounds for UI realism,
+      - return a single dict 'sim' that downstream tabs use.
+    """
     import warnings
     import time
     import numpy as np
@@ -957,7 +964,7 @@ def run_simulation_engine(state):
 
     t0 = time.time()
 
-    # --- FINAL ROBUSTNESS CHECK FOR INPUTS ---
+    # --- FINAL ROBUSTNESS CHECK FOR INPUTS (quick fatal guards) ---
     if state.get('stage_spacing_ft', 0) <= 0:
         st.error(
             "FATAL INPUT ERROR: 'Stage spacing (ft)' must be a positive number. "
@@ -972,35 +979,34 @@ def run_simulation_engine(state):
         return None
     # --- END OF CHECK ---
 
-    # --- choose engine & run ---
     chosen_engine = st.session_state.get("engine_type", "")
     out = None
 
     try:
-        if "Analytical" in chosen_engine:
-            # Call the fast analytical solver
+        if "Analytical" in (chosen_engine or ""):
+            # ---------- ANALYTICAL PATH (with crash-proofing) ----------
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
 
-            # --- CRASH-PROOF ANALYTICAL CALL PATH ---
-            # 1) Run once while listening for the "invalid value encountered in power" warning
+            # Run once, watch for the classic hyperbolic power warning
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always", RuntimeWarning)
                 out = fallback_fast_solver(state, rng)
-                bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
+                bad_power = any("invalid value encountered in power" in str(x.message) for x in w)
 
-                # 2) If we saw the classic Arps failure OR the output looks NaN-ish, sanitize & retry
-                if bad_power or _looks_nan_like(out):
-                    st.info(
-                        "Analytical model encountered an unstable hyperbolic power term. "
-                        "Retrying with safe decline parameters …"
-                    )
-                    safe_state = _sanitize_decline_params(state.copy())
-                    out = fallback_fast_solver(safe_state, rng)
+            # If the classic Arps failure OR NaN-ish output => sanitize & retry once
+            if bad_power or _looks_nan_like(out):
+                st.info(
+                    "Analytical model encountered an unstable hyperbolic power term. "
+                    "Retrying with safe decline parameters …"
+                )
+                safe_state = _sanitize_decline_params(state.copy())
+                out = fallback_fast_solver(safe_state, rng)
 
-                # 3) Guard against any remaining NaNs so plotting & EUR calc don't crash
-                out = _nan_guard_result(out)
+            # Guard against any remaining NaNs so plotting & EUR calc don't crash
+            out = _nan_guard_result(out)
+
         else:
-            # Call the full 3D implicit simulator
+            # ---------- FULL 3D IMPLICIT SIMULATOR ----------
             inputs = {
                 "engine": "implicit",
                 "nx": int(state.get("nx", 20)),
@@ -1034,36 +1040,37 @@ def run_simulation_engine(state):
             }
             out = simulate(inputs)
 
-# === Authoritative cumulative & EURs (Precision RMSE Analytics Corporation) ===
-try:
-    _ = np.ndarray  # ensure numpy imported in this scope
-except NameError:
-    import numpy as np  # fallback if not already imported
-
-t_safe  = out.get("t")
-qg_safe = out.get("qg")
-qo_safe = out.get("qo")
-qw_safe = out.get("qw")
-
-# Guard arrays
-import numpy as np
-t_safe  = np.nan_to_num(np.asarray(t_safe,  float), nan=0.0, posinf=0.0, neginf=0.0) if t_safe is not None else np.array([], float)
-qg_safe = None if qg_safe is None else np.nan_to_num(np.asarray(qg_safe, float), nan=0.0, posinf=0.0, neginf=0.0)
-qo_safe = None if qo_safe is None else np.nan_to_num(np.asarray(qo_safe, float), nan=0.0, posinf=0.0, neginf=0.0)
-qw_safe = None if qw_safe is None else np.nan_to_num(np.asarray(qw_safe, float), nan=0.0, posinf=0.0, neginf=0.0)
-
-sim = dict(out)
-sim.update(_compute_eurs_and_cums(t_safe, qg=qg_safe, qo=qo_safe, qw=qw_safe))
-
-current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
-engine_name  = st.session_state.get("engine_type", "")
-sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
-
-
     except Exception as e:
+        # <- IMPORTANT: this except pairs the try above. Do not put an 'else:' after this.
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
         st.exception(e)
         return None
+
+    # --- pull arrays from engine output ---
+    t = out.get("t")
+    qg = out.get("qg")
+    qo = out.get("qo")
+    qw = out.get("qw")
+
+    # --- Final guard so downstream integrals/UI never see NaN/Inf ---
+    t = np.nan_to_num(np.asarray(t, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
+
+    # --- Authoritative cumulative & EURs (correct units) ---
+    sim = dict(out)
+    sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
+
+    # --- Apply play bounds for Analytical (soft clamp for UI realism) ---
+    current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+    engine_name = st.session_state.get("engine_type", "")
+    sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
+
+    # Optional timing
+    sim["engine_wall_seconds"] = float(time.time() - t0)
+
+    return sim
    
     # --- Authoritative cumulative & EURs + soft bounds for Analytical ---
     # Start from engine output
