@@ -1598,7 +1598,15 @@ elif selected_tab == "RTA":
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True)
 
-elif selected_tab == "Results":
+# ======== Page view selection (left sidebar) ========
+selected_tab = st.sidebar.radio(
+    "View",
+    ["Results", "3D Viewer", "Slice Viewer", "Debug"],
+    index=0
+)
+
+# ========= Tab switcher (TOP-LEVEL; column 0) =========
+if selected_tab == "Results":
     st.header("Simulation Results")
 
     # --- EUR options (UI passthrough; engine has resource-aware defaults) ---
@@ -1625,24 +1633,23 @@ elif selected_tab == "Results":
             key="eur_min_rate_oil_stbd",
         )
 
-    # DEFINITIVE FIX
-run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
-if run_clicked:
-    # ALWAYS CLEAR THE PREVIOUS RESULT BEFORE A NEW RUN
-    st.session_state.sim = None 
-    
-    if "kx" not in st.session_state:
-        st.info("Rock properties not found. Generating them first...")
-        generate_property_volumes(state)
-    with st.spinner("Running full 3D simulation..."):
-        sim_out = run_simulation_engine(state)
-        # Only update the session state if the simulation was successful
-        if sim_out is not None:
-            st.session_state.sim = sim_out
-            
+    # --- Run button (always clear stale results before new run) ---
+    run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
+    if run_clicked:
+        st.session_state.sim = None  # clear prior run
+
+        if "kx" not in st.session_state:
+            st.info("Rock properties not found. Generating them first...")
+            generate_property_volumes(state)
+
+        with st.spinner("Running full 3D simulation..."):
+            sim_out = run_simulation_engine(state)
+            if sim_out is not None:
+                st.session_state.sim = sim_out
+
     # ---- fetch sim & guard against stale signatures ----
     sim = st.session_state.get("sim")
-    cur_sig  = _sim_signature_from_state()
+    cur_sig = _sim_signature_from_state()
     prev_sig = sim.get("_sim_signature") if isinstance(sim, dict) else None
     if (sim is not None) and (prev_sig is not None) and (cur_sig != prev_sig):
         st.session_state.sim = None
@@ -1653,7 +1660,7 @@ if run_clicked:
         st.info("Click **Run simulation** to compute and display the full 3D results.")
     else:
         if sim.get("runtime_s") is not None:
-             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
+            st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
         # --- Sanity gate: block publishing if EURs are out-of-bounds ---
         eur_g = float(sim.get("EUR_g_BCF", 0.0))
@@ -1673,22 +1680,20 @@ if run_clicked:
         # Check Gas EUR
         if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
             issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
-        
+
         # Check Oil EUR
         if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
             issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
-        
+
         # Only apply the strict GOR check for the reliable Analytical Model
         if "Analytical" in chosen_engine:
             if implied_eur_gor > (gor_cap + tol):
                 issues.append(
                     f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
                 )
-        
         # --- END OF CORRECTED SANITY CHECK BLOCK ---
 
         if issues:
-            chosen_engine = st.session_state.get("engine_type", "")
             hint = (
                 " Tip: Try increasing the 'Pad BHP (psi)' in the sidebar to be closer to the 'pb_psi' "
                 "to reduce gas production."
@@ -1718,8 +1723,6 @@ if run_clicked:
             )
             st.stop()
 
-
-        
         # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
         gas_hi = b["gas_bcf"][1]
         oil_hi = b["oil_mmbo"][1]
@@ -1775,176 +1778,142 @@ if run_clicked:
             )
             st.plotly_chart(ofig, use_container_width=True, theme=None)
 
- # ======== Page view selection (radio) ========
-selected_tab = st.sidebar.radio(
-    "View",
-    ["Results", "3D Viewer", "Debug"],
-    index=0
-)
+        # ======== Results tab: semi-log plots (Rate & Cumulative) ========
+        t = sim.get("t")
+        qg = sim.get("qg")
+        qo = sim.get("qo")
+        qw = sim.get("qw")
 
-# ======== Results tab ========
-if selected_tab == "Results":
-    # --- EXPECTS 'sim' already computed in run_simulation_engine and returned above ---
-    t  = sim.get("t")
-    qg = sim.get("qg")
-    qo = sim.get("qo")
-    qw = sim.get("qw")
+        # --- Semi-log Rate vs Time (with decade lines & cycles) ---
+        if t is not None and (qg is not None or qo is not None or qw is not None):
+            t_arr = np.asarray(t, float)
+            t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
+            t_max = float(np.nanmax(t_arr)) if t_arr.size else 10.0
+            n_cycles = max(0.0, np.log10(max(t_max / max(t_min, 1e-12), 1.0)))
+            decade_ticks = [x for x in [1, 10, 100, 1000, 10000, 100000]
+                            if x >= max(1, t_min/1.0001) and x <= t_max*1.0001]
 
-    # --- Semi-log Rate vs Time (with decade lines & cycles) ---
-    if t is not None and (qg is not None or qo is not None or qw is not None):
-        t_arr = np.asarray(t, float)
-        t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
-        t_max = float(np.nanmax(t_arr)) if t_arr.size else 10.0
-        n_cycles = max(0.0, np.log10(max(t_max / max(t_min, 1e-12), 1.0)))
-        decade_ticks = [x for x in [1, 10, 100, 1000, 10000, 100000]
-                        if x >= max(1, t_min/1.0001) and x <= t_max*1.0001]
-
-        fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-        if qg is not None:
-            fig_rate.add_trace(
-                go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)),
-                secondary_y=False,
-            )
-        if qo is not None:
-            fig_rate.add_trace(
-                go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)),
-                secondary_y=True,
-            )
-        if qw is not None:
-            fig_rate.add_trace(
-                go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)),
-                secondary_y=True,
-            )
-
-        vshapes = [
-            dict(type="line", x0=dt, x1=dt, yref="paper", y0=0.0, y1=1.0,
-                 line=dict(width=1, color="rgba(0,0,0,0.10)", dash="dot"))
-            for dt in decade_ticks
-        ]
-        fig_rate.update_layout(
-            template="plotly_white",
-            title_text="<b>Production Rate vs. Time</b>",
-            height=460,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
-            font=dict(size=13),
-            margin=dict(l=10, r=10, t=50, b=10),
-            shapes=vshapes,
-            annotations=[
-                dict(
-                    xref="paper", yref="paper", x=0.01, y=1.08, showarrow=False,
-                    text=f"Log cycles (x-axis): {n_cycles:.2f}",
-                    font=dict(size=12, color="#444")
+            fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+            if qg is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)),
+                    secondary_y=False,
                 )
-            ],
-        )
-        fig_rate.update_xaxes(type="log", dtick=1, tickvals=decade_ticks, title="Time (days)",
-                              showgrid=True, gridcolor="rgba(0,0,0,0.12)")
-        fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False,
-                              showgrid=True, gridcolor="rgba(0,0,0,0.15)")
-        fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
-        st.plotly_chart(fig_rate, use_container_width=True, theme=None)
-
-        with st.expander("How to read this plot"):
-            st.markdown(
-                "- **Semi-log X** emphasizes early-time behavior and decline trends.\n"
-                "- **Vertical dotted lines** mark decade boundaries on time (1, 10, 100, … days).\n"
-                "- **Cycles** = number of log decades spanned on the x-axis.\n"
-                "- Gas is on the **left axis**; liquids (oil/water) on the **right axis**.\n"
-                "- Look for slope changes that may indicate **boundary effects** or **flow regime transitions**."
-            )
-    else:
-        st.warning("Rate series not available.")
-
-    # --- Semi-log Cumulative vs Time (with decade lines & cycles) ---
-    cum_g = sim.get("cum_g_BCF")
-    cum_o = sim.get("cum_o_MMBO")
-    cum_w = sim.get("cum_w_MMBL")
-
-    if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
-        t_arr = np.asarray(t, float)
-        t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
-        t_max = float(np.nanmax(t_arr)) if t_arr.size else 10.0
-        n_cycles = max(0.0, np.log10(max(t_max / max(t_min, 1e-12), 1.0)))
-        decade_ticks = [x for x in [1, 10, 100, 1000, 10000, 100000]
-                        if x >= max(1, t_min/1.0001) and x <= t_max*1.0001]
-
-        fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-        if cum_g is not None:
-            fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)",
-                                         line=dict(width=3, color=COLOR_GAS)), secondary_y=False)
-        if cum_o is not None:
-            fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)",
-                                         line=dict(width=3, color=COLOR_OIL)), secondary_y=True)
-        if cum_w is not None:
-            fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)",
-                                         line=dict(width=2, dash="dot", color=COLOR_WATER)), secondary_y=True)
-
-        vshapes = [
-            dict(type="line", x0=dt, x1=dt, yref="paper", y0=0.0, y1=1.0,
-                 line=dict(width=1, color="rgba(0,0,0,0.10)", dash="dot"))
-            for dt in decade_ticks
-        ]
-        fig_cum.update_layout(
-            template="plotly_white",
-            title_text="<b>Cumulative Production</b>",
-            height=460,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
-            font=dict(size=13),
-            margin=dict(l=10, r=10, t=50, b=10),
-            shapes=vshapes,
-            annotations=[
-                dict(
-                    xref="paper", yref="paper", x=0.01, y=1.08, showarrow=False,
-                    text=f"Log cycles (x-axis): {n_cycles:.2f}",
-                    font=dict(size=12, color="#444")
+            if qo is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)),
+                    secondary_y=True,
                 )
-            ],
-        )
-        fig_cum.update_xaxes(type="log", dtick=1, tickvals=decade_ticks, title="Time (days)",
-                             showgrid=True, gridcolor="rgba(0,0,0,0.12)")
-        fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False,
-                             showgrid=True, gridcolor="rgba(0,0,0,0.15)")
-        fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
-        st.plotly_chart(fig_cum, use_container_width=True, theme=None)
+            if qw is not None:
+                fig_rate.add_trace(
+                    go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)),
+                    secondary_y=True,
+                )
 
-        with st.expander("How to read this plot"):
-            st.markdown(
-                "- **Semi-log X** shows cumulative growth vs. decades of time.\n"
-                "- **Cum Gas (left)** and **Cum Oil/Water (right)** track recoveries directly tied to EUR.\n"
-                "- Expect smooth, monotonic curves; kinks often reflect **operating changes** or **model boundaries**."
+            vshapes = [
+                dict(type="line", x0=dt, x1=dt, yref="paper", y0=0.0, y1=1.0,
+                     line=dict(width=1, color="rgba(0,0,0,0.10)", dash="dot"))
+                for dt in decade_ticks
+            ]
+            fig_rate.update_layout(
+                template="plotly_white",
+                title_text="<b>Production Rate vs. Time</b>",
+                height=460,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
+                font=dict(size=13),
+                margin=dict(l=10, r=10, t=50, b=10),
+                shapes=vshapes,
+                annotations=[
+                    dict(
+                        xref="paper", yref="paper", x=0.01, y=1.08, showarrow=False,
+                        text=f"Log cycles (x-axis): {n_cycles:.2f}",
+                        font=dict(size=12, color="#444")
+                    )
+                ],
             )
-    else:
-        st.warning("Cumulative series not available.")
-# if selected_tab == "Results":
-#     ...YOUR FULL RESULTS CODE...
-#     st.warning("Cumulative series not available.")
-# ← Results block ends here
+            fig_rate.update_xaxes(type="log", dtick=1, tickvals=decade_ticks, title="Time (days)",
+                                  showgrid=True, gridcolor="rgba(0,0,0,0.12)")
+            fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False,
+                                  showgrid=True, gridcolor="rgba(0,0,0,0.15)")
+            fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
+            st.plotly_chart(fig_rate, use_container_width=True, theme=None)
 
-# ======== END Results tab ========
+            with st.expander("How to read this plot"):
+                st.markdown(
+                    "- **Semi-log X** emphasizes early-time behavior and decline trends.\n"
+                    "- **Vertical dotted lines** mark decade boundaries on time (1, 10, 100, … days).\n"
+                    "- **Cycles** = number of log decades spanned on the x-axis.\n"
+                    "- Gas is on the **left axis**; liquids (oil/water) on the **right axis**.\n"
+                    "- Look for slope changes that may indicate **boundary effects** or **flow regime transitions**."
+                )
+        else:
+            st.warning("Rate series not available.")
+
+        # --- Semi-log Cumulative vs Time (with decade lines & cycles) ---
+        cum_g = sim.get("cum_g_BCF")
+        cum_o = sim.get("cum_o_MMBO")
+        cum_w = sim.get("cum_w_MMBL")
+
+        if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
+            t_arr = np.asarray(t, float)
+            t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
+            t_max = float(np.nanmax(t_arr)) if t_arr.size else 10.0
+            n_cycles = max(0.0, np.log10(max(t_max / max(t_min, 1e-12), 1.0)))
+            decade_ticks = [x for x in [1, 10, 100, 1000, 10000, 100000]
+                            if x >= max(1, t_min/1.0001) and x <= t_max*1.0001]
+
+            fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
+            if cum_g is not None:
+                fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)",
+                                             line=dict(width=3, color=COLOR_GAS)), secondary_y=False)
+            if cum_o is not None:
+                fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)",
+                                             line=dict(width=3, color=COLOR_OIL)), secondary_y=True)
+            if cum_w is not None:
+                fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)",
+                                             line=dict(width=2, dash="dot", color=COLOR_WATER)), secondary_y=True)
+
+            vshapes = [
+                dict(type="line", x0=dt, x1=dt, yref="paper", y0=0.0, y1=1.0,
+                     line=dict(width=1, color="rgba(0,0,0,0.10)", dash="dot"))
+                for dt in decade_ticks
+            ]
+            fig_cum.update_layout(
+                template="plotly_white",
+                title_text="<b>Cumulative Production</b>",
+                height=460,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
+                font=dict(size=13),
+                margin=dict(l=10, r=10, t=50, b=10),
+                shapes=vshapes,
+                annotations=[
+                    dict(
+                        xref="paper", yref="paper", x=0.01, y=1.08, showarrow=False,
+                        text=f"Log cycles (x-axis): {n_cycles:.2f}",
+                        font=dict(size=12, color="#444")
+                    )
+                ],
+            )
+            fig_cum.update_xaxes(type="log", dtick=1, tickvals=decade_ticks, title="Time (days)",
+                                 showgrid=True, gridcolor="rgba(0,0,0,0.12)")
+            fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False,
+                                 showgrid=True, gridcolor="rgba(0,0,0,0.15)")
+            fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
+            st.plotly_chart(fig_cum, use_container_width=True, theme=None)
+
+            with st.expander("How to read this plot"):
+                st.markdown(
+                    "- **Semi-log X** shows cumulative growth vs. decades of time.\n"
+                    "- **Cum Gas (left)** and **Cum Oil/Water (right)** track recoveries directly tied to EUR.\n"
+                    "- Expect smooth, monotonic curves; kinks often reflect **operating changes** or **model boundaries**."
+                )
+        else:
+            st.warning("Cumulative series not available.")
 
 elif selected_tab == "3D Viewer":
-    # Paste your actual 3D Viewer code here
-    pass
-
-elif selected_tab == "Slice Viewer":
-    # Paste your actual Slice Viewer code here
-    pass
-
-# (Any further elif/else go here, all aligned with the first `if selected_tab == ...`)
-
-
-# ======== 3D Viewer tab ========
-elif selected_tab == "3D Viewer":
+    # ======== 3D Viewer tab ========
     st.subheader("3D Viewer")
     st.info("Render your 3D grid / fractures / saturation maps here.")
-
-# ======== Debug tab ========
-elif selected_tab == "Debug":
-    st.subheader("Debug")
-    st.json(sim)
-
-else:
-    pass
 
     sim = st.session_state.get("sim") or {}
     kx_vol = st.session_state.get("kx")   # expected (nz, ny, nx)
@@ -2105,8 +2074,8 @@ else:
 
         st.plotly_chart(fig3d, use_container_width=True)
 
-
 elif selected_tab == "Slice Viewer":
+    # ======== Slice Viewer tab ========
     st.header("Slice Viewer")
     sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
@@ -2115,13 +2084,26 @@ elif selected_tab == "Slice Viewer":
         prop_list = ['Permeability (kx)', 'Permeability (ky)', 'Porosity (ϕ)']
         if sim_data and sim_data.get('press_matrix') is not None:
             prop_list.append('Pressure (psi)')
+
         c1, c2 = st.columns(2)
         with c1:
             prop_slice = st.selectbox("Select property:", prop_list)
         with c2:
             plane_slice = st.selectbox("Select plane:", ["k-plane (z, top-down)", "j-plane (y, side-view)", "i-plane (x, end-view)"])
-        data_3d = (st.session_state.get('kx') if 'kx' in prop_slice else st.session_state.get('ky') if 'ky' in prop_slice else st.session_state.get('phi') if 'ϕ' in prop_slice else sim_data.get('press_matrix'))
+
+        data_3d = (
+            st.session_state.get('kx') if 'kx' in prop_slice
+            else st.session_state.get('ky') if 'ky' in prop_slice
+            else st.session_state.get('phi') if 'ϕ' in prop_slice
+            else sim_data.get('press_matrix')
+        )
+
         if data_3d is not None:
+            data_3d = np.asarray(data_3d)
+            if data_3d.ndim != 3:
+                st.warning("3D data is not in the expected (nz, ny, nx) shape.")
+                st.stop()
+
             nz, ny, nx = data_3d.shape
             if "k-plane" in plane_slice:
                 idx, axis_name = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2), "k"
@@ -2132,11 +2114,17 @@ elif selected_tab == "Slice Viewer":
             else:
                 idx, axis_name = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2), "i"
                 data_2d, labels = data_3d[:, :, idx], dict(x="j-index", y="k-index")
+
             fig = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
             fig.update_layout(title=f"<b>{prop_slice} @ {axis_name} = {idx}</b>")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.warning(f"Data for '{prop_slice}' not found.")
+
+elif selected_tab == "Debug":
+    # ======== Debug tab ========
+    st.subheader("Debug")
+    st.json(st.session_state.get("sim") or {})
 
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
