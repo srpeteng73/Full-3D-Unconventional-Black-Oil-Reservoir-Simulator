@@ -1,20 +1,3 @@
-# ============================================================================
-# Precision RMSE Analytics Corporation
-# Application: Streamlit Full 3D Unconventional Black Oil Reservoir Simulator
-# File: app.py (comment-enriched copy)
-# Generated: 2025-10-04T17:27:30.414939Z
-#
-# IMPORTANT:
-# - This file PRESERVES every original line of the uploaded source.
-# - Only additional comments have been inserted to improve readability.
-# - No logic or statements were deleted or reordered.
-# - Searching for the exact original code will still match in this file.
-#
-# Notes on structure:
-# - We insert a short, human-written summary line before each function definition.
-# - We also annotate major UI tab sections (e.g., elif selected_tab == "Results").
-# - If you prefer docstrings instead of preceding comments, we can convert these.
-# ============================================================================
 # Forcing a redeploy on Streamlit Cloud
 import time
 import numpy as np
@@ -42,7 +25,6 @@ MIDLAND_BOUNDS = {
     "gas_bcf":  (0.3, 3.0),
 }
 
-# Function `_cum_trapz_days` — purpose: See inline comments below; params: t_days, y_per_day.
 def _cum_trapz_days(t_days, y_per_day):
     if y_per_day is None:
         return None
@@ -50,7 +32,6 @@ def _cum_trapz_days(t_days, y_per_day):
     y = _np.nan_to_num(_np.asarray(y_per_day, float), nan=0.0)
     return _ctr(y, t, initial=0.0)  # returns same length as t
 
-# Function `_apply_economic_cutoffs` — purpose: See inline comments below; params: t, y, *, cutoff_days=None, min_rate=0.0.
 def _apply_economic_cutoffs(t, y, *, cutoff_days=None, min_rate=0.0):
     if y is None:
         return _np.asarray(t, float), None
@@ -66,7 +47,6 @@ def _apply_economic_cutoffs(t, y, *, cutoff_days=None, min_rate=0.0):
             mask[first:] = False
     return t[mask], y[mask]
 
-# Function `_compute_eurs_and_cums` — purpose: See inline comments below; params: t, qg=None, qo=None, qw=None.
 def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     """
     Compute cumulative volumes and EURs from rate vectors.
@@ -91,7 +71,6 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     t = np.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)
     t = np.maximum(t, 0.0)
 
-# Function `_clean` — purpose: See inline comments below; params: y.
     def _clean(y):
         if y is None:
             return None
@@ -127,7 +106,6 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     return out
 
 
-# Function `_apply_play_bounds_to_results` — purpose: See inline comments below; params: sim_like: dict, play_name: str, engine_name: str.
 def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: str):
     """
     For Analytical engine ONLY: if EURs violate play bounds, scale the displayed cumulative
@@ -190,7 +168,6 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
 
 
 
-# Function `validate_midland_eur` — purpose: See inline comments below; params: EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None.
 def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
@@ -217,14 +194,12 @@ def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
 
     return ok, " ".join(msgs) if msgs else "OK"
 
-# Function `gauge_max` — purpose: See inline comments below; params: value, typical_hi, floor=0.1, safety=0.15.
 def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
     if _np.isnan(value) or value <= 0:
         return max(floor, typical_hi)
     # 95th-percentile-ish: typical_hi plus margin vs. observed value
     return max(floor, typical_hi*(1.0+safety), value*(1.25))
 
-# Function `fmt_qty` — purpose: See inline comments below; params: v, unit.
 def fmt_qty(v, unit):
     if unit == "BCF":
         return f"{v:,.2f} BCF"
@@ -244,7 +219,6 @@ COLOR_WATER = COLOR_WATER if "COLOR_WATER" in globals() else "#2ca02c"
 pio.templates.default = "plotly_white"
 
 
-# Function `_style_fig` — purpose: See inline comments below; params: fig, title, xlab, ylab_left, ylab_right=None.
 def _style_fig(fig, title, xlab, ylab_left, ylab_right=None):
     fig.update_layout(
         title=dict(text=f"<b>{title}</b>", x=0, xanchor="left"),
@@ -258,7 +232,6 @@ def _style_fig(fig, title, xlab, ylab_left, ylab_right=None):
         fig.update_yaxes(title=ylab_right, secondary_y=True, showgrid=False)
 
 
-# Function `rate_chart` — purpose: See inline comments below; params: t, qg=None, qo=None, qw=None.
 def rate_chart(t, qg=None, qo=None, qw=None):
     """Dual-axis rate chart: Gas left (red), Liquids right (green/blue)."""
     fig = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
@@ -297,24 +270,20 @@ PLOT_CONFIG = {
 
 # ----------------------------------------------------------------------------------
 # ------------------------ Utils ------------------------
-# Function `_setdefault` — purpose: See inline comments below; params: k, v.
 def _setdefault(k, v):
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Function `_on_play_change` — purpose: See inline comments below; no parameters.
 def _on_play_change():
     # Clear prior results so the UI cannot show stale EURs
     st.session_state.sim = None
 
-# Function `_safe_rerun` — purpose: See inline comments below; no parameters.
 def _safe_rerun():
     if hasattr(st, "rerun"):
         st.rerun()
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
 
-# Function `_sim_signature_from_state` — purpose: See inline comments below; no parameters.
 def _sim_signature_from_state():
     """
     Lightweight signature of knobs that materially change physics/EUR policy.
@@ -334,7 +303,6 @@ def _sim_signature_from_state():
     key = (play, engine, ctrl, bhp, r_m, r_o, pb, rs, bo, pinit)
     return hash(key)
     
-# Function `is_heel_location_valid` — purpose: See inline comments below; params: x_heel_ft, y_heel_ft, state.
 def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
     """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
     x_max = state['nx'] * state['dx'] - state['L_ft']
@@ -631,26 +599,22 @@ state = {k: st.session_state.get(k, v) for k, v in defaults.items()}
 #### Part 2: Core Logic, Simulation Engine, and Sidebar UI ####
 
 # ------------------------ HELPER FUNCTIONS ------------------------
-# Function `Rs_of_p` — purpose: See inline comments below; params: p, pb, Rs_pb.
 def Rs_of_p(p, pb, Rs_pb):
     p = np.asarray(p, float)
     return np.where(p <= pb, Rs_pb, Rs_pb + 0.00012 * (p - pb) ** 1.1)
 
 
-# Function `Bo_of_p` — purpose: See inline comments below; params: p, pb, Bo_pb.
 def Bo_of_p(p, pb, Bo_pb):
     p = np.asarray(p, float)
     slope = -1.0e-5
     return np.where(p <= pb, Bo_pb, Bo_pb + slope * (p - pb))
 
 
-# Function `Bg_of_p` — purpose: See inline comments below; params: p.
 def Bg_of_p(p):
     p = np.asarray(p, float)
     return 1.2e-5 + (7.0e-6 - 1.2e-5) * (p - p.min()) / (p.max() - p.min() + 1e-12)
 
 
-# Function `mu_g_of_p` — purpose: See inline comments below; params: p, pb, mug_pb.
 def mu_g_of_p(p, pb, mug_pb):
     p = np.asarray(p, float)
     peak = mug_pb * 1.03
@@ -664,7 +628,6 @@ def mu_g_of_p(p, pb, mug_pb):
     return np.clip(mu, 0.001, None)
 
 
-# Function `z_factor_approx` — purpose: See inline comments below; params: p_psi, p_init_psi=5800.0.
 def z_factor_approx(p_psi, p_init_psi=5800.0):
     p_norm = p_psi / p_init_psi
     return 0.95 - 0.2 * (1 - p_norm) + 0.4 * (1 - p_norm) ** 2
@@ -674,13 +637,11 @@ def z_factor_approx(p_psi, p_init_psi=5800.0):
 class _PVTAdapter(dict):
     """Adapter that holds PVT callables and parameters; supports attribute & dict access."""
 
-# Function `__init__` — purpose: See inline comments below; params: self, **kwargs.
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.__dict__.update(kwargs)  # allows pvt.Rs(...) and pvt['Rs'](...)
 
 
-# Function `_build_pvt_payload_from_state` — purpose: See inline comments below; params: state.
 def _build_pvt_payload_from_state(state):
     """Build a PVT payload the engine can use directly (with callables)."""
     pb = float(state.get('pb_psi', 1.0))
@@ -689,23 +650,18 @@ def _build_pvt_payload_from_state(state):
     mug_pb = float(state.get('mug_pb_cp', 0.020))
     muo_pb = float(state.get('muo_pb_cp', 1.20))
 
-# Function `Rs` — purpose: See inline comments below; params: p.
     def Rs(p):
         return Rs_of_p(p, pb, Rs_pb)
 
-# Function `Bo` — purpose: See inline comments below; params: p.
     def Bo(p):
         return Bo_of_p(p, pb, Bo_pb)
 
-# Function `Bg` — purpose: See inline comments below; params: p.
     def Bg(p):
         return Bg_of_p(p)
 
-# Function `mu_g` — purpose: See inline comments below; params: p.
     def mu_g(p):
         return mu_g_of_p(p, pb, mug_pb)
 
-# Function `mu_o` — purpose: See inline comments below; params: p.
     def mu_o(p):
         return np.full_like(np.asarray(p, float), muo_pb, dtype=float)
 
@@ -724,7 +680,6 @@ def _build_pvt_payload_from_state(state):
 
 
 # --- Defensive monkey-patch: if engine's Fluid class lacks methods, inject thin wrappers ---
-# Function `_monkeypatch_engine_fluid_if_needed` — purpose: See inline comments below; params: adapter.
 def _monkeypatch_engine_fluid_if_needed(adapter):
     """
     Some engine builds instantiate their own Fluid and expect .Rs/.Bo/.Bg/.mu_g/.mu_o.
@@ -756,19 +711,16 @@ def _monkeypatch_engine_fluid_if_needed(adapter):
 
 
 # --- Public helper used by run_simulation_engine(...) ---
-# Function `_pvt_from_state` — purpose: See inline comments below; params: state.
 def _pvt_from_state(state):
     adapter = _build_pvt_payload_from_state(state)
     _monkeypatch_engine_fluid_if_needed(adapter)
     return adapter
 
 
-# Function `eur_gauges` — purpose: See inline comments below; params: EUR_g_BCF, EUR_o_MMBO.
 def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     import plotly.graph_objects as go
     import numpy as np
 
-# Function `g` — purpose: See inline comments below; params: val, label, suffix, color, vmax.
     def g(val, label, suffix, color, vmax):
         fig = go.Figure(
             go.Indicator(
@@ -805,7 +757,6 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     )
 
 
-# Function `semi_log_layout` — purpose: See inline comments below; params: title, xaxis="Day (log scale)", yaxis="Rate".
 def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
     return dict(
         title=f"<b>{title}</b>",
@@ -816,12 +767,10 @@ def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
     )
 
 
-# Function `ensure_3d` — purpose: See inline comments below; params: arr2d_or_3d.
 def ensure_3d(arr2d_or_3d):
     a = np.asarray(arr2d_or_3d)
     return a[None, ...] if a.ndim == 2 else a
 
-# Function `get_k_slice` — purpose: See inline comments below; params: A, k.
 def get_k_slice(A, k):
     A3 = ensure_3d(A)
     nz = A3.shape[0]
@@ -829,14 +778,12 @@ def get_k_slice(A, k):
     return A3[k, :, :]
 
 
-# Function `downsample_3d` — purpose: See inline comments below; params: A, ds.
 def downsample_3d(A, ds):
     A3 = ensure_3d(A)
     ds = max(1, int(ds))
     return A3[::ds, ::ds, ::ds]
 
 
-# Function `parse_dfn_csv` — purpose: See inline comments below; params: uploaded_file.
 def parse_dfn_csv(uploaded_file):
     df = pd.read_csv(uploaded_file)
     req = ["x0", "y0", "z0", "x1", "y1", "z1"]
@@ -851,7 +798,6 @@ def parse_dfn_csv(uploaded_file):
     return arr
 
 
-# Function `gen_auto_dfn_from_stages` — purpose: See inline comments below; params: nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_lats, hf_ft.
 def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_lats, hf_ft):
     n_stages = max(1, int(L_ft / max(stage_spacing_ft, 1.0)))
     Lcells = int(L_ft / max(dx, 1.0))
@@ -869,7 +815,6 @@ def gen_auto_dfn_from_stages(nx, ny, nz, dx, dy, dz, L_ft, stage_spacing_ft, n_l
     return np.array(segs, float) if segs else None
 
 
-# Function `_get_sim_preview` — purpose: See inline comments below; no parameters.
 def _get_sim_preview():
     tmp = {k: st.session_state[k] for k in list(defaults.keys()) if k in st.session_state}
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
@@ -895,7 +840,6 @@ def _get_sim_preview():
         # Return a dummy structure to prevent crashing the UI layout
         return {'t': [0], 'qg': [0], 'qo': [0], 'EUR_g_BCF': 0, 'EUR_o_MMBO': 0}
 # ------------------------ Arps/decline safety helpers (ANALYTICAL ONLY) ------------------------
-
 def _sanitize_decline_params(state_like: dict) -> dict:
     """
     Human note: Some builds feed different names for hyperbolic parameters.
@@ -905,7 +849,6 @@ def _sanitize_decline_params(state_like: dict) -> dict:
     """
     SAFE_B_MIN, SAFE_B_MAX = 1.0e-6, 0.95
 
-# Function `_clip_b` — purpose: See inline comments below; params: x.
     def _clip_b(x):
         try:
             xv = float(x)
@@ -913,7 +856,6 @@ def _sanitize_decline_params(state_like: dict) -> dict:
         except Exception:
             return x
 
-# Function `_abs_decline` — purpose: See inline comments below; params: x.
     def _abs_decline(x):
         try:
             return abs(float(x))
@@ -934,7 +876,6 @@ def _sanitize_decline_params(state_like: dict) -> dict:
     return state_like
 
 
-
 def _looks_nan_like(result: dict) -> bool:
     """Return True if any primary arrays contain NaNs or infs."""
     if not isinstance(result, dict):
@@ -945,7 +886,6 @@ def _looks_nan_like(result: dict) -> bool:
             if not np.all(np.isfinite(arr)):
                 return True
     return False
-
 
 
 def _nan_guard_result(result: dict) -> dict:
@@ -965,7 +905,6 @@ def _nan_guard_result(result: dict) -> dict:
     return out
 # -----------------------------------------------------------------------------------------------
 
-# Function `generate_property_volumes` — purpose: See inline comments below; params: state.
 def generate_property_volumes(state):
     """Generates kx, ky, and phi volumes based on sidebar settings and stores them in session_state."""
     rng = np.random.default_rng(int(st.session_state.rng_seed))
@@ -995,74 +934,19 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
-# Function `_sanity_bounds_for_play` — purpose: See inline comments below; params: play_name: str.
 def _sanity_bounds_for_play(play_name: str):
+    """
+    Return EUR sanity bounds (by play) for UI validation & clamping.
+    Default: conservative oil-window-ish.
+    For "Midland", use oil 0.3–2.0 MMBO, gas 0.2–3.5 BCF, max EUR GOR 2,000 scf/STB.
+    """
     s = (play_name or "").lower()
     # Default (conservative, oil-window-ish)
-    bounds = dict(
-        oil_mmbo=(0.3, 1.5),
-        gas_bcf=(0.3, 3.0),
-        max_eur_gor_scfstb=2000.0,
-    )
+    bounds = dict(oil_mmbo=(0.3, 1.5), gas_bcf=(0.3, 3.0), max_eur_gor_scfstb=2000.0)
     if "midland" in s:
-        # Midland oil window – realistic bounds
-        bounds = dict(
-            oil_mmbo=(0.3, 2.0),
-            gas_bcf=(0.2, 3.5),
-            max_eur_gor_scfstb=2000.0,
-        )
-    # Add/extend other plays here if needed
+        bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
     return bounds
 
-
-    if (
-        "delaware" in s
-        or "eagle ford" in s
-        or "niobrara" in s
-        or "tuscaloosa" in s
-    ):
-        return dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
-
-    # --- Condensate / liquids-rich plays ---
-    if "condensate" in s or "utica" in s or "montney" in s or "duvernay" in s:
-        return dict(oil_mmbo=(0.1, 1.8), gas_bcf=(0.8, 8.0), max_eur_gor_scfstb=5000.0)
-
-    # --- Dry gas plays ---
-    if (
-        "dry gas" in s
-        or "haynesville" in s
-        or "marcellus" in s
-        or "horn river" in s
-        or "barnett (gas)" in s
-    ):
-        return dict(oil_mmbo=(0.0, 0.5), gas_bcf=(2.0, 20.0), max_eur_gor_scfstb=50000.0)
-
-    # Fallback to default if no category matched
-    return bounds
-
-# Function `_sim_signature_from_state` — purpose: See inline comments below; no parameters.
-def _sim_signature_from_state():
-    """
-    Build a lightweight signature of the knobs that materially change physics/EUR policy.
-    Keep this at module scope so both the engine and Results tab can use it.
-    """
-    s = st.session_state
-    play = s.get("play_sel", "")
-    engine = s.get("engine_type", "")
-    ctrl  = s.get("pad_ctrl", "BHP")
-    bhp   = float(s.get("pad_bhp_psi", 0.0))
-    r_m   = float(s.get("pad_rate_mscfd", 0.0))
-    r_o   = float(s.get("pad_rate_stbd", 0.0))
-    pb    = float(s.get("pb_psi", 0.0))
-    rs    = float(s.get("Rs_pb_scf_stb", 0.0))
-    bo    = float(s.get("Bo_pb_rb_stb", 1.0))
-    pinit = float(s.get("p_init_psi", 0.0))
-    # Add more if you want to tie signature to extra physics (kvkh, geo_alpha, etc.)
-    key = (play, engine, ctrl, bhp, r_m, r_o, pb, rs, bo, pinit)
-    return hash(key)
-
-
-# Function `run_simulation_engine` — purpose: See inline comments below; params: state.
 def run_simulation_engine(state):
     import warnings
     import time
@@ -1149,6 +1033,32 @@ def run_simulation_engine(state):
                 "geo_alpha": float(state.get("geo_alpha", 0.0)),
             }
             out = simulate(inputs)
+
+# === Authoritative cumulative & EURs (Precision RMSE Analytics Corporation) ===
+try:
+    _ = np.ndarray  # ensure numpy imported in this scope
+except NameError:
+    import numpy as np  # fallback if not already imported
+
+t_safe  = out.get("t")
+qg_safe = out.get("qg")
+qo_safe = out.get("qo")
+qw_safe = out.get("qw")
+
+# Guard arrays
+import numpy as np
+t_safe  = np.nan_to_num(np.asarray(t_safe,  float), nan=0.0, posinf=0.0, neginf=0.0) if t_safe is not None else np.array([], float)
+qg_safe = None if qg_safe is None else np.nan_to_num(np.asarray(qg_safe, float), nan=0.0, posinf=0.0, neginf=0.0)
+qo_safe = None if qo_safe is None else np.nan_to_num(np.asarray(qo_safe, float), nan=0.0, posinf=0.0, neginf=0.0)
+qw_safe = None if qw_safe is None else np.nan_to_num(np.asarray(qw_safe, float), nan=0.0, posinf=0.0, neginf=0.0)
+
+sim = dict(out)
+sim.update(_compute_eurs_and_cums(t_safe, qg=qg_safe, qo=qo_safe, qw=qw_safe))
+
+current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+engine_name  = st.session_state.get("engine_type", "")
+sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
+
 
     except Exception as e:
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
@@ -1410,7 +1320,6 @@ st.write(
 selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
 # ------------------------ TAB CONTENT DEFINITIONS ------------------------
-# UI Tab Section — Setup Preview: handles layout, plots, and widgets for this view.
 if selected_tab == "Setup Preview":
     st.header("Setup Preview")
     c1, c2 = st.columns([1, 1])
@@ -1555,7 +1464,6 @@ if selected_tab == "Setup Preview":
     with st.expander("Click for details"):
         st.markdown("These charts use a simplified analytical model for quick iteration.")
 
-# UI Tab Section — Control Panel: handles layout, plots, and widgets for this view.
 elif selected_tab == "Control Panel":
     st.header("Control Panel")
     c1, c2 = st.columns(2)
@@ -1591,7 +1499,6 @@ elif selected_tab == "Control Panel":
     }
     st.write(summary)
     
-# UI Tab Section — Generate 3D property volumes: handles layout, plots, and widgets for this view.
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("Use this tab to (re)generate φ/k grids based on sidebar parameters.")
@@ -1618,7 +1525,6 @@ elif selected_tab == "Generate 3D property volumes":
         st.info("Click the button above to generate initial property volumes.")
 
 
-# UI Tab Section — PVT (Black-Oil): handles layout, plots, and widgets for this view.
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000, state["p_min_bhp_psi"]), max(2000, state["p_init_psi"] + 1000), 120)
@@ -1638,7 +1544,6 @@ elif selected_tab == "PVT (Black-Oil)":
     f4.update_layout(template="plotly_white", title="<b>Gas viscosity μg vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="μg (cP)")
     st.plotly_chart(f4, use_container_width=True)
 
-# UI Tab Section — MSW Wellbore: handles layout, plots, and widgets for this view.
 elif selected_tab == "MSW Wellbore":
     st.header("MSW Wellbore Physics — Heel–Toe & Limited-Entry")
     try:
@@ -1672,7 +1577,6 @@ elif selected_tab == "MSW Wellbore":
     except Exception as e:
         st.warning(f"Could not compute wellbore hydraulics. Error: {e}")
 
-# UI Tab Section — RTA: handles layout, plots, and widgets for this view.
 elif selected_tab == "RTA":
     st.header("RTA — Quick Diagnostics")
     sim_data = st.session_state.sim if st.session_state.sim is not None else _get_sim_preview()
@@ -1687,7 +1591,6 @@ elif selected_tab == "RTA":
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True)
 
-# UI Tab Section — Results: handles layout, plots, and widgets for this view.
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
@@ -1873,7 +1776,6 @@ selected_tab = st.sidebar.radio(
 )
 
 # ======== Results tab ========
-# UI Tab Section — Results: handles layout, plots, and widgets for this view.
 if selected_tab == "Results":
     # --- EXPECTS 'sim' already computed in run_simulation_engine and returned above ---
     t  = sim.get("t")
@@ -2008,13 +1910,11 @@ if selected_tab == "Results":
         st.warning("Cumulative series not available.")
 
 # ======== 3D Viewer tab ========
-# UI Tab Section — 3D Viewer: handles layout, plots, and widgets for this view.
 elif selected_tab == "3D Viewer":
     st.subheader("3D Viewer")
     st.info("Render your 3D grid / fractures / saturation maps here.")
 
 # ======== Debug tab ========
-# UI Tab Section — Debug: handles layout, plots, and widgets for this view.
 elif selected_tab == "Debug":
     st.subheader("Debug")
     st.json(sim)
@@ -2182,7 +2082,6 @@ else:
         st.plotly_chart(fig3d, use_container_width=True)
 
 
-# UI Tab Section — Slice Viewer: handles layout, plots, and widgets for this view.
 elif selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     sim_data = st.session_state.get("sim")
@@ -2215,7 +2114,6 @@ elif selected_tab == "Slice Viewer":
         else:
             st.warning(f"Data for '{prop_slice}' not found.")
 
-# UI Tab Section — QA / Material Balance: handles layout, plots, and widgets for this view.
 elif selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     sim = st.session_state.get("sim")
@@ -2298,7 +2196,6 @@ elif selected_tab == "QA / Material Balance":
     else:
         st.info("Not enough data points for Oil Material Balance plot.")
         
-# UI Tab Section — Economics: handles layout, plots, and widgets for this view.
 elif selected_tab == "Economics":
     st.header("Financial Model")
     if st.session_state.get("sim") is None:
@@ -2420,12 +2317,10 @@ elif selected_tab == "Economics":
             'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
         }), use_container_width=True)
 
-# UI Tab Section — EUR vs Lateral Length: handles layout, plots, and widgets for this view.
 elif selected_tab == "EUR vs Lateral Length":
     st.header("EUR vs Lateral Length Sensitivity")
     st.info("This feature is not yet implemented. It will allow you to run multiple simulations to see how EUR changes with lateral length.")
 
-# UI Tab Section — Field Match (CSV): handles layout, plots, and widgets for this view.
 elif selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     c1, c2 = st.columns([3, 1])
@@ -2477,7 +2372,6 @@ elif selected_tab == "Field Match (CSV)":
                 )
         elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
             st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
-# UI Tab Section — Automated Match: handles layout, plots, and widgets for this view.
 elif selected_tab == "Automated Match":
     st.header("Automated History Matching")
     st.info("This module uses a genetic algorithm (Differential Evolution) to automatically find the best parameters to match historical data.")
@@ -2527,7 +2421,6 @@ elif selected_tab == "Automated Match":
             
             if run_auto_match:
                 # Objective function for the optimizer
-# Function `objective_function` — purpose: See inline comments below; params: params, param_names, base_state, field_data, error_metric.
                 def objective_function(params, param_names, base_state, field_data, error_metric):
                     temp_state = base_state.copy()
                     for name, value in zip(param_names, params):
@@ -2591,7 +2484,6 @@ elif selected_tab == "Automated Match":
                 fig_match.update_layout(title="<b>Final History Match</b>", template="plotly_white", xaxis_title="Time (days)")
                 st.plotly_chart(fig_match, use_container_width=True)
 
-# UI Tab Section — Uncertainty & Monte Carlo: handles layout, plots, and widgets for this view.
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
     p1, p2, p3 = st.columns(3)
@@ -2671,7 +2563,6 @@ elif selected_tab == "Uncertainty & Monte Carlo":
                 ), use_container_width=True, theme="streamlit"
             )
 
-# UI Tab Section — Well Placement Optimization: handles layout, plots, and widgets for this view.
 elif selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
     st.markdown("#### 1. General Parameters")
@@ -2789,7 +2680,6 @@ elif selected_tab == "Well Placement Optimization":
         )
         st.plotly_chart(fig_opt, use_container_width=True, theme="streamlit")
 
-# UI Tab Section — User’s Manual: handles layout, plots, and widgets for this view.
 elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
@@ -2838,7 +2728,6 @@ elif selected_tab == "User’s Manual":
     -   In the **Automated Match** tab, the interface will warn you if a minimum bound is set higher than its corresponding maximum bound.
     -   On the **Results** tab, sanity checks are performed to ensure the final EURs are reasonable for the selected play type. If the results are physically inconsistent (e.g., an oil well producing an unrealistic amount of gas), an error message will be displayed, and the results will be withheld to prevent misinterpretation.
     """)
-# UI Tab Section — Solver & Profiling: handles layout, plots, and widgets for this view.
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
@@ -2861,7 +2750,6 @@ elif selected_tab == "Solver & Profiling":
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-# UI Tab Section — DFN Viewer: handles layout, plots, and widgets for this view.
 elif selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
