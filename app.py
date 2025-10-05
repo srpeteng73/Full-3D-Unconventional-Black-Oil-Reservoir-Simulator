@@ -1122,37 +1122,33 @@ def run_simulation_engine(state):
         st.exception(e)
         return None
 
+        # ------- everything above here stays the same (your try/except finishes with return None) -------
+
     # --- pull arrays from engine output ---
-    t = out.get("t")
+    t  = out.get("t")
     qg = out.get("qg")
     qo = out.get("qo")
     qw = out.get("qw")
 
-    # --- Final guard so downstream integrals/UI never see NaN/Inf ---
-    t = np.nan_to_num(np.asarray(t, float), nan=0.0, posinf=0.0, neginf=0.0)
+    # Final guard so downstream integrals/UI never see NaN/Inf
+    import numpy as np
+    t  = np.nan_to_num(np.asarray(t,  float), nan=0.0, posinf=0.0, neginf=0.0)
     qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
     qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
     qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
 
-# After: t, qg, qo, qw have been np.nan_to_num(...) guarded
+    # --- Authoritative cumulative & EURs ---
+    sim = dict(out)
+    sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
 
-# Trim series using UI EUR options (Part B)
-t_g, qg_eff = _apply_economic_cutoffs_ui(t, qg, "gas")
-t_o, qo_eff = _apply_economic_cutoffs_ui(t, qo, "oil")
-t_w, qw_eff = _apply_economic_cutoffs_ui(t, qw, "water")
+    # --- Apply play bounds for Analytical (soft clamp for UI realism) ---
+    current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+    engine_name  = st.session_state.get("engine_type", "")
+    sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
 
-# Compute authoritative cum & EURs from the trimmed series
-sim = dict(out)
-sim.update(_compute_eurs_and_cums(t, qg=qg_eff, qo=qo_eff, qw=qw_eff))
-
-# Apply Analytical-only soft clamp for play bounds
-current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
-engine_name  = st.session_state.get("engine_type", "")
-sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
-
-sim["_sim_signature"] = _sim_signature_from_state()
-return sim
-
+    # Signature for stale-guard and return to caller
+    sim["_sim_signature"] = _sim_signature_from_state()
+    return sim
     
     # --- Authoritative cumulative & EURs (correct units) ---
     sim = dict(out)
