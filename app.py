@@ -1662,6 +1662,7 @@ selected_tab = st.sidebar.radio(
 )
 
 # ========= Tab switcher (TOP-LEVEL; column 0) =========
+# ============================= RESULTS TAB =============================
 if selected_tab == "Results":
     st.header("Simulation Results")
 
@@ -1712,44 +1713,39 @@ if selected_tab == "Results":
         sim = None
         st.info("Play/engine/physics changed. Please click **Run simulation** to refresh results.")
 
-    if sim is None:
-        st.info("Click **Run simulation** to compute and display the full 3D results.")
-    else:
-        if sim.get("runtime_s") is not None:
-            st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
+    # If nothing to show yet, stop early
+    if not isinstance(sim, dict) or not sim:
+        st.info("Click **Run simulation** to compute and display the results.")
+        st.stop()
 
-# Fetch the latest sim dict from session and guard before using it
-sim = st.session_state.get("sim")
-if not isinstance(sim, dict) or not sim:
-    st.info("Click **Run simulation** to compute and display the results.")
-    st.stop()
+    if sim.get("runtime_s") is not None:
+        st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-# --- Sanity gate: block publishing if EURs are out-of-bounds ---
-eur_g = float(sim.get("eur_gas_BCF",  sim.get("EUR_g_BCF",  0.0)))
-eur_o = float(sim.get("eur_o_MMBO",   sim.get("EUR_o_MMBO", 0.0)))
+    # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+    eur_g = float(sim.get("eur_gas_BCF", sim.get("EUR_g_BCF", 0.0)))
+    eur_o = float(sim.get("eur_o_MMBO",  sim.get("EUR_o_MMBO", 0.0)))
 
-play_name = st.session_state.get("play_sel", "")
-b = _sanity_bounds_for_play(play_name)
+    play_name = st.session_state.get("play_sel", "")
+    b = _sanity_bounds_for_play(play_name)
 
-implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
-gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
-tol = 1e-6
+    implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
+    gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
+    tol = 1e-6
 
-issues = []
-chosen_engine = st.session_state.get("engine_type", "")
+    issues = []
+    chosen_engine = st.session_state.get("engine_type", "")
 
-# Check Gas EUR
-if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-    issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+    # Check Gas EUR
+    if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+        issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
 
-# Check Oil EUR
-if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
-    issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
+    # Check Oil EUR
+    if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+        issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
 
-# Strict GOR check only for Analytical
-if "Analytical" in chosen_engine and implied_eur_gor > (gor_cap + tol):
-    issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
-    # --- END OF CORRECTED SANITY CHECK BLOCK ---
+    # Strict GOR check only for Analytical
+    if "Analytical" in chosen_engine and implied_eur_gor > (gor_cap + tol):
+        issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
 
     if issues:
         hint = (
@@ -1769,82 +1765,204 @@ if "Analytical" in chosen_engine and implied_eur_gor > (gor_cap + tol):
             )
             st.stop()
 
-        # ---- Validation gate (engine-side) ----
-        eur_valid = bool(sim.get("eur_valid", True))
-        eur_msg = sim.get("eur_validation_msg", "OK")
-        if not eur_valid:
-            st.error(
-                "Production results failed sanity checks and were not published.\n\n"
-                f"Details: {eur_msg}\n\n"
-                "Please review PVT, controls, and units; then re-run.",
-                icon="🚫",
+    # ---- Validation gate (engine-side) ----
+    eur_valid = bool(sim.get("eur_valid", True))
+    eur_msg = sim.get("eur_validation_msg", "OK")
+    if not eur_valid:
+        st.error(
+            "Production results failed sanity checks and were not published.\n\n"
+            f"Details: {eur_msg}\n\n"
+            "Please review PVT, controls, and units; then re-run.",
+            icon="🚫",
+        )
+        st.stop()
+
+    # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
+    gas_hi = b["gas_bcf"][1]
+    oil_hi = b["oil_mmbo"][1]
+    gmax = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
+    omax = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
+
+    # Industry standard colors
+    GAS_RED   = "#D62728"  # Plotly red for gas
+    OIL_GREEN = "#2CA02C"  # Plotly green for oil
+
+    c1, c2 = st.columns(2)
+
+    # --- Gas gauge (RED) ---
+    with c1:
+        gfig = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=eur_g,
+                number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
+                title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
+                gauge=dict(
+                    axis=dict(range=[0, gmax], tickwidth=1.2),
+                    bar=dict(color=GAS_RED, thickness=0.28),
+                    steps=[dict(range=[0, 0.6 * gmax], color="rgba(0,0,0,0.05)")],
+                    threshold=dict(
+                        line=dict(color=GAS_RED, width=4), thickness=0.9, value=eur_g
+                    ),
+                ),
             )
-            st.stop()
-
-           # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-gas_hi = b["gas_bcf"][1]
-oil_hi = b["oil_mmbo"][1]
-gmax = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
-omax = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
-
-# Industry standard colors
-GAS_RED   = "#D62728"  # Plotly red
-OIL_GREEN = "#2CA02C"  # Plotly green
-
-c1, c2 = st.columns(2)
-
-# --- Gas gauge (RED) ---
-with c1:
-    gfig = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=eur_g,
-            number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
-            title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
-            gauge=dict(
-                axis=dict(range=[0, gmax], tickwidth=1.2),
-                bar=dict(color=GAS_RED, thickness=0.28),
-                steps=[dict(range=[0, 0.6 * gmax], color="rgba(0,0,0,0.05)")],
-                threshold=dict(
-                    line=dict(color=GAS_RED, width=4), thickness=0.9, value=eur_g
-                ),
-            ),
         )
-    )
-    gfig.update_layout(
-        height=280,
-        template="plotly_white",
-        margin=dict(l=10, r=10, t=50, b=10),
-    )
-    st.plotly_chart(gfig, use_container_width=True, theme=None, key="eur_gauge_gas")
-
-# --- Oil gauge (GREEN) ---
-with c2:
-    ofig = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=eur_o,
-            number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
-            title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
-            gauge=dict(
-                axis=dict(range=[0, omax], tickwidth=1.2),
-                bar=dict(color=OIL_GREEN, thickness=0.28),
-                steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
-                threshold=dict(
-                    line=dict(color=OIL_GREEN, width=4), thickness=0.9, value=eur_o
-                ),
-            ),
+        gfig.update_layout(
+            height=280,
+            template="plotly_white",
+            margin=dict(l=10, r=10, t=50, b=10),
         )
-    )
-    ofig.update_layout(
-        height=280,
-        template="plotly_white",
-        margin=dict(l=10, r=10, t=50, b=10),
-    )
-    st.plotly_chart(ofig, use_container_width=True, theme=None, key="eur_gauge_oil")
+        st.plotly_chart(gfig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
-# ======== Results tab: semi-log plots (Rate & Cumulative) ========
-if selected_tab == "Results":
+    # --- Oil gauge (GREEN) ---
+    with c2:
+        ofig = go.Figure(
+            go.Indicator(
+                mode="gauge+number",
+                value=eur_o,
+                number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
+                title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
+                gauge=dict(
+                    axis=dict(range=[0, omax], tickwidth=1.2),
+                    bar=dict(color=OIL_GREEN, thickness=0.28),
+                    steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
+                    threshold=dict(
+                        line=dict(color=OIL_GREEN, width=4), thickness=0.9, value=eur_o
+                    ),
+                ),
+            )
+        )
+        ofig.update_layout(
+            height=280,
+            template="plotly_white",
+            margin=dict(l=10, r=10, t=50, b=10),
+        )
+        st.plotly_chart(ofig, use_container_width=True, theme=None, key="eur_gauge_oil")
+
+    # ===================== BHP Sensitivity (Analytical only) =====================
+    with st.expander("BHP sensitivity (Analytical proxy)", expanded=False):
+        colA, colB, colC, colD = st.columns(4)
+        with colA:
+            bhp_start = st.number_input(
+                "Start BHP (psi)", 3000.0, 9000.0,
+                float(st.session_state.get("pad_bhp_psi", 5200.0)),
+                step=50.0, key="bhp_sens_start"
+            )
+        with colB:
+            bhp_end = st.number_input(
+                "End BHP (psi)", 3000.0, 9000.0,
+                4400.0, step=50.0, key="bhp_sens_end"
+            )
+        with colC:
+            bhp_step = st.number_input(
+                "Step (psi)", 10.0, 1000.0, 200.0,
+                step=10.0, key="bhp_sens_step"
+            )
+        with colD:
+            run_btn = st.button("Run sweep", type="primary", key="bhp_sens_go")
+
+        if run_btn:
+            import numpy as _np
+            import pandas as _pd
+            import plotly.graph_objects as _go
+
+            if bhp_step <= 0 or bhp_end == bhp_start:
+                st.warning("Choose a non-zero step and different start/end values.")
+                st.stop()
+
+            # Build the BHP list (inclusive of end where possible)
+            if bhp_end > bhp_start:
+                bhps = _np.arange(bhp_start, bhp_end + 0.5 * bhp_step, bhp_step)
+            else:
+                bhps = _np.arange(bhp_start, bhp_end - 0.5 * bhp_step, -abs(bhp_step))
+
+            rows = []
+            rng_seed = int(st.session_state.get("rng_seed", 1234))
+            rng = _np.random.default_rng(rng_seed)
+
+            for bhp in bhps:
+                # Make an isolated copy of state and set BHP control for this run
+                _state = dict(st.session_state.get("state_for_solver", {}))
+                _state["pad_ctrl"] = "BHP"
+                _state["pad_bhp_psi"] = float(bhp)
+
+                # Ensure pb/p_res are present if your proxy uses them
+                if "pb_psi" not in _state:
+                    _state["pb_psi"] = float(st.session_state.get("pb_psi", 5200.0))
+                if "p_res_psi" not in _state:
+                    _state["p_res_psi"] = float(st.session_state.get("p_res_psi", 5800.0))
+
+                try:
+                    out = fallback_fast_solver(_state, rng=rng)
+                except Exception as e:
+                    st.error(f"Analytical run failed at BHP={bhp:.0f} psi: {e}")
+                    continue
+
+                # Normalize keys and compute GOR safely
+                eur_g_s = float(out.get("EUR_g_BCF", out.get("eur_gas_BCF", 0.0)))
+                eur_o_s = float(out.get("EUR_o_MMBO", out.get("eur_oil_MMBO", 0.0)))
+                gor_s   = (1000.0 * eur_g_s / eur_o_s) if eur_o_s > 1e-12 else _np.inf
+
+                rows.append(dict(
+                    BHP_psi=float(bhp),
+                    EUR_g_BCF=eur_g_s,
+                    EUR_o_MMBO=eur_o_s,
+                    EUR_GOR_scf_stb=gor_s
+                ))
+
+            if not rows:
+                st.warning("No results returned.")
+                st.stop()
+
+            df = _pd.DataFrame(rows).sort_values("BHP_psi", ascending=False).reset_index(drop=True)
+            st.dataframe(df, use_container_width=True)
+
+            # --- Plot EURs vs BHP ---
+            fig_eur = _go.Figure()
+            fig_eur.add_trace(_go.Scatter(
+                x=df["BHP_psi"], y=df["EUR_g_BCF"],
+                name="Gas EUR (BCF)", mode="lines+markers",
+                line=dict(width=3, color=GAS_RED)
+            ))
+            fig_eur.add_trace(_go.Scatter(
+                x=df["BHP_psi"], y=df["EUR_o_MMBO"],
+                name="Oil EUR (MMBO)", mode="lines+markers",
+                line=dict(width=3, color=OIL_GREEN), yaxis="y2"
+            ))
+            fig_eur.update_layout(
+                template="plotly_white",
+                title="<b>EUR vs BHP</b>",
+                height=420,
+                margin=dict(l=10, r=10, t=50, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
+                yaxis=dict(title="Gas EUR (BCF)"),
+                yaxis2=dict(title="Oil EUR (MMBO)", overlaying="y", side="right"),
+                xaxis=dict(title="BHP (psi)")
+            )
+            st.plotly_chart(fig_eur, use_container_width=True, theme=None, key="bhp_sens_eur_plot")
+
+            # --- Plot GOR vs BHP ---
+            fig_gor = _go.Figure(_go.Scatter(
+                x=df["BHP_psi"], y=df["EUR_GOR_scf_stb"],
+                name="EUR GOR (scf/STB)", mode="lines+markers"
+            ))
+            # Optional: draw your GOR cap line if defined for the play
+            _bounds = _sanity_bounds_for_play(st.session_state.get("play_sel", ""))
+            _gor_cap = float(_bounds.get("max_eur_gor_scfstb", 2000.0))
+            fig_gor.add_hline(y=_gor_cap, line=dict(color="rgba(0,0,0,0.3)", dash="dot"))
+            fig_gor.update_layout(
+                template="plotly_white",
+                title="<b>EUR GOR vs BHP</b>",
+                height=400,
+                margin=dict(l=10, r=10, t=50, b=10),
+                yaxis=dict(title="scf/STB"),
+                xaxis=dict(title="BHP (psi)"),
+                showlegend=False
+            )
+            st.plotly_chart(fig_gor, use_container_width=True, theme=None, key="bhp_sens_gor_plot")
+    # =================== end BHP Sensitivity block ===================
+
+    # ======== Semi-log plots (Rate & Cumulative) ========
     t  = sim.get("t")
     qg = sim.get("qg")
     qo = sim.get("qo")
@@ -1999,6 +2117,7 @@ if selected_tab == "Results":
             )
     else:
         st.warning("Cumulative series not available.")
+# =========================== END RESULTS TAB ==========================
 
 # ======== 3D Viewer tab (flush-left 'elif') ========
 elif selected_tab == "3D Viewer":
