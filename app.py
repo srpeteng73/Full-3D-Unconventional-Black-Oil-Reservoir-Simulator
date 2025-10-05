@@ -1754,23 +1754,14 @@ if selected_tab == "Results":
         if sim.get("runtime_s") is not None:
             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-                # --- Sanity gate: block publishing if EURs are out-of-bounds ---
-        # Use the authoritative keys written by _compute_eurs_and_cums(...)
-       eur_g = float(
-    sim.get("eur_gas_BCF", sim.get("EUR_g_BCF", 0.0))
-)
-eur_o = float(
-    sim.get("eur_oil_MMBO", sim.get("EUR_o_MMBO", 0.0))
-)
-
-
-        # If GOR was computed, use it; else infer safely
-        implied_eur_gor = sim.get("eur_gor_scfstb", None)
-        if implied_eur_gor is None:
-            implied_eur_gor = (1.0e9 * eur_g / (1.0e6 * eur_o)) if eur_o > 1e-12 else float("inf")
+              # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+        eur_g = float(sim.get("eur_gas_BCF", sim.get("EUR_g_BCF", 0.0)))
+        eur_o = float(sim.get("eur_oil_MMBO", sim.get("EUR_o_MMBO", 0.0)))
 
         play_name = st.session_state.get("play_sel", "")
         b = _sanity_bounds_for_play(play_name)
+
+        implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
         gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
         tol = 1e-6
 
@@ -1778,12 +1769,15 @@ eur_o = float(
         issues = []
         chosen_engine = st.session_state.get("engine_type", "")
 
+        # Check Gas EUR
         if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
             issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
 
+        # Check Oil EUR
         if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
             issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
 
+        # Only apply the strict GOR check for the reliable Analytical Model
         if "Analytical" in chosen_engine:
             if implied_eur_gor > (gor_cap + tol):
                 issues.append(
@@ -1851,6 +1845,30 @@ eur_o = float(
                 margin=dict(l=10, r=10, t=50, b=10),
             )
             st.plotly_chart(gfig, use_container_width=True, theme=None)
+
+        with c2:
+            ofig = go.Figure(
+                go.Indicator(
+                    mode="gauge+number",
+                    value=eur_o,
+                    number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
+                    title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
+                    gauge=dict(
+                        axis=dict(range=[0, omax], tickwidth=1.2),
+                        bar=dict(color=COLOR_OIL, thickness=0.28),
+                        steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
+                        threshold=dict(
+                            line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o
+                        ),
+                    ),
+                )
+            )
+            ofig.update_layout(
+                height=280,
+                template="plotly_white",
+                margin=dict(l=10, r=10, t=50, b=10),
+            )
+            st.plotly_chart(ofig, use_container_width=True, theme=None)
 
         with c2:
             ofig = go.Figure(
