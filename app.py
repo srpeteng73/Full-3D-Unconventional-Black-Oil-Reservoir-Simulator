@@ -1718,7 +1718,13 @@ if selected_tab == "Results":
         if sim.get("runtime_s") is not None:
             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-     # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+         # ---- Make sure we actually have a simulation dict before using it ----
+    sim = st.session_state.get("sim")
+    if not isinstance(sim, dict) or not sim:
+        st.info("Click **Run simulation** to compute and display the results.")
+        st.stop()
+
+    # --- Sanity gate: block publishing if EURs are out-of-bounds ---
     eur_g = float(sim.get("eur_gas_BCF",  sim.get("EUR_g_BCF",  0.0)))
     eur_o = float(sim.get("eur_o_MMBO",   sim.get("EUR_o_MMBO", 0.0)))
 
