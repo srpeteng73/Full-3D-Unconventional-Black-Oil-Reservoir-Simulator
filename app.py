@@ -1815,7 +1815,7 @@ if selected_tab == "Results":
             )
             st.stop()
 
-        # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
+                # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
         gas_hi = b["gas_bcf"][1]
         oil_hi = b["oil_mmbo"][1]
         gmax = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
@@ -1844,7 +1844,8 @@ if selected_tab == "Results":
                 template="plotly_white",
                 margin=dict(l=10, r=10, t=50, b=10),
             )
-            st.plotly_chart(gfig, use_container_width=True, theme=None)
+            # UNIQUE KEY
+            st.plotly_chart(gfig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
         with c2:
             ofig = go.Figure(
@@ -1868,31 +1869,8 @@ if selected_tab == "Results":
                 template="plotly_white",
                 margin=dict(l=10, r=10, t=50, b=10),
             )
-            st.plotly_chart(ofig, use_container_width=True, theme=None)
-
-        with c2:
-            ofig = go.Figure(
-                go.Indicator(
-                    mode="gauge+number",
-                    value=eur_o,
-                    number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
-                    title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
-                    gauge=dict(
-                        axis=dict(range=[0, omax], tickwidth=1.2),
-                        bar=dict(color=COLOR_OIL, thickness=0.28),
-                        steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
-                        threshold=dict(
-                            line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o
-                        ),
-                    ),
-                )
-            )
-            ofig.update_layout(
-                height=280,
-                template="plotly_white",
-                margin=dict(l=10, r=10, t=50, b=10),
-            )
-            st.plotly_chart(ofig, use_container_width=True, theme=None)
+            # UNIQUE KEY
+            st.plotly_chart(ofig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
         # ======== Results tab: semi-log plots (Rate & Cumulative) ========
         t = sim.get("t")
@@ -1952,7 +1930,8 @@ if selected_tab == "Results":
             fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False,
                                   showgrid=True, gridcolor="rgba(0,0,0,0.15)")
             fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
-            st.plotly_chart(fig_rate, use_container_width=True, theme=None)
+            # UNIQUE KEY
+            st.plotly_chart(fig_rate, use_container_width=True, theme=None, key="rate_semilog_chart")
 
             with st.expander("How to read this plot"):
                 st.markdown(
@@ -2015,7 +1994,8 @@ if selected_tab == "Results":
             fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False,
                                  showgrid=True, gridcolor="rgba(0,0,0,0.15)")
             fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
-            st.plotly_chart(fig_cum, use_container_width=True, theme=None)
+            # UNIQUE KEY
+            st.plotly_chart(fig_cum, use_container_width=True, theme=None, key="cum_semilog_chart")
 
             with st.expander("How to read this plot"):
                 st.markdown(
