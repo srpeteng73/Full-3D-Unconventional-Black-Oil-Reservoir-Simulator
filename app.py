@@ -1042,10 +1042,14 @@ def _sanity_bounds_for_play(play_name: str) -> dict:
         # Oil Window – widened to cover ~3.5–3.7 BCF gas and ~1.6–1.7 MMBO oil you observed
         return dict(gas_bcf=(0.8, 4.8), oil_mmbo=(0.3, 2.2), max_eur_gor_scfstb=2300.0)
 
-    # Bakken / Three Forks (Oil)
-    if "bakken" in s or "three forks" in s:
-        # Widened to include your 2.8–4.6 BCF gas and ~2.0 MMBO oil cases
-        return dict(gas_bcf=(0.6, 4.8), oil_mmbo=(0.6, 2.2), max_eur_gor_scfstb=2300.0)
+   # Bakken / Three Forks (Oil)
+if "bakken" in s or "three forks" in s:
+    return dict(
+        gas_bcf=(0.6, 4.6),
+        oil_mmbo=(0.8, 2.2),
+        max_eur_gor_scfstb=2300.0,  # was 1800 – raised to avoid false positives at ~2.2k
+    )
+
 
     # Niobrara / DJ (Oil)
     if "niobrara" in s or " dj" in s:
