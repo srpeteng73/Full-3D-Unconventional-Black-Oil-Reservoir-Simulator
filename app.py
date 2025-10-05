@@ -1010,15 +1010,12 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
-from __future__ import annotations
+from typing import Dict, Tuple, List, Union, Optional
 
-from typing import Dict, Tuple, List
-
-
-Bounds = Dict[str, Tuple[float, float] | float]
+Bounds = Dict[str, Union[Tuple[float, float], float]]
 
 
-def _sanity_bounds_for_play(play_name: str) -> Dict[str, Tuple[float, float] | float]:
+def _sanity_bounds_for_play(play_name: str) -> Bounds:
     """
     Return per-play sanity envelopes for EUR Gas (BCF), EUR Oil (MMBO),
     and a soft cap on implied EUR GOR (scf/STB). Envelopes are conservative
@@ -1026,7 +1023,6 @@ def _sanity_bounds_for_play(play_name: str) -> Dict[str, Tuple[float, float] | f
 
     If a play name isn’t recognized, a safe default is returned.
     """
-
     s = (play_name or "").lower()
 
     # -------- Global fallback (conservative, oil-window-ish) --------
@@ -1059,7 +1055,7 @@ def _sanity_bounds_for_play(play_name: str) -> Dict[str, Tuple[float, float] | f
         return dict(gas_bcf=(0.6, 4.6), oil_mmbo=(0.8, 2.2), max_eur_gor_scfstb=2300.0)
 
     # Niobrara / DJ (Oil)
-    if "niobrara" in s or " dj" in s or "dj " in s:
+    if "niobrara" in s or "dj" in s:
         return dict(gas_bcf=(0.3, 2.5), oil_mmbo=(0.3, 1.8), max_eur_gor_scfstb=1800.0)
 
     # Anadarko – Woodford
@@ -1110,12 +1106,11 @@ def _sanity_bounds_for_play(play_name: str) -> Dict[str, Tuple[float, float] | f
     return defaults
 
 
-# ---------- Optional helper to centralize the “sanity check” logic ---------- #
 def sanity_warnings(
     play_name: str,
-    eur_gas_bcf: float | None,
-    eur_oil_mmbo: float | None,
-    implied_eur_gor_scfstb: float | None,
+    eur_gas_bcf: Optional[float],
+    eur_oil_mmbo: Optional[float],
+    implied_eur_gor_scfstb: Optional[float],
 ) -> List[str]:
     """
     Return a list of human-readable warnings for the Results tab.
