@@ -1017,7 +1017,7 @@ def _sanity_bounds_for_play(play_name: str) -> dict:
     conservative so plausible cases are not flagged during proxy testing.
 
     Notes:
-      • Oil-window plays get a GOR cap in the ~1,600–2,600 range.
+      • Oil-window plays get a GOR cap in the ~1,400–2,600 range.
       • Dry-gas plays effectively disable the GOR cap by setting it high.
       • If a play name isn’t recognized, a safe default is returned.
     """
@@ -1031,29 +1031,31 @@ def _sanity_bounds_for_play(play_name: str) -> dict:
     )
 
     # -------- Play-specific envelopes --------
-    # Permian
+    # Permian – Midland (Oil): widen gas, tighten oil slightly; lift GOR cap to avoid edge warnings
     if "permian" in s and "midland" in s:
-        # Widened gas max so your 4.3–4.4 BCF cases don’t warn
-        return dict(gas_bcf=(0.8, 4.6), oil_mmbo=(0.6, 2.2), max_eur_gor_scfstb=2200.0)
+        return dict(gas_bcf=(0.8, 4.5), oil_mmbo=(0.7, 2.1), max_eur_gor_scfstb=2300.0)
+
+    # Permian – Delaware (Oil/Gas)
     if "permian" in s and "delaware" in s:
         return dict(gas_bcf=(1.0, 5.0), oil_mmbo=(0.6, 2.4), max_eur_gor_scfstb=2600.0)
 
-    # Eagle Ford
+    # Eagle Ford (Condensate)
     if "eagle" in s and "ford" in s and "condensate" in s:
         return dict(gas_bcf=(1.5, 5.0), oil_mmbo=(0.4, 2.5), max_eur_gor_scfstb=3000.0)
+
+    # Eagle Ford (Oil Window): widened gas to cover ~4.3–4.4 BCF; oil up to ~2.2; cap ~2,200
     if "eagle" in s and "ford" in s:
-        # Oil window — widened to match your 4.3–4.4 BCF, ~2.0 MMBO outcomes
         return dict(gas_bcf=(0.8, 4.8), oil_mmbo=(0.3, 2.2), max_eur_gor_scfstb=2200.0)
 
-    # Bakken / Three Forks
+    # Bakken / Three Forks (Oil): tighter and more representative of mid-window behavior
     if "bakken" in s or "three forks" in s:
-        return dict(gas_bcf=(0.4, 3.5), oil_mmbo=(0.8, 2.2), max_eur_gor_scfstb=1600.0)
+        return dict(gas_bcf=(0.4, 1.8), oil_mmbo=(0.6, 2.0), max_eur_gor_scfstb=1400.0)
 
-    # Niobrara / DJ
+    # Niobrara / DJ (Oil)
     if "niobrara" in s or "dj" in s:
         return dict(gas_bcf=(0.3, 2.5), oil_mmbo=(0.3, 1.8), max_eur_gor_scfstb=1800.0)
 
-    # Anadarko – Woodford
+    # Anadarko – Woodford (liquids-rich gas)
     if "anadarko" in s or "woodford" in s:
         return dict(gas_bcf=(0.5, 4.0), oil_mmbo=(0.2, 1.5), max_eur_gor_scfstb=3500.0)
 
