@@ -1975,6 +1975,7 @@ if t is not None and (cum_g is not None or cum_o is not None or cum_w is not Non
         )
 else:
     st.warning("Cumulative series not available.")
+
 elif selected_tab == "3D Viewer":
     # ======== 3D Viewer tab ========
     st.subheader("3D Viewer")
