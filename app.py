@@ -1010,18 +1010,54 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
-def _sanity_bounds_for_play(play_name: str):
+def _sanity_bounds_for_play(play_name: str) -> dict:
     """
-    Return EUR sanity bounds (by play) for UI validation & clamping.
-    Default: conservative oil-window-ish.
-    For "Midland", use oil 0.3–2.0 MMBO, gas 0.2–3.5 BCF, max EUR GOR 2,000 scf/STB.
+    Return per-play EUR sanity bounds (min,max) and a GOR cap (scf/STB)
+    used by the Results tab. Values are intentionally conservative but
+    should not flag plausible cases.
+
+    If the play name doesn't match any known pattern, we fall back to
+    conservative defaults suitable for an oil-window case.
     """
-    s = (play_name or "").lower()
-    # Default (conservative, oil-window-ish)
-    bounds = dict(oil_mmbo=(0.3, 1.5), gas_bcf=(0.3, 3.0), max_eur_gor_scfstb=2000.0)
-    if "midland" in s:
-        bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
-    return bounds
+    # --- Conservative global fallbacks ---
+    defaults = dict(
+        gas_bcf=(0.2, 4.0),
+        oil_mmbo=(0.1, 2.5),
+        max_eur_gor_scfstb=2200,  # gentle default cap
+    )
+
+    # Normalize the incoming label for robust matching
+    s = (play_name or "").strip().lower()
+    s = s.replace("—", "-").replace("–", "-")  # unify dashes
+
+    # --- Known plays (pattern-based) ---
+    if "midland" in s:  # Permian – Midland (Oil)
+        return dict(
+            gas_bcf=(1.0, 3.2),
+            oil_mmbo=(0.7, 2.1),
+            max_eur_gor_scfstb=2200,
+        )
+
+    if "eagle" in s and "oil" in s:  # Eagle Ford (Oil Window)
+        return dict(
+            gas_bcf=(0.8, 3.2),
+            oil_mmbo=(0.3, 2.1),
+            max_eur_gor_scfstb=2100,
+        )
+
+    if "bakken" in s and ("middle" in s or "middle bakken" in s):
+        return dict(
+            gas_bcf=(0.4, 1.8),
+            oil_mmbo=(0.6, 2.0),
+            max_eur_gor_scfstb=1400,
+        )
+
+    # --- Fallback (conservative oil-window-ish) ---
+    return dict(
+        gas_bcf=defaults["gas_bcf"],
+        oil_mmbo=defaults["oil_mmbo"],
+        max_eur_gor_scfstb=defaults["max_eur_gor_scfstb"],
+    )
 
 def run_simulation_engine(state):
     """
