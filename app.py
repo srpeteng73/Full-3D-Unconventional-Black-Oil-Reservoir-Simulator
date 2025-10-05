@@ -47,6 +47,42 @@ def _apply_economic_cutoffs(t, y, *, cutoff_days=None, min_rate=0.0):
             mask[first:] = False
     return t[mask], y[mask]
 
+def _apply_economic_cutoffs_ui(t, q, kind: str):
+    """
+    Use EUR options from the UI to trim the series BEFORE integration.
+    kind: "gas", "oil", or "water".
+    Returns (t_trim, q_trim). If q is None, returns (t, None).
+    """
+    import numpy as np
+    import streamlit as st
+
+    if q is None:
+        return np.asarray(t, float), None
+
+    # Coerce arrays (guard NaN/Inf to be safe for masking)
+    t = np.asarray(t, float)
+    q = np.asarray(q, float)
+    t = np.nan_to_num(t, nan=0.0, posinf=0.0, neginf=0.0)
+    q = np.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+
+    cutoff_days = float(st.session_state.get("eur_cutoff_days", 30.0 * 365.25))
+    if kind == "gas":
+        min_rate = float(st.session_state.get("eur_min_rate_gas_mscfd", 100.0))
+    elif kind == "oil":
+        min_rate = float(st.session_state.get("eur_min_rate_oil_stbd", 30.0))
+    else:
+        # Water default: no economic floor
+        min_rate = 0.0
+
+    # Keep samples within horizon AND above floor
+    mask = (t <= cutoff_days) & (q >= min_rate)
+    if not np.any(mask):
+        # No valid samples → return safe tiny series so plots/EUR don’t crash
+        return np.array([0.0]), np.array([0.0])
+
+    return t[mask], q[mask]
+
+
 def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     """
     Compute cumulative volumes and EURs from rate vectors.
@@ -1098,6 +1134,26 @@ def run_simulation_engine(state):
     qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
     qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
 
+# After: t, qg, qo, qw have been np.nan_to_num(...) guarded
+
+# Trim series using UI EUR options (Part B)
+t_g, qg_eff = _apply_economic_cutoffs_ui(t, qg, "gas")
+t_o, qo_eff = _apply_economic_cutoffs_ui(t, qo, "oil")
+t_w, qw_eff = _apply_economic_cutoffs_ui(t, qw, "water")
+
+# Compute authoritative cum & EURs from the trimmed series
+sim = dict(out)
+sim.update(_compute_eurs_and_cums(t, qg=qg_eff, qo=qo_eff, qw=qw_eff))
+
+# Apply Analytical-only soft clamp for play bounds
+current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+engine_name  = st.session_state.get("engine_type", "")
+sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
+
+sim["_sim_signature"] = _sim_signature_from_state()
+return sim
+
+    
     # --- Authoritative cumulative & EURs (correct units) ---
     sim = dict(out)
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
@@ -1702,14 +1758,22 @@ if selected_tab == "Results":
         if sim.get("runtime_s") is not None:
             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-        # --- Sanity gate: block publishing if EURs are out-of-bounds ---
-        eur_g = float(sim.get("EUR_g_BCF", 0.0))
-        eur_o = float(sim.get("EUR_o_MMBO", 0.0))
+                # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+        # Use the authoritative keys written by _compute_eurs_and_cums(...)
+        eur_g = float(
+            sim.get("eur_gas_BCF", sim.get("EUR_g_BCF", 0.0))
+        )
+        eur_o = float(
+            sim.get("eur_oil_MMBO", sim.get("EUR_o_MMBO", 0.0))
+        )
+
+        # If GOR was computed, use it; else infer safely
+        implied_eur_gor = sim.get("eur_gor_scfstb", None)
+        if implied_eur_gor is None:
+            implied_eur_gor = (1.0e9 * eur_g / (1.0e6 * eur_o)) if eur_o > 1e-12 else float("inf")
 
         play_name = st.session_state.get("play_sel", "")
         b = _sanity_bounds_for_play(play_name)
-
-        implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
         gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
         tol = 1e-6
 
@@ -1717,15 +1781,12 @@ if selected_tab == "Results":
         issues = []
         chosen_engine = st.session_state.get("engine_type", "")
 
-        # Check Gas EUR
         if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
             issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
 
-        # Check Oil EUR
         if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
             issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
 
-        # Only apply the strict GOR check for the reliable Analytical Model
         if "Analytical" in chosen_engine:
             if implied_eur_gor > (gor_cap + tol):
                 issues.append(
