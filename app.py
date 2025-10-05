@@ -1014,89 +1014,154 @@ def _sanity_bounds_for_play(play_name: str) -> dict:
     """
     Return per-play sanity envelopes for EUR Gas (BCF), EUR Oil (MMBO),
     and a soft cap on implied EUR GOR (scf/STB). Envelopes are conservative
-    (meant to catch only outliers) and are used for Results tab warnings.
+    (meant to catch only outliers) and feed Results-tab warnings.
 
     If a play name isn’t recognized, a safe default is returned.
     """
     s = (play_name or "").lower()
 
     # -------- Global fallback (conservative, oil-window-ish) --------
-    defaults = dict(
-        gas_bcf=(0.3, 5.0),
-        oil_mmbo=(0.2, 2.5),
-        max_eur_gor_scfstb=2200.0,
-    )
+    defaults = {
+        "gas_bcf": (0.3, 5.0),
+        "oil_mmbo": (0.2, 2.5),
+        "max_eur_gor_scfstb": 2200.0,
+    }
 
     # -------- Play-specific envelopes --------
-    # Permian
+    # Permian – Midland (Oil)
     if "permian" in s and "midland" in s:
-        # Matches your current runs up to ~4.4 BCF gas / ~2.0 MMBO oil
-        return dict(gas_bcf=(0.8, 4.6), oil_mmbo=(0.6, 2.2), max_eur_gor_scfstb=2200.0)
+        # Covers ~0.8–4.6 BCF gas and ~0.6–2.2 MMBO oil from your runs
+        return {
+            "gas_bcf": (0.8, 4.6),
+            "oil_mmbo": (0.6, 2.2),
+            "max_eur_gor_scfstb": 2200.0,
+        }
+
+    # Permian – Delaware (Oil/Gas)
     if "permian" in s and "delaware" in s:
-        return dict(gas_bcf=(1.0, 5.0), oil_mmbo=(0.6, 2.4), max_eur_gor_scfstb=2600.0)
+        return {
+            "gas_bcf": (1.0, 5.0),
+            "oil_mmbo": (0.6, 2.4),
+            "max_eur_gor_scfstb": 2600.0,
+        }
 
-    # Eagle Ford
+    # Eagle Ford – Condensate
     if "eagle" in s and "ford" in s and "condensate" in s:
-        return dict(gas_bcf=(1.5, 5.0), oil_mmbo=(0.4, 2.5), max_eur_gor_scfstb=3000.0)
+        return {
+            "gas_bcf": (1.5, 5.0),
+            "oil_mmbo": (0.4, 2.5),
+            "max_eur_gor_scfstb": 3000.0,
+        }
+
+    # Eagle Ford – Oil Window
     if "eagle" in s and "ford" in s:
-        # Oil Window – widened to cover ~3.5–3.7 BCF gas and ~1.6–1.7 MMBO oil you observed
-        return dict(gas_bcf=(0.8, 4.8), oil_mmbo=(0.3, 2.2), max_eur_gor_scfstb=2300.0)
+        # Widened to cover ~3.5–3.7 BCF and ~1.6–1.7 MMBO you observed
+        return {
+            "gas_bcf": (0.8, 4.8),
+            "oil_mmbo": (0.3, 2.2),
+            "max_eur_gor_scfstb": 2300.0,
+        }
 
-   # Bakken / Three Forks (Oil)
-if "bakken" in s or "three forks" in s:
-    return dict(
-        gas_bcf=(0.6, 4.6),
-        oil_mmbo=(0.8, 2.2),
-        max_eur_gor_scfstb=2300.0,  # was 1800 – raised to avoid false positives at ~2.2k
-    )
-
+    # Bakken / Three Forks (Oil)
+    if "bakken" in s or "three forks" in s:
+        return {
+            "gas_bcf": (0.6, 4.6),
+            "oil_mmbo": (0.8, 2.2),
+            # Raised to avoid false positives around ~2.2k scf/STB
+            "max_eur_gor_scfstb": 2300.0,
+        }
 
     # Niobrara / DJ (Oil)
-    if "niobrara" in s or " dj" in s:
-        return dict(gas_bcf=(0.3, 2.5), oil_mmbo=(0.3, 1.8), max_eur_gor_scfstb=1800.0)
+    if "niobrara" in s or "dj" in s:
+        return {
+            "gas_bcf": (0.3, 2.5),
+            "oil_mmbo": (0.3, 1.8),
+            "max_eur_gor_scfstb": 1800.0,
+        }
 
     # Anadarko – Woodford
     if "anadarko" in s or "woodford" in s:
-        return dict(gas_bcf=(0.5, 4.0), oil_mmbo=(0.2, 1.5), max_eur_gor_scfstb=3500.0)
+        return {
+            "gas_bcf": (0.5, 4.0),
+            "oil_mmbo": (0.2, 1.5),
+            "max_eur_gor_scfstb": 3500.0,
+        }
 
     # Granite Wash (liquids-rich gas)
     if "granite wash" in s:
-        return dict(gas_bcf=(0.5, 5.0), oil_mmbo=(0.1, 1.0), max_eur_gor_scfstb=4000.0)
+        return {
+            "gas_bcf": (0.5, 5.0),
+            "oil_mmbo": (0.1, 1.0),
+            "max_eur_gor_scfstb": 4000.0,
+        }
 
     # Tuscaloosa Marine (Oil)
     if "tuscaloosa" in s:
-        return dict(gas_bcf=(0.3, 3.0), oil_mmbo=(0.3, 2.2), max_eur_gor_scfstb=2200.0)
+        return {
+            "gas_bcf": (0.3, 3.0),
+            "oil_mmbo": (0.3, 2.2),
+            "max_eur_gor_scfstb": 2200.0,
+        }
 
     # Montney (Condensate-Rich)
     if "montney" in s:
-        return dict(gas_bcf=(0.8, 6.0), oil_mmbo=(0.2, 2.0), max_eur_gor_scfstb=4000.0)
+        return {
+            "gas_bcf": (0.8, 6.0),
+            "oil_mmbo": (0.2, 2.0),
+            "max_eur_gor_scfstb": 4000.0,
+        }
 
     # Duvernay (Liquids)
     if "duvernay" in s:
-        return dict(gas_bcf=(0.5, 5.0), oil_mmbo=(0.3, 2.0), max_eur_gor_scfstb=3000.0)
+        return {
+            "gas_bcf": (0.5, 5.0),
+            "oil_mmbo": (0.3, 2.0),
+            "max_eur_gor_scfstb": 3000.0,
+        }
 
     # Haynesville (Dry Gas)
     if "haynesville" in s:
-        return dict(gas_bcf=(3.0, 20.0), oil_mmbo=(0.0, 0.3), max_eur_gor_scfstb=10000.0)
+        return {
+            "gas_bcf": (3.0, 20.0),
+            "oil_mmbo": (0.0, 0.3),
+            "max_eur_gor_scfstb": 10000.0,
+        }
 
     # Marcellus (Dry Gas)
     if "marcellus" in s:
-        return dict(gas_bcf=(2.0, 15.0), oil_mmbo=(0.0, 0.3), max_eur_gor_scfstb=10000.0)
+        return {
+            "gas_bcf": (2.0, 15.0),
+            "oil_mmbo": (0.0, 0.3),
+            "max_eur_gor_scfstb": 10000.0,
+        }
 
     # Barnett (Gas)
     if "barnett" in s:
-        return dict(gas_bcf=(0.5, 6.0), oil_mmbo=(0.0, 0.3), max_eur_gor_scfstb=8000.0)
+        return {
+            "gas_bcf": (0.5, 6.0),
+            "oil_mmbo": (0.0, 0.3),
+            "max_eur_gor_scfstb": 8000.0,
+        }
 
     # Fayetteville (Gas)
     if "fayetteville" in s:
-        return dict(gas_bcf=(0.5, 5.0), oil_mmbo=(0.0, 0.3), max_eur_gor_scfstb=8000.0)
+        return {
+            "gas_bcf": (0.5, 5.0),
+            "oil_mmbo": (0.0, 0.3),
+            "max_eur_gor_scfstb": 8000.0,
+        }
 
     # Horn River (Dry Gas)
     if "horn river" in s:
-        return dict(gas_bcf=(3.0, 15.0), oil_mmbo=(0.0, 0.3), max_eur_gor_scfstb=12000.0)
+        return {
+            "gas_bcf": (3.0, 15.0),
+            "oil_mmbo": (0.0, 0.3),
+            "max_eur_gor_scfstb": 12000.0,
+        }
 
     # Unknown / not listed → safe defaults
     return defaults
+
 
 def run_simulation_engine(state):
     """
