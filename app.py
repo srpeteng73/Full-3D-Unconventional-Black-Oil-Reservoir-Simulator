@@ -1760,12 +1760,13 @@ if selected_tab == "Results":
 
                 # --- Sanity gate: block publishing if EURs are out-of-bounds ---
         # Use the authoritative keys written by _compute_eurs_and_cums(...)
-        eur_g = float(
-            sim.get("eur_gas_BCF", sim.get("EUR_g_BCF", 0.0))
-        )
-        eur_o = float(
-            sim.get("eur_oil_MMBO", sim.get("EUR_o_MMBO", 0.0))
-        )
+       eur_g = float(
+    sim.get("eur_gas_BCF", sim.get("EUR_g_BCF", 0.0))
+)
+eur_o = float(
+    sim.get("eur_oil_MMBO", sim.get("EUR_o_MMBO", 0.0))
+)
+
 
         # If GOR was computed, use it; else infer safely
         implied_eur_gor = sim.get("eur_gor_scfstb", None)
