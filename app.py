@@ -1718,52 +1718,51 @@ if selected_tab == "Results":
         if sim.get("runtime_s") is not None:
             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-           # --- Sanity gate: block publishing if EURs are out-of-bounds ---
-eur_g = float(sim.get("eur_gas_BCF",  sim.get("EUR_g_BCF",  0.0)))
-eur_o = float(sim.get("eur_o_MMBO",   sim.get("EUR_o_MMBO", 0.0)))
+     # --- Sanity gate: block publishing if EURs are out-of-bounds ---
+    eur_g = float(sim.get("eur_gas_BCF",  sim.get("EUR_g_BCF",  0.0)))
+    eur_o = float(sim.get("eur_o_MMBO",   sim.get("EUR_o_MMBO", 0.0)))
 
-play_name = st.session_state.get("play_sel", "Permian – Midland (Oil)")
-b = _sanity_bounds_for_play(play_name)
+    play_name = st.session_state.get("play_sel", "")
+    b = _sanity_bounds_for_play(play_name)
 
-implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else float("inf")
-gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
-tol = 1e-6
+    implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
+    gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
+    tol = 1e-6
 
-# --- CORRECTED SANITY CHECK BLOCK ---
-issues = []
-engine = str(st.session_state.get("engine_type", "")).lower()
+    # --- CORRECTED SANITY CHECK BLOCK ---
+    issues = []
+    chosen_engine = st.session_state.get("engine_type", "")
 
-# Gas EUR
-if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-    issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
+    # Check Gas EUR
+    if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
+        issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
 
-# Oil EUR
-if not (b["oil_mmbo"][0] <= eur_o <= b["oil_mmbo"][1]):
-    issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
+    # Check Oil EUR
+    if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
+        issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
 
-# Strict GOR check only for the Analytical proxy
-if "analytical" in engine and implied_eur_gor > (gor_cap + tol):
-    issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
-# --- END OF CORRECTED SANITY CHECK BLOCK ---
+    # Only apply the strict GOR check for the reliable Analytical Model
+    if "Analytical" in chosen_engine and implied_eur_gor > (gor_cap + tol):
+        issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
+    # --- END OF CORRECTED SANITY CHECK BLOCK ---
 
-
-        if issues:
-            hint = (
-                " Tip: Try increasing the 'Pad BHP (psi)' in the sidebar to be closer to the 'pb_psi' "
-                "to reduce gas production."
+    if issues:
+        hint = (
+            " Tip: Try increasing the 'Pad BHP (psi)' in the sidebar to be closer to the 'pb_psi' "
+            "to reduce gas production."
+        )
+        if "Analytical" in chosen_engine:
+            # During proxy debugging, warn but do not block publishing
+            st.warning(
+                "Sanity checks flagged issues (Analytical engine), but results are shown for debugging.\n\n"
+                "Details:\n- " + "\n- ".join(issues) + hint
             )
-            if "Analytical" in chosen_engine:
-                # During proxy debugging, warn but do not block publishing
-                st.warning(
-                    "Sanity checks flagged issues (Analytical engine), but results are shown for debugging.\n\n"
-                    "Details:\n- " + "\n- ".join(issues) + hint
-                )
-            else:
-                st.error(
-                    "Production results failed sanity checks and were not published.\n\n"
-                    "Details:\n- " + "\n- ".join(issues) + hint
-                )
-                st.stop()
+        else:
+            st.error(
+                "Production results failed sanity checks and were not published.\n\n"
+                "Details:\n- " + "\n- ".join(issues) + hint
+            )
+            st.stop()
 
         # ---- Validation gate (engine-side) ----
         eur_valid = bool(sim.get("eur_valid", True))
