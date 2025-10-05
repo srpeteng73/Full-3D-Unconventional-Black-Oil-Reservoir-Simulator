@@ -1718,7 +1718,7 @@ if selected_tab == "Results":
         if sim.get("runtime_s") is not None:
             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-         # ---- Make sure we actually have a simulation dict before using it ----
+     # ---- Ensure we actually have a simulation dict before using it ----
     sim = st.session_state.get("sim")
     if not isinstance(sim, dict) or not sim:
         st.info("Click **Run simulation** to compute and display the results.")
@@ -1747,7 +1747,7 @@ if selected_tab == "Results":
     if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
         issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
 
-    # Only apply the strict GOR check for the reliable Analytical Model
+    # Only apply the strict GOR check for the Analytical model
     if "Analytical" in chosen_engine and implied_eur_gor > (gor_cap + tol):
         issues.append(f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}")
     # --- END OF CORRECTED SANITY CHECK BLOCK ---
