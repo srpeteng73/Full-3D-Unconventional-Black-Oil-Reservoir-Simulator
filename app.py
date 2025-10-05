@@ -1,24 +1,43 @@
-# Forcing a redeploy on Streamlit Cloud
+"""App entrypoint and UI wiring."""
+
+# MUST be first (only the docstring may be above this line):
+from __future__ import annotations
+
+from typing import Dict, Tuple, Union
+
+# Type alias used in sanity bounds code (Py 3.8/3.9 compatible)
+Bounds = Dict[str, Union[Tuple[float, float], float]]
+
+# ---------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------
+
+# stdlib
 import time
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import plotly.io as pio
-import streamlit as st
-from scipy import stats
-from scipy.integrate import cumulative_trapezoid
-from scipy.optimize import differential_evolution
-from scipy.interpolate import interp1d
-import numpy_financial as npf
-from core.full3d import simulate
-from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 import warnings  # trap analytical power warnings for Arps
 
-# ==== EUR & Validation helpers ===============================================
-from scipy.integrate import cumulative_trapezoid as _ctr
-import numpy as _np
+# third-party
+import numpy as np
+import numpy as _np  # underscore alias used by some helper snippets
+import numpy_financial as npf
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.subplots import make_subplots
+import streamlit as st
+from scipy import stats
+from scipy.integrate import cumulative_trapezoid  # sometimes used directly
+from scipy.integrate import cumulative_trapezoid as _ctr  # helper alias
+from scipy.interpolate import interp1d
+from scipy.optimize import differential_evolution
+
+# local modules
+from core.full3d import simulate
+from engines.fast import fallback_fast_solver  # used in preview & fallbacks
+
+# Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top)
+
 
 MIDLAND_BOUNDS = {
     "oil_mmbo": (0.3, 1.5),   # typical sanity window
@@ -1010,12 +1029,6 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
-# app.py (top of file)
-from __future__ import annotations  # must come first
-
-from typing import Dict, Tuple, Union
-
-Bounds = Dict[str, Union[Tuple[float, float], float]]
 
 def _sanity_bounds_for_play(play_name: str) -> Bounds:
     
