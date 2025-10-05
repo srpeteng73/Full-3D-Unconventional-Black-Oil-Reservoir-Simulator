@@ -1010,13 +1010,16 @@ def generate_property_volumes(state):
     st.session_state.phi = np.clip(phi_mid[None, ...] * kz_scale, 0.01, 0.35)
     st.success("Successfully generated 3D property volumes!")
 
-from __future__ import annotations
-from typing import Dict, Tuple, List
+# app.py (top of file)
+from __future__ import annotations  # must come first
 
-Bounds = Dict[str, Tuple[float, float] | float]
+from typing import Dict, Tuple, Union
 
+Bounds = Dict[str, Union[Tuple[float, float], float]]
 
-def _sanity_bounds_for_play(play_name: str) -> dict:
+def _sanity_bounds_for_play(play_name: str) -> Bounds:
+    
+
     """
     Return per-play sanity envelopes for EUR Gas (BCF), EUR Oil (MMBO),
     and a soft cap on implied EUR GOR (scf/STB). Envelopes are conservative
