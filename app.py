@@ -1034,55 +1034,58 @@ def run_simulation_engine(state):
     import warnings
     import time
     import numpy as np
-    from scipy.integrate import cumulative_trapezoid
-    from core.full3d import simulate
+
+    # Local imports are safe here even if you already import them at top-of-file.
+    # If you prefer, you can delete these two lines if they're already imported globally.
     from engines.fast import fallback_fast_solver
+    from core.full3d import simulate
 
     t0 = time.time()
-
-    # --- FINAL ROBUSTNESS CHECK FOR INPUTS (quick fatal guards) ---
-    if state.get('stage_spacing_ft', 0) <= 0:
-        st.error(
-            "FATAL INPUT ERROR: 'Stage spacing (ft)' must be a positive number. "
-            f"Current value: {state.get('stage_spacing_ft')}"
-        )
-        return None
-    if state.get('L_ft', 0) <= 0:
-        st.error(
-            "FATAL INPUT ERROR: 'Lateral length (ft)' must be a positive number. "
-            f"Current value: {state.get('L_ft')}"
-        )
-        return None
-    # --- END OF CHECK ---
-
     chosen_engine = st.session_state.get("engine_type", "")
     out = None
 
     try:
-        if "Analytical" in (chosen_engine or ""):
-            # ---------- ANALYTICAL PATH (with crash-proofing) ----------
+        if "Analytical" in chosen_engine:
+            # ---------------------------------------------------------------
+            # B) Ensure the proxy receives the widget values (pad_ctrl, BHP)
+            # ---------------------------------------------------------------
+            state = dict(state)  # work on a copy so we don't mutate caller
+            state["pad_ctrl"] = str(st.session_state.get("pad_ctrl", "BHP"))
+            state["pad_bhp_psi"] = float(st.session_state.get("pad_bhp_psi", 2500.0))
+
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
 
-            # Run once, watch for the classic hyperbolic power warning
+            # ---------------------------------------------------------------
+            # A) DEBUG: Confirm what the proxy actually receives
+            # ---------------------------------------------------------------
+            st.caption(
+                "DEBUG (Analytical inputs) → "
+                f"pad_ctrl={state.get('pad_ctrl')}  "
+                f"pad_bhp_psi={state.get('pad_bhp_psi')}  "
+                f"pb_psi={state.get('pb_psi')}"
+            )
+
+            # --- CRASH-PROOF ANALYTICAL CALL PATH ---
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always", RuntimeWarning)
+
+                # Call the fast proxy
                 out = fallback_fast_solver(state, rng)
+
+                # Detect classic hyperbolic-power warnings + NaN-ish results; retry sanitized
                 bad_power = any("invalid value encountered in power" in str(x.message) for x in w)
+                if bad_power or _looks_nan_like(out):
+                    st.info("Analytical model hit an unstable power term; retrying with safe parameters …")
+                    safe_state = _sanitize_decline_params(state.copy())
+                    out = fallback_fast_solver(safe_state, rng)
 
-            # If the classic Arps failure OR NaN-ish output => sanitize & retry once
-            if bad_power or _looks_nan_like(out):
-                st.info(
-                    "Analytical model encountered an unstable hyperbolic power term. "
-                    "Retrying with safe decline parameters …"
-                )
-                safe_state = _sanitize_decline_params(state.copy())
-                out = fallback_fast_solver(safe_state, rng)
-
-            # Guard against any remaining NaNs so plotting & EUR calc don't crash
-            out = _nan_guard_result(out)
+                # Guard the result dict against stray NaNs/Infs
+                out = _nan_guard_result(out)
 
         else:
-            # ---------- FULL 3D IMPLICIT SIMULATOR ----------
+            # ---------------------------
+            # Full 3D implicit simulator
+            # ---------------------------
             inputs = {
                 "engine": "implicit",
                 "nx": int(state.get("nx", 20)),
@@ -1117,84 +1120,45 @@ def run_simulation_engine(state):
             out = simulate(inputs)
 
     except Exception as e:
-        # <- IMPORTANT: this except pairs the try above. Do not put an 'else:' after this.
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
         st.exception(e)
         return None
 
-        # ------- everything above here stays the same (your try/except finishes with return None) -------
+    # If the engine returned nothing, bail gracefully
+    if not isinstance(out, dict):
+        st.error("Engine did not return a result dictionary.")
+        return None
 
-    # --- pull arrays from engine output ---
-    t  = out.get("t")
+    # ----------------------------------------
+    # Pull arrays and do the final NaN/Inf guard
+    # ----------------------------------------
+    t = out.get("t")
     qg = out.get("qg")
     qo = out.get("qo")
     qw = out.get("qw")
 
-    # Final guard so downstream integrals/UI never see NaN/Inf
-    import numpy as np
-    t  = np.nan_to_num(np.asarray(t,  float), nan=0.0, posinf=0.0, neginf=0.0)
+    t = np.nan_to_num(np.asarray(t, float), nan=0.0, posinf=0.0, neginf=0.0) if t is not None else np.array([], dtype=float)
     qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
     qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
     qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
 
-    # --- Authoritative cumulative & EURs ---
-    sim = dict(out)
+    # ------------------------------------------------------
+    # Authoritative cumulatives & EURs (unit-correct, robust)
+    # ------------------------------------------------------
+    sim = dict(out)  # start with engine output
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
 
-    # --- Apply play bounds for Analytical (soft clamp for UI realism) ---
+    # ------------------------------------------------------
+    # Apply play bounds (Analytical: soft UI clamp only)
+    # ------------------------------------------------------
     current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
-    engine_name  = st.session_state.get("engine_type", "")
+    engine_name = chosen_engine
     sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
 
-    # Signature for stale-guard and return to caller
+    # Bookkeeping
     sim["_sim_signature"] = _sim_signature_from_state()
-    return sim
-    
-    # --- Authoritative cumulative & EURs (correct units) ---
-    sim = dict(out)
-    sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
+    sim["runtime_s"] = float(time.time() - t0)
 
-    # --- Apply play bounds for Analytical (soft clamp for UI realism) ---
-    current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
-    engine_name = st.session_state.get("engine_type", "")
-    sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
-
-    # Optional timing
-    sim["engine_wall_seconds"] = float(time.time() - t0)
-
-    return sim
-   
-    # --- Authoritative cumulative & EURs + soft bounds for Analytical ---
-    # Start from engine output
-    sim = dict(out)
-
-    # Make sure the cleaned arrays are the ones used downstream
-    sim["t"], sim["qg"], sim["qo"], sim["qw"] = t, qg, qo, qw
-
-    # Compute cumulative volumes and EURs (gas in BCF, oil/water in MMbbl)
-    sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
-
-    # Soft clamp ONLY for Analytical engine to keep the UI realistic during proxy debugging
-    current_play = st.session_state.get("play_name", st.session_state.get("shale_play", st.session_state.get("play_sel", "")))
-    engine_name  = st.session_state.get("engine_type", "")
-    sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
-
-    # Compatibility keys (older UI expects these exact names)
-    if "eur_gas_BCF" in sim:
-        sim["EUR_g_BCF"] = sim["eur_gas_BCF"]
-    if "eur_oil_MMBO" in sim:
-        sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
-    if "eur_water_MMBL" in sim:
-        sim["EUR_w_MMBL"] = sim["eur_water_MMBL"]
-
-    # Preserve/compute runtime if not set yet
-    if "runtime_s" not in sim:
-        sim["runtime_s"] = time.time() - t0
-
-    # Add/refresh simulation signature so Results tab can detect stale outputs
-    sim["_sim_signature"] = _sim_signature_from_state()
-
-    # This replaces any ad-hoc EUR calcs elsewhere — return the enriched result now
     return sim
 
 
