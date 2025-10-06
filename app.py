@@ -8,7 +8,7 @@ from typing import Dict, Tuple, Union
 # Type alias used in sanity bounds code (Py 3.8/3.9 compatible)
 Bounds = Dict[str, Union[Tuple[float, float], float]]
 
-# ---------------------------------------------------------------------------
+## ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
 # stdlib
