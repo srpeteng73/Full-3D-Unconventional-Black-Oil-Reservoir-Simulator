@@ -2043,6 +2043,66 @@ with c2:
     )
     st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
+# ----------------------------------------------------------------------
+# Expected ranges card (per-play sanity envelope + status)
+# ----------------------------------------------------------------------
+oil_rng = b["oil_mmbo"]
+gas_rng = b["gas_bcf"]
+gor_cap = float(b.get("max_eur_gor_scfstb", np.inf))
+
+def _in_range(val: float, rng: tuple[float, float]) -> bool:
+    try:
+        v = float(val)
+    except Exception:
+        return False
+    return (rng[0] - 1e-9) <= v <= (rng[1] + 1e-9)
+
+oil_ok = _in_range(eur_o, oil_rng)
+gas_ok = _in_range(eur_g, gas_rng)
+gor_ok = (implied_eur_gor <= gor_cap) if np.isfinite(implied_eur_gor) else False
+
+status = lambda ok: "✅ OK" if ok else "⚠️ Check"
+
+pad_ctrl = str(st.session_state.get("pad_ctrl", ""))
+bhp = st.session_state.get("pad_bhp_psi", None)
+pb  = st.session_state.get("pb_psi", None)
+
+with st.container():
+    st.markdown("#### Expected ranges (play sanity envelope)")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown(
+            f"**Oil EUR (MMBO)**  \n"
+            f"Observed: **{eur_o:.2f}**  \n"
+            f"Envelope: {oil_rng[0]:.2f}–{oil_rng[1]:.2f}  \n"
+            f"{status(oil_ok)}"
+        )
+    with c2:
+        st.markdown(
+            f"**Gas EUR (BCF)**  \n"
+            f"Observed: **{eur_g:.2f}**  \n"
+            f"Envelope: {gas_rng[0]:.2f}–{gas_rng[1]:.2f}  \n"
+            f"{status(gas_ok)}"
+        )
+    with c3:
+        st.markdown(
+            f"**Implied EUR GOR (scf/STB)**  \n"
+            f"Observed: **{implied_eur_gor:,.0f}**  \n"
+            f"Cap: {gor_cap:,.0f}  \n"
+            f"{status(gor_ok)}"
+        )
+
+    # Optional small operating context line (helps debug BHP vs pb)
+    _ctx = []
+    if pad_ctrl:
+        _ctx.append(f"Control: {pad_ctrl}")
+    if isinstance(bhp, (int, float)):
+        _ctx.append(f"BHP: {float(bhp):.0f} psi")
+    if isinstance(pb, (int, float)):
+        _ctx.append(f"pb: {float(pb):.0f} psi")
+    if _ctx:
+        st.caption(" · ".join(_ctx))
+    
 
     # ===================== BHP Sensitivity (Analytical only) =====================
     with st.expander("BHP sensitivity (Analytical proxy)", expanded=False):
