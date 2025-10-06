@@ -37,24 +37,43 @@ from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 
 # Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top)
 
-# ---- Brand colors for gauges (global) ----
+# ---------------------------------------------------------------------------
+# Brand colors (define once, globally)
+# ---------------------------------------------------------------------------
 GAS_RED   = "#D62728"  # Plotly red for gas
 OIL_GREEN = "#2CA02C"  # Plotly green for oil
 
-# ---- Optional safety nets (helpers only) ----
+# ---------------------------------------------------------------------------
+# Optional safety nets (helpers only)
+#   - harmless if your project already defines these elsewhere
+#   - keeps Cloud hot-reload / module order from biting you
+# ---------------------------------------------------------------------------
 if "gauge_max" not in globals():
     def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
+        """Reasonable gauge max: cover typical_hi and current value with margin."""
         if value is None or (isinstance(value, (int, float)) and _np.isnan(value)) or value <= 0:
             return max(floor, typical_hi)
         return max(floor, typical_hi * (1.0 + safety), float(value) * 1.25)
 
 if "_recovery_to_date_pct" not in globals():
-    def _recovery_to_date_pct(cum_oil_stb, eur_oil_mmbo, cum_gas_mscf, eur_gas_bcf):
-        oil_rf = gas_rf = 0.0
+    def _recovery_to_date_pct(
+        cum_oil_stb: float,
+        eur_oil_mmbo: float,
+        cum_gas_mscf: float,
+        eur_gas_bcf: float,
+    ) -> tuple[float, float]:
+        """Return (oil_RF_pct, gas_RF_pct) as 0–100, clipped."""
+        oil_rf = 0.0
+        gas_rf = 0.0
+
         if eur_oil_mmbo and eur_oil_mmbo > 0:
-            oil_rf = max(0.0, min(100.0, 100.0 * (float(cum_oil_stb) / (float(eur_oil_mmbo) * 1_000_000.0))))
+            oil_rf = 100.0 * (float(cum_oil_stb) / (float(eur_oil_mmbo) * 1_000_000.0))
+            oil_rf = max(0.0, min(100.0, oil_rf))
+
         if eur_gas_bcf and eur_gas_bcf > 0:
-            gas_rf = max(0.0, min(100.0, 100.0 * (float(cum_gas_mscf) / (float(eur_gas_bcf) * 1_000_000.0))))
+            gas_rf = 100.0 * (float(cum_gas_mscf) / (float(eur_gas_bcf) * 1_000_000.0))
+            gas_rf = max(0.0, min(100.0, gas_rf))
+
         return oil_rf, gas_rf
 
 
@@ -314,30 +333,28 @@ def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
 # 2B) Gauge helper with subtitle (Oil first, then Gas)
 # ----------------------------------------------------------------------
 def _render_gauge(
-    title: str,
+    title: str,                # e.g., "EUR Oil" or "EUR Gas"
     value: float,
     minmax: tuple[float, float],
     color: str,
-    subtitle: str = "",
+    unit_suffix: str,          # e.g., " MMBO" or " BCF"
+    subtitle: str = "",        # e.g., "Recovery to date: 83%"
 ):
-    """
-    Build a Plotly gauge+number figure with an optional subtitle under the title.
-    """
     lo, hi = minmax
-    # Prefer your existing gauge_max if available:
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
-    sub_html = (
-        f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>"
-        if subtitle else ""
-    )
+    sub_html = f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>" if subtitle else ""
 
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
             value=float(value or 0.0),
-            number={"valueformat": ",.2f", "font": {"size": 44}},
-            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
+            number={
+                "valueformat": ",.2f",
+                "suffix": unit_suffix,        # <— unit shown with the big number
+                "font": {"size": 40},         # slightly smaller to avoid crowding
+            },
+            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 18}},  # shorter, smaller
             gauge=dict(
                 axis=dict(range=[0, vmax], tickwidth=1.2),
                 bar=dict(color=color, thickness=0.28),
@@ -353,7 +370,7 @@ def _render_gauge(
     fig.update_layout(
         height=280,
         template="plotly_white",
-        margin=dict(l=10, r=10, t=50, b=10),
+        margin=dict(l=10, r=10, t=52, b=10),  # a touch more top margin for subtitle
     )
     return fig
 
@@ -2048,20 +2065,22 @@ c1, c2 = st.columns(2)
 
 with c1:
     oil_fig = _render_gauge(
-        title="EUR Oil (MMBO)",
+        title="EUR Oil",
         value=float(eur_o or 0.0),
         minmax=b["oil_mmbo"],
         color=OIL_GREEN,
+        unit_suffix=" MMBO",
         subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
     )
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
 with c2:
     gas_fig = _render_gauge(
-        title="EUR Gas (BCF)",
+        title="EUR Gas",
         value=float(eur_g or 0.0),
         minmax=b["gas_bcf"],
         color=GAS_RED,
+        unit_suffix=" BCF",
         subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
     )
     st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
