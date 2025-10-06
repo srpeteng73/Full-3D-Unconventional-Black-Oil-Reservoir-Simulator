@@ -37,6 +37,26 @@ from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 
 # Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top)
 
+# ---- Brand colors for gauges (global) ----
+GAS_RED   = "#D62728"  # Plotly red for gas
+OIL_GREEN = "#2CA02C"  # Plotly green for oil
+
+# ---- Optional safety nets (helpers only) ----
+if "gauge_max" not in globals():
+    def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
+        if value is None or (isinstance(value, (int, float)) and _np.isnan(value)) or value <= 0:
+            return max(floor, typical_hi)
+        return max(floor, typical_hi * (1.0 + safety), float(value) * 1.25)
+
+if "_recovery_to_date_pct" not in globals():
+    def _recovery_to_date_pct(cum_oil_stb, eur_oil_mmbo, cum_gas_mscf, eur_gas_bcf):
+        oil_rf = gas_rf = 0.0
+        if eur_oil_mmbo and eur_oil_mmbo > 0:
+            oil_rf = max(0.0, min(100.0, 100.0 * (float(cum_oil_stb) / (float(eur_oil_mmbo) * 1_000_000.0))))
+        if eur_gas_bcf and eur_gas_bcf > 0:
+            gas_rf = max(0.0, min(100.0, 100.0 * (float(cum_gas_mscf) / (float(eur_gas_bcf) * 1_000_000.0))))
+        return oil_rf, gas_rf
+
 
 MIDLAND_BOUNDS = {
     "oil_mmbo": (0.3, 1.5),   # typical sanity window
