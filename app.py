@@ -1879,6 +1879,9 @@ def _render_gauge(
     )
     return fig
 
+# ---- Brand colors for gauges (global) ----
+GAS_RED   = "#D62728"  # Plotly red for gas
+OIL_GREEN = "#2CA02C"  # Plotly green for oil
 
 # ========= Tab switcher (TOP-LEVEL; column 0) =========
 # ============================= RESULTS TAB =============================
