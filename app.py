@@ -372,35 +372,27 @@ def arps_cum_numeric(qi: float, Di: float, b: float, t) -> _np.ndarray:
 def _render_gauge(
     title: str,
     value: float,
-    minmax: tuple[float, float],
-    color: str,
-    subtitle: str = "",
-    unit_suffix: str = "",   # <-- new
+    minmax=(0.0, 1.0),
+    fmt: str = "{:,.2f}",
+    unit_suffix: str = "",   # ← add this
+    **kwargs,                # ← optional: future-proof extra args
 ):
-    import plotly.graph_objects as go  # local import is fine
-    lo, hi = minmax
-    vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
-    sub_html = f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>" if subtitle else ""
-    fig = go.Figure(
-        go.Indicator(
-            mode="gauge+number",
-            value=float(value or 0.0),
-            number={"valueformat": ",.2f",
-                    "suffix": f" {unit_suffix}" if unit_suffix else "",
-                    "font": {"size": 44}},
-            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
-            gauge=dict(
-                axis=dict(range=[0, vmax], tickwidth=1.2),
-                bar=dict(color=color, thickness=0.28),
-                steps=[dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.05)")],
-                threshold=dict(line=dict(color=color, width=4),
-                               thickness=0.9,
-                               value=float(value or 0.0)),
-            ),
-        )
-    )
-    fig.update_layout(height=280, template="plotly_white",
-                      margin=dict(l=10, r=10, t=50, b=10))
+    import plotly.graph_objects as go
+    vmin, vmax = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
+    if vmax <= vmin:
+        vmax = vmin + 1.0
+
+    # Plotly: show suffix next to the number
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=float(value),
+        title={"text": title},
+        number={
+            "valueformat": fmt.replace("{", "").replace("}", ""),
+            "suffix": f" {unit_suffix}" if unit_suffix else ""
+        },
+        gauge={"axis": {"range": [vmin, vmax]}}
+    ))
     return fig
 
 
@@ -2109,14 +2101,13 @@ oil_rf_pct, gas_rf_pct = _recovery_to_date_pct(
 c1, c2 = st.columns(2)
 
 with c1:
-    oil_fig = _render_gauge(
-        title="EUR Oil",
-        value=float(eur_o or 0.0),
-        minmax=b["oil_mmbo"],
-        color=OIL_GREEN,
-        subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
-        unit_suffix="MMBO",
-    )
+   oil_fig = _render_gauge(
+    title="EUR Oil",
+    value=float(eur_o or 0.0),
+    minmax=b["oil_mmbo"],
+    unit_suffix="MMBO",   # ← previously unexpected
+)
+
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
 with c2:
