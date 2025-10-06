@@ -322,24 +322,104 @@ def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
             )
 
     return ok, " ".join(msgs) if msgs else "OK"
-
-def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
-    if _np.isnan(value) or value <= 0:
-        return max(floor, typical_hi)
-    # 95th-percentile-ish: typical_hi plus margin vs. observed value
-    return max(floor, typical_hi*(1.0+safety), value*(1.25))
-
 # ----------------------------------------------------------------------
-# 2B) Gauge helper with subtitle (Oil first, then Gas)
 # ----------------------------------------------------------------------
+# ==============================================================================
+# Robust Arps + Gauge helpers (paste once, near your other small helpers)
+# ==============================================================================
+
+import numpy as _np
+try:
+    # Use the alias you already import elsewhere; harmless if duplicated
+    from scipy.integrate import cumulative_trapezoid as _ctr
+except Exception:
+    _ctr = None  # numeric cumulative optional
+
+# ------------------------------------------------------------------------------
+# 1) Robust Arps: rate and cumulative (handles b→0 and clamps unsafe bases)
+# ------------------------------------------------------------------------------
+def arps_rate(qi: float, Di: float, b: float, t) -> _np.ndarray:
+    """
+    Robust Arps rate:
+      • Exponential fallback when |b| ≈ 0 (the correct limit as b→0)
+      • Clamps base to avoid non-positive (1 + b*Di*t) for fractional powers
+      • Ensures t ≥ 0
+    """
+    t  = _np.asarray(t, float)
+    t  = _np.maximum(t, 0.0)
+    qi = float(qi); Di = float(Di); b = float(b)
+
+    if abs(b) < 1e-12:
+        return qi * _np.exp(-Di * t)
+
+    base = 1.0 + b * Di * t
+    base = _np.maximum(base, 1e-12)
+    return qi * _np.power(base, -1.0 / b)
+
+
+def arps_cum(qi: float, Di: float, b: float, t) -> _np.ndarray:
+    """
+    Robust Arps cumulative (analytic):
+      • Uses exponential analytic form for b≈0
+      • Uses hyperbolic analytic form otherwise, with base clamped
+    """
+    t  = _np.asarray(t, float)
+    t  = _np.maximum(t, 0.0)
+    qi = float(qi); Di = float(Di); b = float(b)
+
+    if abs(b) < 1e-12:
+        # Exponential cumulative: Np = qi/Di * (1 - e^{-Di t})
+        Di_safe = max(Di, 1e-16)
+        return (qi / Di_safe) * (1.0 - _np.exp(-Di * t))
+
+    base = 1.0 + b * Di * t
+    base = _np.maximum(base, 1e-12)
+
+    one_minus_b = 1.0 - b
+    denom       = max(one_minus_b * Di, 1e-16)
+    exponent    = one_minus_b / b
+    return (qi / denom) * (1.0 - _np.power(base, exponent))
+
+
+def arps_cum_numeric(qi: float, Di: float, b: float, t) -> _np.ndarray:
+    """
+    Optional numeric cumulative via integration of the robust rate
+    (use if you prefer numeric integration or want to cross-check).
+    """
+    if _ctr is None:
+        raise RuntimeError("scipy.integrate.cumulative_trapezoid not available.")
+    t = _np.asarray(t, float)
+    t = _np.maximum(t, 0.0)
+    q = arps_rate(qi, Di, b, t)
+    return _ctr(q, t, initial=0.0)
+
+# ------------------------------------------------------------------------------
+# 2) Gauge helpers
+# ------------------------------------------------------------------------------
+def gauge_max(value: float, typical_hi: float, floor: float = 0.1, safety: float = 0.15) -> float:
+    """Choose a nice gauge max that covers the value and the typical upper bound."""
+    try:
+        v = float(value)
+    except Exception:
+        v = _np.nan
+    if v is None or (isinstance(v, float) and _np.isnan(v)) or v <= 0:
+        return max(floor, float(typical_hi))
+    return max(floor, float(typical_hi) * (1.0 + safety), v * 1.25)
+
+
 def _render_gauge(
-    title: str,                # e.g., "EUR Oil" or "EUR Gas"
+    title: str,
     value: float,
     minmax: tuple[float, float],
     color: str,
-    unit_suffix: str,          # e.g., " MMBO" or " BCF"
-    subtitle: str = "",        # e.g., "Recovery to date: 83%"
+    subtitle: str = "",
+    unit_suffix: str = "",
 ):
+    """
+    Plotly gauge+number with optional subtitle and number suffix.
+    """
+    import plotly.graph_objects as go
+
     lo, hi = minmax
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
@@ -351,10 +431,10 @@ def _render_gauge(
             value=float(value or 0.0),
             number={
                 "valueformat": ",.2f",
-                "suffix": unit_suffix,        # <— unit shown with the big number
-                "font": {"size": 40},         # slightly smaller to avoid crowding
+                "suffix": f" {unit_suffix}" if unit_suffix else "",
+                "font": {"size": 44},
             },
-            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 18}},  # shorter, smaller
+            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
             gauge=dict(
                 axis=dict(range=[0, vmax], tickwidth=1.2),
                 bar=dict(color=color, thickness=0.28),
@@ -367,21 +447,22 @@ def _render_gauge(
             ),
         )
     )
-    fig.update_layout(
-        height=280,
-        template="plotly_white",
-        margin=dict(l=10, r=10, t=52, b=10),  # a touch more top margin for subtitle
-    )
+    fig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
     return fig
 
 
-def fmt_qty(v, unit):
-    if unit == "BCF":
-        return f"{v:,.2f} BCF"
-    if unit == "MMBO":
-        return f"{v:,.2f} MMBO"
-    return f"{v:,.2f} {unit}"
-# ===============================================================================
+def fmt_qty(v: float, unit: str) -> str:
+    """Small formatter for quantities with units."""
+    try:
+        x = float(v)
+    except Exception:
+        return f"{v}"
+    unit_up = (unit or "").upper()
+    if unit_up == "BCF":
+        return f"{x:,.2f} BCF"
+    if unit_up == "MMBO":
+        return f"{x:,.2f} MMBO"
+    return f"{x:,.2f} {unit}"
 
 
 # ---------------------- Plot Style Pack (Gas=RED, Oil=GREEN) ----------------------
@@ -2065,23 +2146,23 @@ c1, c2 = st.columns(2)
 
 with c1:
     oil_fig = _render_gauge(
-        title="EUR Oil",
-        value=float(eur_o or 0.0),
-        minmax=b["oil_mmbo"],
-        color=OIL_GREEN,
-        unit_suffix=" MMBO",
-        subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
-    )
+    title="EUR Oil",
+    value=float(eur_o or 0.0),
+    minmax=b["oil_mmbo"],
+    color=OIL_GREEN,
+    subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
+    unit_suffix="MMBO",   # <— now supported
+)
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
 with c2:
     gas_fig = _render_gauge(
-        title="EUR Gas",
-        value=float(eur_g or 0.0),
-        minmax=b["gas_bcf"],
-        color=GAS_RED,
-        unit_suffix=" BCF",
-        subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
+    title="EUR Gas",
+    value=float(eur_g or 0.0),
+    minmax=b["gas_bcf"],
+    color=GAS_RED,
+    subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
+    unit_suffix="BCF",    # <— now supported
     )
     st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
