@@ -323,69 +323,44 @@ def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
 
     return ok, " ".join(msgs) if msgs else "OK"
 # ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
-# ==============================================================================
-# Robust Arps + Gauge helpers (paste once, near your other small helpers)
-# ==============================================================================
 
+# ======================================================================
+# Robust Arps + Gauge helpers
+# ======================================================================
 import numpy as _np
 try:
-    # Use the alias you already import elsewhere; harmless if duplicated
     from scipy.integrate import cumulative_trapezoid as _ctr
 except Exception:
     _ctr = None  # numeric cumulative optional
 
-# ------------------------------------------------------------------------------
-# 1) Robust Arps: rate and cumulative (handles b→0 and clamps unsafe bases)
-# ------------------------------------------------------------------------------
 def arps_rate(qi: float, Di: float, b: float, t) -> _np.ndarray:
-    """
-    Robust Arps rate:
-      • Exponential fallback when |b| ≈ 0 (the correct limit as b→0)
-      • Clamps base to avoid non-positive (1 + b*Di*t) for fractional powers
-      • Ensures t ≥ 0
-    """
+    """Robust Arps rate with exponential fallback and safe base clamp."""
     t  = _np.asarray(t, float)
     t  = _np.maximum(t, 0.0)
     qi = float(qi); Di = float(Di); b = float(b)
-
     if abs(b) < 1e-12:
         return qi * _np.exp(-Di * t)
-
     base = 1.0 + b * Di * t
     base = _np.maximum(base, 1e-12)
     return qi * _np.power(base, -1.0 / b)
 
-
 def arps_cum(qi: float, Di: float, b: float, t) -> _np.ndarray:
-    """
-    Robust Arps cumulative (analytic):
-      • Uses exponential analytic form for b≈0
-      • Uses hyperbolic analytic form otherwise, with base clamped
-    """
+    """Robust Arps cumulative (analytic), exponential for b≈0."""
     t  = _np.asarray(t, float)
     t  = _np.maximum(t, 0.0)
     qi = float(qi); Di = float(Di); b = float(b)
-
     if abs(b) < 1e-12:
-        # Exponential cumulative: Np = qi/Di * (1 - e^{-Di t})
         Di_safe = max(Di, 1e-16)
         return (qi / Di_safe) * (1.0 - _np.exp(-Di * t))
-
     base = 1.0 + b * Di * t
     base = _np.maximum(base, 1e-12)
-
     one_minus_b = 1.0 - b
-    denom       = max(one_minus_b * Di, 1e-16)
-    exponent    = one_minus_b / b
+    denom = max(one_minus_b * Di, 1e-16)
+    exponent = (one_minus_b / b)
     return (qi / denom) * (1.0 - _np.power(base, exponent))
 
-
 def arps_cum_numeric(qi: float, Di: float, b: float, t) -> _np.ndarray:
-    """
-    Optional numeric cumulative via integration of the robust rate
-    (use if you prefer numeric integration or want to cross-check).
-    """
+    """Optional numeric cumulative via integration of robust rate."""
     if _ctr is None:
         raise RuntimeError("scipy.integrate.cumulative_trapezoid not available.")
     t = _np.asarray(t, float)
@@ -393,61 +368,39 @@ def arps_cum_numeric(qi: float, Di: float, b: float, t) -> _np.ndarray:
     q = arps_rate(qi, Di, b, t)
     return _ctr(q, t, initial=0.0)
 
-# ------------------------------------------------------------------------------
-# 2) Gauge helpers
-# ------------------------------------------------------------------------------
-def gauge_max(value: float, typical_hi: float, floor: float = 0.1, safety: float = 0.15) -> float:
-    """Choose a nice gauge max that covers the value and the typical upper bound."""
-    try:
-        v = float(value)
-    except Exception:
-        v = _np.nan
-    if v is None or (isinstance(v, float) and _np.isnan(v)) or v <= 0:
-        return max(floor, float(typical_hi))
-    return max(floor, float(typical_hi) * (1.0 + safety), v * 1.25)
-
-
+# Gauge helper with subtitle + unit suffix
 def _render_gauge(
     title: str,
     value: float,
     minmax: tuple[float, float],
     color: str,
     subtitle: str = "",
-    unit_suffix: str = "",
+    unit_suffix: str = "",   # <-- new
 ):
-    """
-    Plotly gauge+number with optional subtitle and number suffix.
-    """
-    import plotly.graph_objects as go
-
+    import plotly.graph_objects as go  # local import is fine
     lo, hi = minmax
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
-
     sub_html = f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>" if subtitle else ""
-
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
             value=float(value or 0.0),
-            number={
-                "valueformat": ",.2f",
-                "suffix": f" {unit_suffix}" if unit_suffix else "",
-                "font": {"size": 44},
-            },
+            number={"valueformat": ",.2f",
+                    "suffix": f" {unit_suffix}" if unit_suffix else "",
+                    "font": {"size": 44}},
             title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
             gauge=dict(
                 axis=dict(range=[0, vmax], tickwidth=1.2),
                 bar=dict(color=color, thickness=0.28),
                 steps=[dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.05)")],
-                threshold=dict(
-                    line=dict(color=color, width=4),
-                    thickness=0.9,
-                    value=float(value or 0.0),
-                ),
+                threshold=dict(line=dict(color=color, width=4),
+                               thickness=0.9,
+                               value=float(value or 0.0)),
             ),
         )
     )
-    fig.update_layout(height=280, template="plotly_white", margin=dict(l=10, r=10, t=50, b=10))
+    fig.update_layout(height=280, template="plotly_white",
+                      margin=dict(l=10, r=10, t=50, b=10))
     return fig
 
 
@@ -2116,21 +2069,33 @@ if not eur_valid:
         icon="🚫",
     )
     st.stop()
+# ... inside: if selected_tab == "Results": 
+# after your sanity checks/validation and BEFORE the gauges
+
+# Safety net in case hot-reload skipped the global color block
+try:
+    OIL_GREEN
+    GAS_RED
+except NameError:
+    GAS_RED   = "#D62728"
+    OIL_GREEN = "#2CA02C"
+
+# ---------- Recovery to date & Gauges (Oil first, then Gas) ----------
+# (now render _render_gauge(...))
 
 # ----------------------------------------------------------------------
-# Recovery to date & Gauges (Oil first, then Gas)
-# ----------------------------------------------------------------------
+# ---------- Recovery to date & Gauges (Oil first, then Gas) ----------
 # Pull cumulative-to-date (use last sample if arrays exist)
-cum_o = sim.get("cum_o_MMBO")
-cum_g = sim.get("cum_g_BCF")
+_cum_o = sim.get("cum_o_MMBO")
+_cum_g = sim.get("cum_g_BCF")
 
-if isinstance(cum_o, (list, tuple, np.ndarray)) and len(cum_o) > 0:
-    cum_oil_stb = float(cum_o[-1]) * 1_000_000.0  # MMBO → STB
+if isinstance(_cum_o, (list, tuple, np.ndarray)) and len(_cum_o) > 0:
+    cum_oil_stb = float(_cum_o[-1]) * 1_000_000.0  # MMBO → STB
 else:
     cum_oil_stb = 0.0
 
-if isinstance(cum_g, (list, tuple, np.ndarray)) and len(cum_g) > 0:
-    cum_gas_mscf = float(cum_g[-1]) * 1_000_000.0  # BCF → Mscf
+if isinstance(_cum_g, (list, tuple, np.ndarray)) and len(_cum_g) > 0:
+    cum_gas_mscf = float(_cum_g[-1]) * 1_000_000.0  # BCF → Mscf
 else:
     cum_gas_mscf = 0.0
 
@@ -2141,34 +2106,31 @@ oil_rf_pct, gas_rf_pct = _recovery_to_date_pct(
     eur_gas_bcf=float(eur_g or 0.0),
 )
 
-# ---- Oil first, then Gas (with RF% in subtitle) ----
 c1, c2 = st.columns(2)
 
 with c1:
     oil_fig = _render_gauge(
-    title="EUR Oil",
-    value=float(eur_o or 0.0),
-    minmax=b["oil_mmbo"],
-    color=OIL_GREEN,
-    subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
-    unit_suffix="MMBO",   # <— now supported
-)
+        title="EUR Oil",
+        value=float(eur_o or 0.0),
+        minmax=b["oil_mmbo"],
+        color=OIL_GREEN,
+        subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
+        unit_suffix="MMBO",
+    )
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
 with c2:
     gas_fig = _render_gauge(
-    title="EUR Gas",
-    value=float(eur_g or 0.0),
-    minmax=b["gas_bcf"],
-    color=GAS_RED,
-    subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
-    unit_suffix="BCF",    # <— now supported
+        title="EUR Gas",
+        value=float(eur_g or 0.0),
+        minmax=b["gas_bcf"],
+        color=GAS_RED,
+        subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
+        unit_suffix="BCF",
     )
     st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
-# ----------------------------------------------------------------------
-# Expected ranges card (per-play sanity envelope + status)
-# ----------------------------------------------------------------------
+# ---------- Expected ranges (play sanity envelope) ----------
 oil_rng = b["oil_mmbo"]
 gas_rng = b["gas_bcf"]
 gor_cap = float(b.get("max_eur_gor_scfstb", np.inf))
@@ -2184,7 +2146,7 @@ oil_ok = _in_range(eur_o, oil_rng)
 gas_ok = _in_range(eur_g, gas_rng)
 gor_ok = (implied_eur_gor <= gor_cap) if np.isfinite(implied_eur_gor) else False
 
-status = lambda ok: "✅ OK" if ok else "⚠️ Check"
+status = (lambda ok: "✅ OK" if ok else "⚠️ Check")
 
 pad_ctrl = str(st.session_state.get("pad_ctrl", ""))
 bhp = st.session_state.get("pad_bhp_psi", None)
@@ -2192,28 +2154,34 @@ pb  = st.session_state.get("pb_psi", None)
 
 with st.container():
     st.markdown("#### Expected ranges (play sanity envelope)")
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    c3, c4, c5 = st.columns(3)
+    with c3:
         st.markdown(
             f"**Oil EUR (MMBO)**  \n"
             f"Observed: **{eur_o:.2f}**  \n"
             f"Envelope: {oil_rng[0]:.2f}–{oil_rng[1]:.2f}  \n"
             f"{status(oil_ok)}"
         )
-    with c2:
+    with c4:
         st.markdown(
             f"**Gas EUR (BCF)**  \n"
             f"Observed: **{eur_g:.2f}**  \n"
             f"Envelope: {gas_rng[0]:.2f}–{gas_rng[1]:.2f}  \n"
             f"{status(gas_ok)}"
         )
-    with c3:
+    with c5:
+        _cap_str = "∞" if not np.isfinite(gor_cap) else f"{gor_cap:,.0f}"
         st.markdown(
             f"**Implied EUR GOR (scf/STB)**  \n"
             f"Observed: **{implied_eur_gor:,.0f}**  \n"
-            f"Cap: {gor_cap:,.0f}  \n"
+            f"Cap: {_cap_str}  \n"
             f"{status(gor_ok)}"
         )
+    _ctx = []
+    if pad_ctrl: _ctx.append(f"Control: {pad_ctrl}")
+    if isinstance(bhp, (int, float)): _ctx.append(f"BHP: {float(bhp):.0f} psi")
+    if isinstance(pb,  (int, float)): _ctx.append(f"pb: {float(pb):.0f} psi")
+    if _ctx: st.caption(" · ".join(_ctx))
 
     # Optional small operating context line (helps debug BHP vs pb)
     _ctx = []
