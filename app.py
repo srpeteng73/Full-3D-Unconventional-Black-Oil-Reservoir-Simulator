@@ -1945,19 +1945,23 @@ def _recovery_to_date_pct(
         gas_rf = max(0.0, min(100.0, 100.0 * (cum_gas_mscf / eur_gas_mscf)))
 
     return oil_rf, gas_rf
-# --- Recovery to date, then render Oil first, Gas second ---
+# ----------------------------------------------------------------------
+# Recovery to date & Gauges (Oil first, then Gas)
+# Expects: sim, b, eur_g, eur_o already defined above.
+# ----------------------------------------------------------------------
+import numpy as np as _np  # safe if already imported; otherwise no-op
 
 # Pull cumulative-to-date (use last sample if arrays exist)
-cum_o = sim.get("cum_o_MMBO")
-cum_g = sim.get("cum_g_BCF")
+_cum_o = sim.get("cum_o_MMBO")
+_cum_g = sim.get("cum_g_BCF")
 
-if isinstance(cum_o, (list, tuple, np.ndarray)) and len(cum_o) > 0:
-    cum_oil_stb = float(cum_o[-1]) * 1_000_000.0  # MMBO → STB
+if isinstance(_cum_o, (list, tuple, _np.ndarray)) and len(_cum_o) > 0:
+    cum_oil_stb = float(_cum_o[-1]) * 1_000_000.0  # MMBO → STB
 else:
     cum_oil_stb = 0.0
 
-if isinstance(cum_g, (list, tuple, np.ndarray)) and len(cum_g) > 0:
-    cum_gas_mscf = float(cum_g[-1]) * 1_000_000.0  # BCF → Mscf
+if isinstance(_cum_g, (list, tuple, _np.ndarray)) and len(_cum_g) > 0:
+    cum_gas_mscf = float(_cum_g[-1]) * 1_000_000.0  # BCF → Mscf
 else:
     cum_gas_mscf = 0.0
 
