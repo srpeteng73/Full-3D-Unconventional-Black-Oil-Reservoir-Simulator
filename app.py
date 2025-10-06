@@ -2322,16 +2322,14 @@ with c2:
         st.warning("Cumulative series not available.")
 # =========================== END RESULTS TAB ==========================
 
-# ======== 3D Viewer tab (flush-left 'elif') ========
-elif selected_tab == "3D Viewer":
-    # ======== 3D Viewer tab ========
+# ======== 3D Viewer tab ========
+if selected_tab == "3D Viewer":
     st.subheader("3D Viewer")
     st.info("Render your 3D grid / fractures / saturation maps here.")
 
     sim = st.session_state.get("sim") or {}
-    kx_vol = st.session_state.get("kx")   # expected (nz, ny, nx)
-    phi_vol = st.session_state.get("phi") # expected (nz, ny, nx)
-
+    kx_vol = st.session_state.get("kx")    # expected (nz, ny, nx)
+    phi_vol = st.session_state.get("phi")  # expected (nz, ny, nx)
 
     # If nothing at all is available, bail early
     if kx_vol is None and phi_vol is None and not sim:
@@ -2361,24 +2359,28 @@ elif selected_tab == "3D Viewer":
     with c1:
         ds = st.slider(
             "Downsample factor",
-            1, 10,
-            int(st.session_state.get("vol_downsample", 2)),
-            1,
-            key="vol_ds"
+            min_value=1,
+            max_value=10,
+            value=int(st.session_state.get("vol_downsample", 2)),
+            step=1,
+            key="vol_ds",
         )
     with c2:
         iso_rel = st.slider(
             "Isosurface value (relative)",
-            0.05, 0.95,
-            float(st.session_state.get("iso_value_rel", 0.85)),
-            0.05,
-            key="iso_val_rel"
+            min_value=0.05,
+            max_value=0.95,
+            value=float(st.session_state.get("iso_value_rel", 0.85)),
+            step=0.05,
+            key="iso_val_rel",
         )
 
     # Resolve grid spacing (accept *_ft or raw)
-    dx = float(state.get("dx_ft", state.get("dx", 1.0)))
-    dy = float(state.get("dy_ft", state.get("dy", 1.0)))
-    dz = float(state.get("dz_ft", state.get("dz", 1.0)))
+    # Prefer `state` if it exists; fall back to session
+    state_src = locals().get("state") or st.session_state
+    dx = float(state_src.get("dx_ft", state_src.get("dx", 1.0)))
+    dy = float(state_src.get("dy_ft", state_src.get("dy", 1.0)))
+    dz = float(state_src.get("dz_ft", state_src.get("dz", 1.0)))
 
     # Select data and styling
     data_3d = None
@@ -2409,7 +2411,7 @@ elif selected_tab == "3D Viewer":
         colorscale = "Plasma"
         colorbar_title = "OOIP (STB/cell)"
 
-    # Validate
+    # Validate selection
     if data_3d is None:
         st.warning(f"Data for '{prop_3d}' not found. Please run a simulation.")
         st.stop()
@@ -2421,9 +2423,9 @@ elif selected_tab == "3D Viewer":
 
     # Downsample (use your helper if available)
     try:
-        data_ds = downsample_3d(data_3d, ds)
+        data_ds = downsample_3d(data_3d, ds)  # noqa: F821  (if helper exists)
     except Exception:
-        # simple stride fallback
+        # Simple stride fallback
         data_ds = data_3d[::ds, ::ds, ::ds]
 
     vmin, vmax = float(np.nanmin(data_ds)), float(np.nanmax(data_ds))
@@ -2454,10 +2456,10 @@ elif selected_tab == "3D Viewer":
 
         # Optional horizontal well overlay (best-effort)
         try:
-            L_ft = float(state.get("L_ft", nx * dx))
-            n_lat = int(state.get("n_laterals", 1))
+            L_ft = float(state_src.get("L_ft", nx * dx))
+            n_lat = int(state_src.get("n_laterals", 1))
             y_span = ny * dy * ds
-            y_positions = ([y_span/3.0, 2*y_span/3.0] if n_lat >= 2 else [y_span/2.0])
+            y_positions = ([y_span / 3.0, 2 * y_span / 3.0] if n_lat >= 2 else [y_span / 2.0])
             z_mid = (nz * dz * ds) / 2.0
 
             for i, y_pos in enumerate(y_positions):
