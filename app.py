@@ -2098,16 +2098,16 @@ oil_rf_pct, gas_rf_pct = _recovery_to_date_pct(
     eur_gas_bcf=float(eur_g or 0.0),
 )
 
+# two side-by-side gauges
 c1, c2 = st.columns(2)
 
 with c1:
-   oil_fig = _render_gauge(
-    title="EUR Oil",
-    value=float(eur_o or 0.0),
-    minmax=b["oil_mmbo"],
-    unit_suffix="MMBO",   # ← previously unexpected
-)
-
+    oil_fig = _render_gauge(
+        title="EUR Oil",
+        value=float(eur_o or 0.0),
+        minmax=b["oil_mmbo"],
+        unit_suffix="MMBO",
+    )
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
 with c2:
@@ -2115,8 +2115,6 @@ with c2:
         title="EUR Gas",
         value=float(eur_g or 0.0),
         minmax=b["gas_bcf"],
-        color=GAS_RED,
-        subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
         unit_suffix="BCF",
     )
     st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
