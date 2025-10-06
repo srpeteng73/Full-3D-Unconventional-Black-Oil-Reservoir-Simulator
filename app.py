@@ -1912,44 +1912,22 @@ if selected_tab == "Results":
             st.stop()
 
     # ---- Validation gate (engine-side) ----
-    eur_valid = bool(sim.get("eur_valid", True))
-    eur_msg = sim.get("eur_validation_msg", "OK")
-    if not eur_valid:
-        st.error(
-            "Production results failed sanity checks and were not published.\n\n"
-            f"Details: {eur_msg}\n\n"
-            "Please review PVT, controls, and units; then re-run.",
-            icon="🚫",
-        )
-      st.stop()  # (end of previous section)
+eur_valid = bool(sim.get("eur_valid", True))
+eur_msg = sim.get("eur_validation_msg", "OK")
+if not eur_valid:
+    st.error(
+        "Production results failed sanity checks and were not published.\n\n"
+        f"Details: {eur_msg}\n\n"
+        "Please review PVT, controls, and units; then re-run.",
+        icon="🚫",
+    )
+    st.stop()
 
-# ----------------------------------------------------------------------
-# 2A) Recovery to Date calculation helper
-# ----------------------------------------------------------------------
-def _recovery_to_date_pct(
-    cum_oil_stb: float,
-    eur_oil_mmbo: float,
-    cum_gas_mscf: float,
-    eur_gas_bcf: float,
-) -> tuple[float, float]:
-    """Return (oil_RF_pct, gas_RF_pct) as 0–100, clipped."""
-    oil_rf = 0.0
-    gas_rf = 0.0
-
-    if eur_oil_mmbo and eur_oil_mmbo > 0:
-        eur_oil_stb = eur_oil_mmbo * 1_000_000.0
-        oil_rf = max(0.0, min(100.0, 100.0 * (cum_oil_stb / eur_oil_stb)))
-
-    if eur_gas_bcf and eur_gas_bcf > 0:
-        eur_gas_mscf = eur_gas_bcf * 1_000_000.0
-        gas_rf = max(0.0, min(100.0, 100.0 * (cum_gas_mscf / eur_gas_mscf)))
-
-    return oil_rf, gas_rf
 # ----------------------------------------------------------------------
 # Recovery to date & Gauges (Oil first, then Gas)
 # Expects: sim, b, eur_g, eur_o already defined above.
 # ----------------------------------------------------------------------
-import numpy as np as _np  # safe if already imported; otherwise no-op
+import numpy as _np  # safe even if imported earlier
 
 # Pull cumulative-to-date (use last sample if arrays exist)
 _cum_o = sim.get("cum_o_MMBO")
