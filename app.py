@@ -1807,6 +1807,79 @@ selected_tab = st.sidebar.radio(
     index=0
 )
 
+# ----------------------------------------------------------------------
+# EUR helpers: Recovery-to-date % and gauge renderer with subtitle
+# ----------------------------------------------------------------------
+def _recovery_to_date_pct(
+    cum_oil_stb: float,
+    eur_oil_mmbo: float,
+    cum_gas_mscf: float,
+    eur_gas_bcf: float,
+) -> tuple[float, float]:
+    """Return (oil_RF_pct, gas_RF_pct) as 0–100, clipped to [0, 100]."""
+    oil_rf = 0.0
+    gas_rf = 0.0
+
+    # Oil RF% = cum oil (STB) / EUR oil (STB)
+    if eur_oil_mmbo and eur_oil_mmbo > 0:
+        eur_oil_stb = float(eur_oil_mmbo) * 1_000_000.0  # MMBO → STB
+        oil_rf = 100.0 * (float(cum_oil_stb) / eur_oil_stb)
+        oil_rf = max(0.0, min(100.0, oil_rf))
+
+    # Gas RF% = cum gas (Mscf) / EUR gas (Mscf)
+    if eur_gas_bcf and eur_gas_bcf > 0:
+        eur_gas_mscf = float(eur_gas_bcf) * 1_000_000.0  # BCF → Mscf
+        gas_rf = 100.0 * (float(cum_gas_mscf) / eur_gas_mscf)
+        gas_rf = max(0.0, min(100.0, gas_rf))
+
+    return oil_rf, gas_rf
+
+
+def _render_gauge(
+    title: str,
+    value: float,
+    minmax: tuple[float, float],
+    color: str,
+    subtitle: str = "",
+):
+    """
+    Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
+    Requires: go (plotly.graph_objects as go) and your gauge_max(...) helper.
+    """
+    lo, hi = minmax
+    vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
+
+    sub_html = (
+        f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>"
+        if subtitle else ""
+    )
+
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=float(value or 0.0),
+            number={"valueformat": ",.2f", "font": {"size": 44}},
+            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
+            gauge=dict(
+                axis=dict(range=[0, vmax], tickwidth=1.2),
+                bar=dict(color=color, thickness=0.28),
+                steps=[dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.05)")],
+                threshold=dict(
+                    line=dict(color=color, width=4),
+                    thickness=0.9,
+                    value=float(value or 0.0),
+                ),
+            ),
+        )
+    )
+    fig.update_layout(
+        height=280,
+        template="plotly_white",
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+    return fig
+
+
 # ========= Tab switcher (TOP-LEVEL; column 0) =========
 # ============================= RESULTS TAB =============================
 if selected_tab == "Results":
@@ -1925,21 +1998,18 @@ if not eur_valid:
 
 # ----------------------------------------------------------------------
 # Recovery to date & Gauges (Oil first, then Gas)
-# Expects: sim, b, eur_g, eur_o already defined above.
 # ----------------------------------------------------------------------
-import numpy as _np  # safe even if imported earlier
-
 # Pull cumulative-to-date (use last sample if arrays exist)
-_cum_o = sim.get("cum_o_MMBO")
-_cum_g = sim.get("cum_g_BCF")
+cum_o = sim.get("cum_o_MMBO")
+cum_g = sim.get("cum_g_BCF")
 
-if isinstance(_cum_o, (list, tuple, _np.ndarray)) and len(_cum_o) > 0:
-    cum_oil_stb = float(_cum_o[-1]) * 1_000_000.0  # MMBO → STB
+if isinstance(cum_o, (list, tuple, np.ndarray)) and len(cum_o) > 0:
+    cum_oil_stb = float(cum_o[-1]) * 1_000_000.0  # MMBO → STB
 else:
     cum_oil_stb = 0.0
 
-if isinstance(_cum_g, (list, tuple, _np.ndarray)) and len(_cum_g) > 0:
-    cum_gas_mscf = float(_cum_g[-1]) * 1_000_000.0  # BCF → Mscf
+if isinstance(cum_g, (list, tuple, np.ndarray)) and len(cum_g) > 0:
+    cum_gas_mscf = float(cum_g[-1]) * 1_000_000.0  # BCF → Mscf
 else:
     cum_gas_mscf = 0.0
 
@@ -1973,74 +2043,6 @@ with c2:
     )
     st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
-
-# ----------------------------------------------------------------------
-# Next section: EUR Gauges and Visualization
-# ----------------------------------------------------------------------
-# --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-
-    
-    # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-    gas_hi = b["gas_bcf"][1]
-    oil_hi = b["oil_mmbo"][1]
-    gmax = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
-    omax = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
-
-    # Industry standard colors
-    GAS_RED   = "#D62728"  # Plotly red for gas
-    OIL_GREEN = "#2CA02C"  # Plotly green for oil
-
-    c1, c2 = st.columns(2)
-
-    # --- Gas gauge (RED) ---
-    with c1:
-        gfig = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=eur_g,
-                number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
-                title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
-                gauge=dict(
-                    axis=dict(range=[0, gmax], tickwidth=1.2),
-                    bar=dict(color=GAS_RED, thickness=0.28),
-                    steps=[dict(range=[0, 0.6 * gmax], color="rgba(0,0,0,0.05)")],
-                    threshold=dict(
-                        line=dict(color=GAS_RED, width=4), thickness=0.9, value=eur_g
-                    ),
-                ),
-            )
-        )
-        gfig.update_layout(
-            height=280,
-            template="plotly_white",
-            margin=dict(l=10, r=10, t=50, b=10),
-        )
-        st.plotly_chart(gfig, use_container_width=True, theme=None, key="eur_gauge_gas")
-
-    # --- Oil gauge (GREEN) ---
-    with c2:
-        ofig = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=eur_o,
-                number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
-                title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
-                gauge=dict(
-                    axis=dict(range=[0, omax], tickwidth=1.2),
-                    bar=dict(color=OIL_GREEN, thickness=0.28),
-                    steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
-                    threshold=dict(
-                        line=dict(color=OIL_GREEN, width=4), thickness=0.9, value=eur_o
-                    ),
-                ),
-            )
-        )
-        ofig.update_layout(
-            height=280,
-            template="plotly_white",
-            margin=dict(l=10, r=10, t=50, b=10),
-        )
-        st.plotly_chart(ofig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
     # ===================== BHP Sensitivity (Analytical only) =====================
     with st.expander("BHP sensitivity (Analytical proxy)", expanded=False):
