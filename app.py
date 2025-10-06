@@ -374,24 +374,25 @@ def _render_gauge(
     value: float,
     minmax=(0.0, 1.0),
     fmt: str = "{:,.2f}",
-    unit_suffix: str = "",   # ← add this
-    **kwargs,                # ← optional: future-proof extra args
+    unit_suffix: str = "",     # <— add this
+    **kwargs,                  # <— keeps future args from crashing
 ):
     import plotly.graph_objects as go
+
+    # Normalize range
     vmin, vmax = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
     if vmax <= vmin:
         vmax = vmin + 1.0
 
-    # Plotly: show suffix next to the number
+    # Convert Python format to Plotly valueformat (e.g., "{:,.2f}" -> ",.2f")
+    vf = fmt.replace("{", "").replace("}", "").replace(":", "")
+
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=float(value),
         title={"text": title},
-        number={
-            "valueformat": fmt.replace("{", "").replace("}", ""),
-            "suffix": f" {unit_suffix}" if unit_suffix else ""
-        },
-        gauge={"axis": {"range": [vmin, vmax]}}
+        number={"valueformat": vf, "suffix": f" {unit_suffix}" if unit_suffix else ""},
+        gauge={"axis": {"range": [vmin, vmax]}},
     ))
     return fig
 
@@ -2109,6 +2110,7 @@ with c1:
         unit_suffix="MMBO",
     )
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
+
 
 with c2:
     gas_fig = _render_gauge(
