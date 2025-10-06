@@ -11,7 +11,6 @@ Bounds = Dict[str, Union[Tuple[float, float], float]]
 # ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
-
 # stdlib
 import time
 import warnings  # trap analytical power warnings for Arps
@@ -100,7 +99,6 @@ def _apply_economic_cutoffs_ui(t, q, kind: str):
         return np.array([0.0]), np.array([0.0])
 
     return t[mask], q[mask]
-
 
 def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     """
@@ -260,9 +258,6 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
 
     return sim_like
 
-
-
-
 def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
@@ -294,6 +289,54 @@ def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
         return max(floor, typical_hi)
     # 95th-percentile-ish: typical_hi plus margin vs. observed value
     return max(floor, typical_hi*(1.0+safety), value*(1.25))
+
+# ----------------------------------------------------------------------
+# 2B) Gauge helper with subtitle (Oil first, then Gas)
+# ----------------------------------------------------------------------
+def _render_gauge(
+    title: str,
+    value: float,
+    minmax: tuple[float, float],
+    color: str,
+    subtitle: str = "",
+):
+    """
+    Build a Plotly gauge+number figure with an optional subtitle under the title.
+    """
+    lo, hi = minmax
+    # Prefer your existing gauge_max if available:
+    vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
+
+    sub_html = (
+        f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>"
+        if subtitle else ""
+    )
+
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=float(value or 0.0),
+            number={"valueformat": ",.2f", "font": {"size": 44}},
+            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
+            gauge=dict(
+                axis=dict(range=[0, vmax], tickwidth=1.2),
+                bar=dict(color=color, thickness=0.28),
+                steps=[dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.05)")],
+                threshold=dict(
+                    line=dict(color=color, width=4),
+                    thickness=0.9,
+                    value=float(value or 0.0),
+                ),
+            ),
+        )
+    )
+    fig.update_layout(
+        height=280,
+        template="plotly_white",
+        margin=dict(l=10, r=10, t=50, b=10),
+    )
+    return fig
+
 
 def fmt_qty(v, unit):
     if unit == "BCF":
@@ -1878,8 +1921,83 @@ if selected_tab == "Results":
             "Please review PVT, controls, and units; then re-run.",
             icon="🚫",
         )
-        st.stop()
+      st.stop()  # (end of previous section)
 
+# ----------------------------------------------------------------------
+# 2A) Recovery to Date calculation helper
+# ----------------------------------------------------------------------
+def _recovery_to_date_pct(
+    cum_oil_stb: float,
+    eur_oil_mmbo: float,
+    cum_gas_mscf: float,
+    eur_gas_bcf: float,
+) -> tuple[float, float]:
+    """Return (oil_RF_pct, gas_RF_pct) as 0–100, clipped."""
+    oil_rf = 0.0
+    gas_rf = 0.0
+
+    if eur_oil_mmbo and eur_oil_mmbo > 0:
+        eur_oil_stb = eur_oil_mmbo * 1_000_000.0
+        oil_rf = max(0.0, min(100.0, 100.0 * (cum_oil_stb / eur_oil_stb)))
+
+    if eur_gas_bcf and eur_gas_bcf > 0:
+        eur_gas_mscf = eur_gas_bcf * 1_000_000.0
+        gas_rf = max(0.0, min(100.0, 100.0 * (cum_gas_mscf / eur_gas_mscf)))
+
+    return oil_rf, gas_rf
+# --- Recovery to date, then render Oil first, Gas second ---
+
+# Pull cumulative-to-date (use last sample if arrays exist)
+cum_o = sim.get("cum_o_MMBO")
+cum_g = sim.get("cum_g_BCF")
+
+if isinstance(cum_o, (list, tuple, np.ndarray)) and len(cum_o) > 0:
+    cum_oil_stb = float(cum_o[-1]) * 1_000_000.0  # MMBO → STB
+else:
+    cum_oil_stb = 0.0
+
+if isinstance(cum_g, (list, tuple, np.ndarray)) and len(cum_g) > 0:
+    cum_gas_mscf = float(cum_g[-1]) * 1_000_000.0  # BCF → Mscf
+else:
+    cum_gas_mscf = 0.0
+
+oil_rf_pct, gas_rf_pct = _recovery_to_date_pct(
+    cum_oil_stb=cum_oil_stb,
+    eur_oil_mmbo=float(eur_o or 0.0),
+    cum_gas_mscf=cum_gas_mscf,
+    eur_gas_bcf=float(eur_g or 0.0),
+)
+
+# ---- Oil first, then Gas (with RF% in subtitle) ----
+c1, c2 = st.columns(2)
+
+with c1:
+    oil_fig = _render_gauge(
+        title="EUR Oil (MMBO)",
+        value=float(eur_o or 0.0),
+        minmax=b["oil_mmbo"],
+        color=OIL_GREEN,
+        subtitle=f"Recovery to date: {oil_rf_pct:.0f}%",
+    )
+    st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
+
+with c2:
+    gas_fig = _render_gauge(
+        title="EUR Gas (BCF)",
+        value=float(eur_g or 0.0),
+        minmax=b["gas_bcf"],
+        color=GAS_RED,
+        subtitle=f"Recovery to date: {gas_rf_pct:.0f}%",
+    )
+    st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
+
+
+# ----------------------------------------------------------------------
+# Next section: EUR Gauges and Visualization
+# ----------------------------------------------------------------------
+# --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
+
+    
     # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
     gas_hi = b["gas_bcf"][1]
     oil_hi = b["oil_mmbo"][1]
