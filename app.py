@@ -374,27 +374,48 @@ def _render_gauge(
     value: float,
     minmax=(0.0, 1.0),
     fmt: str = "{:,.2f}",
-    unit_suffix: str = "",     # <— add this
-    **kwargs,                  # <— keeps future args from crashing
+    unit_suffix: str = "",
+    **kwargs,  # future-proofing
 ):
+    """
+    Render a Plotly gauge with optional value suffix (e.g., MMBO, BCF).
+    - minmax: 2-tuple/list (vmin, vmax). If invalid or equal, we auto-fix.
+    - fmt: python-style number format string (e.g., "{:,.2f}")
+    """
+    import math
     import plotly.graph_objects as go
 
-    # Normalize range
-    vmin, vmax = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
+    # --- normalize range ---
+    try:
+        vmin, vmax = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
+    except Exception:
+        vmin, vmax = 0.0, 1.0
     if vmax <= vmin:
         vmax = vmin + 1.0
 
-    # Convert Python format to Plotly valueformat (e.g., "{:,.2f}" -> ",.2f")
+    # --- clean value & clamp into range to avoid weird gauge renders ---
+    x = float(value) if value is not None and not isinstance(value, str) else 0.0
+    if math.isnan(x) or math.isinf(x):
+        x = 0.0
+    x = max(vmin, min(vmax, x))
+
+    # --- convert python fmt -> Plotly's d3 valueformat ---
+    # e.g., "{:,.2f}" -> ",.2f"
     vf = fmt.replace("{", "").replace("}", "").replace(":", "")
 
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=float(value),
-        title={"text": title},
-        number={"valueformat": vf, "suffix": f" {unit_suffix}" if unit_suffix else ""},
-        gauge={"axis": {"range": [vmin, vmax]}},
-    ))
+    # --- build figure ---
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=x,
+            title={"text": title},
+            number={"valueformat": vf, "suffix": f" {unit_suffix}" if unit_suffix else ""},
+            gauge={"axis": {"range": [vmin, vmax]}},
+        )
+    )
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10))
     return fig
+
 
 
 def fmt_qty(v: float, unit: str) -> str:
@@ -2102,8 +2123,10 @@ oil_rf_pct, gas_rf_pct = _recovery_to_date_pct(
 # two side-by-side gauges
 c1, c2 = st.columns(2)
 
+c1, c2 = st.columns(2)
+
 with c1:
-    oil_fig = _render_gauge(
+    oil_fig = render_gauge(
         title="EUR Oil",
         value=float(eur_o or 0.0),
         minmax=b["oil_mmbo"],
@@ -2111,9 +2134,8 @@ with c1:
     )
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
-
 with c2:
-    gas_fig = _render_gauge(
+    gas_fig = render_gauge(
         title="EUR Gas",
         value=float(eur_g or 0.0),
         minmax=b["gas_bcf"],
