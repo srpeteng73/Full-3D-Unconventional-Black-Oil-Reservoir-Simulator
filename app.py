@@ -3498,13 +3498,19 @@ elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
     st.markdown("""
-    ### 1. Introduction
-st.markdown(
+   st.markdown(
     """
 ### 1. Introduction
 Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+
+### Quick Start
+1. **Set Parameters:** Choose play, well geometry, and fluid model.
+2. **Run Simulation:** Click **Run** to produce time-series rates and pressures.
+3. **Generate Geology:** Go to the **Generate 3D property volumes** tab and click the large button. This creates the 3D permeability and porosity grids required for the simulation.
+4. **View Results:** Use **Results**, **3D Viewer**, and **Slice Viewer** to inspect outputs.
 """
 )
+
 
 
     ### 2. Quick Start Guide
