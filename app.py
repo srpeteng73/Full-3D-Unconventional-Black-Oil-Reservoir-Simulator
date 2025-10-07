@@ -956,38 +956,58 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     import plotly.graph_objects as go
     import numpy as np
 
-  def g(val, label, suffix, color, vmax):
+ def g(val, label, suffix, color, vmax):
+    # --- sanitize inputs ---
+    try:
+        vmax = float(vmax)
+    except Exception:
+        vmax = 1.0
+    if vmax <= 0:
+        vmax = 1.0
+
+    try:
+        x = float(val)
+    except Exception:
+        x = 0.0
+    if x != x or x == float("inf") or x == float("-inf"):
+        x = 0.0
+    # clamp into [0, vmax] so the gauge never overflows
+    x = max(0.0, min(vmax, x))
+
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
-            value=float(val),
-            number={'suffix': f" {suffix}", 'font': {'size': 44, 'color': '#0b2545'}},
-            title={'text': f"<b>{label}</b>", 'font': {'size': 22, 'color': '#0b2545'}},
+            value=x,
+            number={"suffix": f" {suffix}" if suffix else "", "font": {"size": 44, "color": "#0b2545"}},
+            title={"text": f"<b>{label}</b>", "font": {"size": 22, "color": "#0b2545"}},
             gauge={
-                'shape': 'angular',
-                'axis': {'range': [0, vmax], 'tickwidth': 1.2, 'tickcolor': '#0b2545'},
-                'bar': {'color': color, 'thickness': 0.28},
-                'bgcolor': 'white',
-                'borderwidth': 1,
-                'bordercolor': '#cfe0ff',
-                'steps': [
-                    {'range': [0, 0.6 * vmax], 'color': 'rgba(0,0,0,0.04)'},
-                    {'range': [0.6 * vmax, 0.85 * vmax], 'color': 'rgba(0,0,0,0.07)'}
+                "shape": "angular",
+                "axis": {"range": [0, vmax], "tickwidth": 1.2, "tickcolor": "#0b2545"},
+                "bar": {"color": color, "thickness": 0.28},
+                "bgcolor": "white",
+                "borderwidth": 1,
+                "bordercolor": "#cfe0ff",
+                "steps": [
+                    {"range": [0, 0.6 * vmax], "color": "rgba(0,0,0,0.04)"},
+                    {"range": [0.6 * vmax, 0.85 * vmax], "color": "rgba(0,0,0,0.07)"},
                 ],
-                'threshold': {
-                    'line': {'color': 'green' if color == '#d62728' else 'red', 'width': 4},
-                    'thickness': 0.9,
-                    'value': float(val)
+                "threshold": {
+                    "line": {"color": ("#2CA02C" if str(color).lower() == "#d62728" else "#D62728"), "width": 4},
+                    "thickness": 0.9,
+                    "value": x,
                 },
             },
         )
     )
+
+    # compact layout so two gauges fit side-by-side
     fig.update_layout(height=320, margin=dict(l=6, r=6, t=36, b=6), paper_bgcolor="#ffffff")
 
+    # shrink inner-axis tick labels (optional; remove if you want bigger ticks)
     fig.update_traces(gauge={"axis": {"tickfont": {"size": 10}}})
 
-
     return fig
+
 
 
     gmax = max(1.0, np.ceil(EUR_g_BCF / 5.0) * 5.0)
