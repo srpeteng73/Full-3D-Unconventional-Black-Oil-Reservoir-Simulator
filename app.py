@@ -253,9 +253,10 @@ OIL_GREEN = "#2CA02C"
 
 
     # ---------------------------------------------------------------------------
-    # Utilities
-    # ---------------------------------------------------------------------------
-    import numpy as np
+# Utilities
+# ---------------------------------------------------------------------------
+import numpy as np            #  ← delete this line (and any other imports here)
+import numpy as _np           #  ← delete if present
 
     def safe_power(x, p):
         """Robust power that won't emit warnings or create complex numbers."""
