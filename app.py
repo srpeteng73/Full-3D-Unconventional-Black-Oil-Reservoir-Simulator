@@ -956,7 +956,7 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
     import plotly.graph_objects as go
     import numpy as np
 
- def g(val, label, suffix, color, vmax):
+def g(val, label, suffix, color, vmax):
     # --- sanitize inputs ---
     try:
         vmax = float(vmax)
