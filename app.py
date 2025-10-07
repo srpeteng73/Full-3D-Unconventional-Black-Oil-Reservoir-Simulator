@@ -2147,13 +2147,11 @@ def _render_gauge_v2(
     subtitle: str | None = None,
 ):
     """
-# Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
-
+    Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
     Requires: go (plotly.graph_objects as go) and your gauge_max(...) helper.
     """
     import plotly.graph_objects as go
 
-    # normalize range and compute a reasonable vmax for the gauge
     lo, hi = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
