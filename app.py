@@ -117,7 +117,7 @@ PAGES = {
     "Automated Match": render_automated_match,
     "Uncertainty & Monte Carlo": render_uncertainty_monte_carlo,
     "Well Placement Optimization": render_well_placement_optimization,
-    "User’s Manual": render_users_manual,  # ← added
+    "User’s Manual": render_users_manual,   # ← added
     "Solver & Profiling": render_solver_profiling,
     "DFN Viewer": render_dfn_viewer,
 }
@@ -125,9 +125,18 @@ PAGES = {
 
 # 4) Radio + dispatcher. Keep this near the top-level (not inside another tab),
 #    and do NOT render any other panels below it (that would cause fall-through).
+
 # ---- LEFT MENU (only copy) ----
 with st.sidebar:
     selected = st.radio("Navigation", NAV_ITEMS, index=0, key="nav_main", label_visibility="collapsed")
+
+# Legacy compatibility for any old code that still references selected_tab
+selected_tab = selected
+
+# ---- DISPATCH (only copy) ----
+page_fn = PAGES.get(selected, lambda: st.info("Setup Preview"))
+page_fn()
+
 
 # Legacy compatibility (if any old code still references selected_tab)
 selected_tab = selected
@@ -3526,6 +3535,8 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 
 """  # END: disable legacy nav block
 
+"""  # END: disable legacy nav block
+
 def render_users_manual():
     st.markdown(
         """
@@ -3539,43 +3550,35 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 4. **Run Simulation:** Go to **Results** and click **Run simulation**.
 5. **Analyze:** Review EUR gauges, rate–time plots, and cumulative production charts.
 6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
+
+### 3. Key Tabs Explained
+
+#### Results
+Primary dashboard for simulation outputs (EURs, rate-time, cumulative). Simulation runs only when you click **Run simulation** on this tab.
+
+#### Economics
+Financial model based on the Results profile.
+- **Inputs:** CAPEX, price decks, OPEX, fiscal terms.
+- **Metrics:** **NPV**, **IRR**, **Payout Period**.
+- **Outputs:** Yearly & cumulative cash flows plus a detailed table.
+
+#### Field Match & Automated Match
+History matching against real data.
+- **Field Match (CSV):** Upload CSV (must include `Day` and one of `Oil_Rate_STBpd` or `Gas_Rate_Mscfd`). Adjust parameters and re-run to align curves.
+- **Automated Match:** Genetic algorithm:
+  1) Upload data  2) Select parameters (e.g., `xf_ft`, `k_stdev`)  
+  3) Set bounds  4) **Run Automated Match** to minimize RMSE.
+
+#### 3D & Slice Viewers
+- **3D Viewer:** Interactive isosurfaces (perm/poro/pressure).  
+- **Slice Viewer:** 2D cross-sections in X/Y/Z for layer-by-layer inspection.
+
+### 4. Input Validation
+- **Automated Match:** warns if any min bound > max bound.  
+- **Results:** sanity checks enforce realistic EURs for the selected play; physically inconsistent results are flagged or withheld.
         """
     )
 
-
-    ### 3. Key Tabs Explained
-
-    ##### **Results Tab**
-    This is the primary dashboard for viewing simulation output. It provides EURs for oil and gas, along with standard production plots. The simulation is only run when you click the "Run simulation" button on this tab.
-
-    #### **Economics Tab**
-    This tab provides a full financial model based on the production profile from the **Results** tab.
-    -   **Inputs:** Enter your project's total upfront capital expenditure (CAPEX), commodity price decks, operating costs (OPEX), and fiscal terms (royalty, tax).
-    -   **Metrics:** The model automatically calculates key financial metrics:
-        -   **NPV (Net Present Value):** The value of all future cash flows, discounted to the present.
-        -   **IRR (Internal Rate of Return):** The discount rate at which the NPV of the project is zero.
-        -   **Payout Period:** The time it takes for the cumulative cash flow to turn positive, recovering the initial investment.
-    -   **Outputs:** View yearly and cumulative cash flow charts, plus a detailed annual table, to assess project profitability.
-
-    #### **Field Match & Automated Match Tabs**
-    These tabs are designed for history matching against real-world production data.
-    -   **Field Match (CSV):** For manual history matching. Upload a CSV with historical production data (columns must include 'Day', and either 'Oil_Rate_STBpd' or 'Gas_Rate_Mscfd'). Adjust sidebar parameters and re-run simulations until the simulated curves visually align with the field data markers.
-    -   **Automated Match:** Let the simulator find the best match for you using a genetic algorithm.
-        1.  Upload your historical data.
-        2.  Select which parameters you want the algorithm to tune (e.g., `xf_ft`, `k_stdev`).
-        3.  Define the minimum and maximum bounds for each selected parameter. The algorithm will search for a solution within this range.
-        4.  Click "Run Automated Match". The algorithm will run many simulations to find the parameter set that minimizes the error (RMSE) between the simulation and your data.
-
-    #### **3D & Slice Viewers**
-    Visualize the reservoir properties.
-    -   **3D Viewer:** Renders an interactive 3D isosurface plot of properties like permeability, porosity, or pressure after a simulation. Use the sliders to adjust the downsampling and the value being displayed.
-    -   **Slice Viewer:** Shows 2D cross-sections of the 3D property grids, allowing you to inspect heterogeneity layer by layer in any of the three principal directions (X, Y, or Z).
-
-    ### 4. Input Validation
-    The application includes input validation to improve user experience and prevent errors.
-    -   In the **Automated Match** tab, the interface will warn you if a minimum bound is set higher than its corresponding maximum bound.
-    -   On the **Results** tab, sanity checks are performed to ensure the final EURs are reasonable for the selected play type. If the results are physically inconsistent (e.g., an oil well producing an unrealistic amount of gas), an error message will be displayed, and the results will be withheld to prevent misinterpretation.
-    """)
 elif selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
