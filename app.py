@@ -2150,12 +2150,13 @@ with c1:
 
 with c2:
     gas_fig = _render_gauge_v2(
-        title="EUR Gas",
-        value=float(eur_g or 0.0),
-        minmax=b["gas_bcf"],
-        unit_suffix="BCF",
-    )
-    st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
+    title="EUR Gas",
+    value=float(eur_g or 0.0),
+    minmax=b["gas_bcf"],
+    unit_suffix="BCF",
+)
+gas_fig.update_traces(gauge={"bar": {"color": "#D62728"}})  # red
+st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
 # ---------- Expected ranges (play sanity envelope) ----------
 oil_rng = b["oil_mmbo"]
