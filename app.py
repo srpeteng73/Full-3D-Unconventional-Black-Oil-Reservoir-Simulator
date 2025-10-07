@@ -117,22 +117,25 @@ PAGES = {
     "Automated Match": render_automated_match,
     "Uncertainty & Monte Carlo": render_uncertainty_monte_carlo,
     "Well Placement Optimization": render_well_placement_optimization,
-    "User’s Manual": render_users_manual,  # ← add this line
+    "User’s Manual": render_users_manual,  # ← added
     "Solver & Profiling": render_solver_profiling,
     "DFN Viewer": render_dfn_viewer,
 }
 
+
 # 4) Radio + dispatcher. Keep this near the top-level (not inside another tab),
 #    and do NOT render any other panels below it (that would cause fall-through).
-# ---- LEFT MENU (sidebar) ----
+# ---- LEFT MENU (only copy) ----
 with st.sidebar:
-    selected = st.radio(
-        "Navigation",
-        NAV_ITEMS,
-        index=0,
-        key="nav_main",
-        label_visibility="collapsed",
-    )
+    selected = st.radio("Navigation", NAV_ITEMS, index=0, key="nav_main", label_visibility="collapsed")
+
+# Legacy compatibility (if any old code still references selected_tab)
+selected_tab = selected
+
+# ---- DISPATCH (only copy) ----
+page_fn = PAGES.get(selected, lambda: st.info("Setup Preview"))
+page_fn()
+
 
 selected_tab = selected  # <— add this line right after the block
 
@@ -3621,4 +3624,21 @@ elif selected_tab == "DFN Viewer":
             - Use this for QC to verify locations/orientations inside the reservoir model.
             """)
 """  # END: disable legacy nav block
+def render_users_manual():
+    st.markdown(
+        """
+### 1. Introduction
+Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+
+### 2. Quick Start Guide
+1. **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
+2. **Apply Preset:** Click **Apply Preset**. This loads typical reservoir, fluid, and completion parameters into the sidebar.
+3. **Generate Geology:** Open **Generate 3D property volumes** and click the large button to create 3D permeability/porosity grids.
+4. **Run Simulation:** Go to **Results** and click **Run simulation**.
+5. **Analyze:** Review EUR gauges, rate–time plots, and cumulative production charts.
+6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
+        """
+    )
+
+
 
