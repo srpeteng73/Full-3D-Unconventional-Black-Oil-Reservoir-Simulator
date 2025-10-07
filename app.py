@@ -2118,7 +2118,8 @@ def _recovery_to_date_pct(
     cum_gas_mscf: float,
     eur_gas_bcf: float,
 ) -> tuple[float, float]:
-    """Return (oil_RF_pct, gas_RF_pct) as 0-100, clipped to [0, 100]."""
+    # Return (oil_RF_pct, gas_RF_pct) as 0-100, clipped to [0, 100].
+
     oil_rf = 0.0
     gas_rf = 0.0
 
