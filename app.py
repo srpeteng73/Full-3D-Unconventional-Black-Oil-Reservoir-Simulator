@@ -2147,42 +2147,30 @@ def _render_gauge_v2(
     subtitle: str | None = None,
 ):
     """
-    """Build a Plotly gauge+number figure with an optional subtitle (small text under the title)."""
-
+    Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
     Requires: go (plotly.graph_objects as go) and your gauge_max(...) helper.
     """
-    lo, hi = minmax
+    import plotly.graph_objects as go
+
+    # normalize range and compute a reasonable vmax for the gauge
+    lo, hi = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
-    sub_html = (
-        f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>" if subtitle else ""
-    )
-
+    sub_html = f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>" if subtitle else ""
+    number_fmt = fmt.replace("{", "").replace("}", "").replace(":", "")
 
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
-            value=float(value or 0.0),
-            number={"valueformat": ",.2f", "font": {"size": 44}},
-            title={"text": f"<b>{title}</b>{sub_html}", "font": {"size": 20}},
-            gauge=dict(
-                axis=dict(range=[0, vmax], tickwidth=1.2),
-                bar=dict(color=color, thickness=0.28),
-                steps=[dict(range=[0, 0.6 * vmax], color="rgba(0,0,0,0.05)")],
-                threshold=dict(
-                    line=dict(color=color, width=4),
-                    thickness=0.9,
-                    value=float(value or 0.0),
-                ),
-            ),
+            value=float(value) if value is not None else 0.0,
+            title={"text": f"{title}{sub_html}"},
+            number={"valueformat": number_fmt, "suffix": f" {unit_suffix}" if unit_suffix else ""},
+            gauge={"axis": {"range": [max(lo, 0.0), max(vmax, max(lo, 0.0) + 1e-12)]}},
         )
     )
-    fig.update_layout(
-        height=280,
-        template="plotly_white",
-        margin=dict(l=10, r=10, t=50, b=10),
-    )
+    fig.update_layout(height=320, margin=dict(l=6, r=6, t=36, b=6), paper_bgcolor="#ffffff")
     return fig
+
 
 # ---- Brand colors for gauges (global) ----
 GAS_RED   = "#D62728"  # Plotly red for gas
