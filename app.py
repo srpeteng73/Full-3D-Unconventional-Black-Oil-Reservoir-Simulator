@@ -3524,9 +3524,14 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 
 
 
- def render_users_manual():
+"""  # END: disable legacy nav block
+
+def render_users_manual():
     st.markdown(
         """
+### 1. Introduction
+Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+
 ### 2. Quick Start Guide
 1. **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
 2. **Apply Preset:** Click **Apply Preset**. This loads typical reservoir, fluid, and completion parameters into the sidebar.
@@ -3536,6 +3541,7 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
         """
     )
+
 
     ### 3. Key Tabs Explained
 
