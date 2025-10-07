@@ -3305,7 +3305,7 @@ elif selected_tab == "User’s Manual":
 
     ### 3. Key Tabs Explained
 
-    #### **Results Tab**
+    ##### **Results Tab**
     This is the primary dashboard for viewing simulation output. It provides EURs for oil and gas, along with standard production plots. The simulation is only run when you click the "Run simulation" button on this tab.
 
     #### **Economics Tab**
