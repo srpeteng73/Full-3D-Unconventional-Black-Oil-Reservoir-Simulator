@@ -3521,13 +3521,17 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 
 
 
-    ### 2. Quick Start Guide
-    1.  **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
-    2.  **Apply Preset:** Click the **Apply Preset** button. This will load typical reservoir, fluid, and completion parameters for that play into the sidebar.
-    3.  **Generate Geology:** Go to the **Generate 3D property volumes** tab and click the large button. This creates the 3D permeability and porosity grids required for the simulation.
-    4.  **Run Simulation:** Navigate to the **Results** tab and click **Run simulation**.
-    5.  **Analyze:** Review the EUR gauges, rate-time plots, and cumulative production charts.
-    6.  **Iterate:** Adjust parameters in the sidebar (e.g., Frac half-length `xf_ft` or Pad BHP `pad_bhp_psi`) and re-run the simulation to see the impact.
+ st.markdown(
+    """
+### 2. Quick Start Guide
+1. **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
+2. **Apply Preset:** Click **Apply Preset**. This loads typical reservoir, fluid, and completion parameters into the sidebar.
+3. **Generate Geology:** Open **Generate 3D property volumes** and click the large button to create 3D permeability/porosity grids.
+4. **Run Simulation:** Go to **Results** and click **Run simulation**.
+5. **Analyze:** Review EUR gauges, rate–time plots, and cumulative production charts.
+6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
+"""
+)
 
     ### 3. Key Tabs Explained
 
