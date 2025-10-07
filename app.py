@@ -45,6 +45,7 @@ OIL_GREEN = "#2CA02C"
 # ======================================================================
 # Keep ALL page/UI code inside a function to avoid dangling-elif issues
 # ======================================================================
+# ==== PAGES START (REPLACE YOUR EXISTING render_app WITH THIS) ===============
 def render_app() -> None:
     # ---- Sidebar navigation
     selected_tab = st.sidebar.radio(
@@ -87,7 +88,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
 2. Go to **Simulation** and click **Run Simulation**.  
 3. View plots and tables in **Results**.  
 4. Optional: **Solver & Profiling** shows solver selection and timing utilities.
-""")
+""")  # <-- CLOSED TRIPLE QUOTES
 
     elif selected_tab == "Inputs":
         st.header("Model Inputs")
@@ -102,14 +103,14 @@ This application is designed for petroleum engineers to model, forecast, and opt
             k_md    = st.number_input("Permeability (mD)",   min_value=0.001, max_value=1000.0, value=0.05, step=0.01, format="%.3f")
 
             st.subheader("Fluids")
-            oil_mu = st.number_input("Oil viscosity (cP)",         min_value=0.2, max_value=50.0,  value=1.2,  step=0.1, format="%.2f")
+            oil_mu = st.number_input("Oil viscosity (cP)", min_value=0.2, max_value=50.0, value=1.2, step=0.1, format="%.2f")
             b_oil  = st.number_input("Formation volume factor (RB/STB)", min_value=1.0, max_value=2.0, value=1.2, step=0.05, format="%.2f")
-            rs     = st.number_input("Solution GOR (scf/STB)",     min_value=0.0, max_value=5000.0, value=400.0, step=10.0,  format="%.1f")
+            rs     = st.number_input("Solution GOR (scf/STB)", min_value=0.0, max_value=5000.0, value=400.0, step=10.0, format="%.1f")
 
             st.subheader("Well & Completion")
             lateral_len = st.number_input("Lateral length (ft)", min_value=2000, max_value=15000, value=10000, step=500)
-            stages      = st.number_input("Frac stages",         min_value=5,    max_value=100,   value=40,    step=1)
-            generation  = st.selectbox("Completion generation",  ["Gen1","Gen2","Gen3","Gen4"], index=3)
+            stages      = st.number_input("Frac stages",         min_value=5, max_value=100, value=40, step=1)
+            generation  = st.selectbox("Completion generation",  ["Gen1", "Gen2", "Gen3", "Gen4"], index=3)
 
             st.subheader("Schedule")
             t_days = st.number_input("Simulation days", min_value=30, max_value=3650, value=730, step=30)
@@ -128,7 +129,6 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
     elif selected_tab == "Simulation":
         st.header("Run Simulation")
-
         if not _require_inputs():
             st.stop()
 
@@ -149,7 +149,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
                     elif _has_fn("fallback_fast_solver"):
                         results = fallback_fast_solver(inputs)
                     else:
-                        raise RuntimeError("No solver available. Ensure `simulate` or `fallback_fast_solver` is imported.")
+                        raise RuntimeError("No solver available. Import `simulate` or `fallback_fast_solver`.")
                 except Exception as e:
                     st.error(f"Simulation failed: {e}")
                     st.stop()
@@ -159,15 +159,10 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
     elif selected_tab == "Results":
         st.header("Results")
-
         if not _require_results():
             st.stop()
 
         results = st.session_state.results
-
-        # Expecting results to contain time series; adapt keys to your actual structure.
-        # Example: {"time_days": np.array, "q_oil_stb_d": np.array, "p_wf_psi": np.array}
-                # ----- Results (end) -----
         try:
             t = np.asarray(results.get("time_days", []))
             q = np.asarray(results.get("q_oil_stb_d", []))
@@ -193,9 +188,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
     elif selected_tab == "Solver & Profiling":
         st.header("Solver & Profiling")
-        st.markdown(
-            "Use this page to choose a solver, run a tiny benchmark, and check approximate timings."
-        )
+        st.markdown("Use this page to choose a solver, run a tiny benchmark, and check approximate timings.")
 
         test_steps = st.slider("Benchmark steps (small for quick check)", 10, 200, 50, 10)
         do_profile = st.button("Run tiny benchmark")
@@ -204,7 +197,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
             if not _require_inputs():
                 st.stop()
 
-            inputs = st.session_state.inputs  # <-- remove the trailing dot here
+            inputs = st.session_state.inputs
 
             # Create a shallow 'short schedule' copy for quick timing
             short_inputs = dict(inputs)
@@ -214,8 +207,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
             timings: Dict[str, Union[float, str]] = {}
 
-            # Try full solver if available
-            if callable(globals().get("simulate")):
+            if _has_fn("simulate"):
                 start = time.perf_counter()
                 try:
                     _ = simulate(short_inputs)
@@ -225,8 +217,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
             else:
                 timings["core.full3d.simulate"] = "not available"
 
-            # Try fallback solver if available
-            if callable(globals().get("fallback_fast_solver")):
+            if _has_fn("fallback_fast_solver"):
                 start = time.perf_counter()
                 try:
                     _ = fallback_fast_solver(short_inputs)
@@ -238,6 +229,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
             st.subheader("Timings (seconds)")
             st.json(timings)
+# ==== PAGES END ==============================================================
 
 # ---- Streamlit entrypoint
 if __name__ == "__main__":
