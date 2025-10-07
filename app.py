@@ -14,7 +14,6 @@ Bounds = Dict[str, Union[Tuple[float, float], float]]
 # stdlib
 import time
 import warnings  # trap analytical power warnings for Arps
-
 # third-party
 import numpy as np
 import numpy as _np  # underscore alias used by some helper snippets
@@ -30,12 +29,18 @@ from scipy.integrate import cumulative_trapezoid  # sometimes used directly
 from scipy.integrate import cumulative_trapezoid as _ctr  # helper alias
 from scipy.interpolate import interp1d
 from scipy.optimize import differential_evolution
-
 # local modules
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 
-# Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top)
+# utils: hot-reload so edits to _render_gauge are picked up on reruns
+try:
+    import utils
+    from importlib import reload as _reload
+    _reload(utils)  # ensure we’re using the latest utils during Streamlit reruns
+except Exception:
+    utils = None  # utils may not exist in some environments; keep app running
+# Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top).
 
 # ---------------------------------------------------------------------------
 # Brand colors (define once, globally)
@@ -369,23 +374,34 @@ def arps_cum_numeric(qi: float, Di: float, b: float, t) -> _np.ndarray:
     return _ctr(q, t, initial=0.0)
 
 # Gauge helper with subtitle + unit suffix
-def _render_gauge(
+def _render_gauge_v2(
     title: str,
     value: float,
     minmax=(0.0, 1.0),
     fmt: str = "{:,.2f}",
     unit_suffix: str = "",
-    **kwargs,  # future-proofing
+    **kwargs,
 ):
-    """
-    Render a Plotly gauge with optional value suffix (e.g., MMBO, BCF).
-    - minmax: 2-tuple/list (vmin, vmax). If invalid or equal, we auto-fix.
-    - fmt: python-style number format string (e.g., "{:,.2f}")
-    """
     import math
     import plotly.graph_objects as go
 
-    # --- normalize range ---
+    # Prefer the utils implementation if it exists and accepts our args.
+    if utils and hasattr(utils, "_render_gauge"):
+        # Try calling utils._render_gauge; if it rejects unit_suffix, fall back.
+        try:
+            return utils._render_gauge(
+                title=title, value=value, minmax=minmax, fmt=fmt, unit_suffix=unit_suffix
+            )
+        except TypeError:
+            # Call without unit_suffix, then append suffix if possible
+            fig = utils._render_gauge(title=title, value=value, minmax=minmax, fmt=fmt)
+            try:
+                fig.update_traces(number={"suffix": f" {unit_suffix}" if unit_suffix else ""})
+            except Exception:
+                pass
+            return fig
+
+    # Fallback: local implementation
     try:
         vmin, vmax = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
     except Exception:
@@ -393,17 +409,13 @@ def _render_gauge(
     if vmax <= vmin:
         vmax = vmin + 1.0
 
-    # --- clean value & clamp into range to avoid weird gauge renders ---
     x = float(value) if value is not None and not isinstance(value, str) else 0.0
     if math.isnan(x) or math.isinf(x):
         x = 0.0
     x = max(vmin, min(vmax, x))
 
-    # --- convert python fmt -> Plotly's d3 valueformat ---
-    # e.g., "{:,.2f}" -> ",.2f"
     vf = fmt.replace("{", "").replace("}", "").replace(":", "")
 
-    # --- build figure ---
     fig = go.Figure(
         go.Indicator(
             mode="gauge+number",
@@ -2125,8 +2137,10 @@ c1, c2 = st.columns(2)
 
 c1, c2 = st.columns(2)
 
+c1, c2 = st.columns(2)
+
 with c1:
-    oil_fig = render_gauge(
+    oil_fig = _render_gauge_v2(
         title="EUR Oil",
         value=float(eur_o or 0.0),
         minmax=b["oil_mmbo"],
@@ -2135,7 +2149,7 @@ with c1:
     st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
 with c2:
-    gas_fig = render_gauge(
+    gas_fig = _render_gauge_v2(
         title="EUR Gas",
         value=float(eur_g or 0.0),
         minmax=b["gas_bcf"],
