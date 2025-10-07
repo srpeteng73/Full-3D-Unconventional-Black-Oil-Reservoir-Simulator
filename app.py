@@ -167,6 +167,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
         # Expecting results to contain time series; adapt keys to your actual structure.
         # Example: {"time_days": np.array, "q_oil_stb_d": np.array, "p_wf_psi": np.array}
+                # ----- Results (end) -----
         try:
             t = np.asarray(results.get("time_days", []))
             q = np.asarray(results.get("q_oil_stb_d", []))
@@ -182,15 +183,19 @@ This application is designed for petroleum engineers to model, forecast, and opt
 
             if t.size:
                 df = pd.DataFrame({"day": t})
-                if q.size: df["q_oil_stb_d"] = q
-                if p.size: df["p_wf_psi"] = p
+                if q.size:
+                    df["q_oil_stb_d"] = q
+                if p.size:
+                    df["p_wf_psi"] = p
                 st.dataframe(df.head(200))
         except Exception as e:
             st.warning(f"Could not render plots/tables from results: {e}")
 
     elif selected_tab == "Solver & Profiling":
         st.header("Solver & Profiling")
-        st.markdown("Use this page to choose a solver, run a tiny benchmark, and check approximate timings.")
+        st.markdown(
+            "Use this page to choose a solver, run a tiny benchmark, and check approximate timings."
+        )
 
         test_steps = st.slider("Benchmark steps (small for quick check)", 10, 200, 50, 10)
         do_profile = st.button("Run tiny benchmark")
@@ -198,18 +203,19 @@ This application is designed for petroleum engineers to model, forecast, and opt
         if do_profile:
             if not _require_inputs():
                 st.stop()
-            inputs = st.session_state.inputs
 
-            # Create a shallow "short schedule" copy for quick timing
+            inputs = st.session_state.inputs  # <-- remove the trailing dot here
+
+            # Create a shallow 'short schedule' copy for quick timing
             short_inputs = dict(inputs)
-            sch = dict(inputs["schedule"])
+            sch = dict(inputs.get("schedule", {}))
             sch["t_days"] = int(min(test_steps, sch.get("t_days", test_steps)))
             short_inputs["schedule"] = sch
 
             timings: Dict[str, Union[float, str]] = {}
 
             # Try full solver if available
-            if _has_fn("simulate"):
+            if callable(globals().get("simulate")):
                 start = time.perf_counter()
                 try:
                     _ = simulate(short_inputs)
@@ -220,7 +226,7 @@ This application is designed for petroleum engineers to model, forecast, and opt
                 timings["core.full3d.simulate"] = "not available"
 
             # Try fallback solver if available
-            if _has_fn("fallback_fast_solver"):
+            if callable(globals().get("fallback_fast_solver")):
                 start = time.perf_counter()
                 try:
                     _ = fallback_fast_solver(short_inputs)
