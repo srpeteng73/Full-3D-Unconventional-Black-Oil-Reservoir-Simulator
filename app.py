@@ -124,9 +124,24 @@ PAGES = {
 
 # 4) Radio + dispatcher. Keep this near the top-level (not inside another tab),
 #    and do NOT render any other panels below it (that would cause fall-through).
-# ---- LEFT MENU ----
+# ---- LEFT MENU (only copy of the radio!) ----
 with st.sidebar:
-    selected = st.radio("Navigation", NAV_ITEMS, index=0, key="nav_main", label_visibility="collapsed")
+    selected = st.radio(
+        "Navigation",
+        NAV_ITEMS,
+        index=0,
+        key="nav_main",
+        label_visibility="collapsed",
+    )
+
+# ---- DISPATCH (only copy!) ----
+# No undefined-function references and no second call
+page_fn = PAGES.get(
+    selected,
+    lambda: render_setup_preview() if "render_setup_preview" in globals() else st.info("Setup Preview"),
+)
+page_fn()
+
 
 # --- Minimal page renderers to keep routing clean ---
 def render_setup_preview():
@@ -1813,7 +1828,6 @@ st.write(
     'div.row-widget.stRadio > div > div[aria-checked="true"] {background-color: #e57373; color: white; border-color: #d32f2f;}</style>',
     unsafe_allow_html=True,
 )
-selected_tab = st.radio("Navigation", tab_names, label_visibility="collapsed")
 
 # ------------------------ TAB CONTENT DEFINITIONS ------------------------
 if selected_tab == "Setup Preview":
