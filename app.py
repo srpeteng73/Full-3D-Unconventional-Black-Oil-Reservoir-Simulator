@@ -2136,8 +2136,7 @@ def _recovery_to_date_pct(
         gas_rf = max(0.0, min(100.0, gas_rf))
 
     return oil_rf, gas_rf
-
-
+# >>> REPLACE EVERYTHING from your current def _render_gauge_v2(...) down to its return with THIS EXACT BLOCK:
 def _render_gauge_v2(
     title: str,
     value: float,
@@ -2152,6 +2151,7 @@ def _render_gauge_v2(
     """
     import plotly.graph_objects as go
 
+    # normalize range and compute a reasonable vmax for the gauge
     lo, hi = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
@@ -2169,6 +2169,10 @@ def _render_gauge_v2(
     )
     fig.update_layout(height=320, margin=dict(l=6, r=6, t=36, b=6), paper_bgcolor="#ffffff")
     return fig
+# <<< END REPLACEMENT
+
+
+
 
 
 # ---- Brand colors for gauges (global) ----
