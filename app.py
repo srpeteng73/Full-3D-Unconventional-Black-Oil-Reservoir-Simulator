@@ -1,11 +1,9 @@
 """App entrypoint and UI wiring."""
 from __future__ import annotations
 
-# ---- typing & aliases (column 0)
 from typing import Dict, Tuple, Union
 Bounds = Dict[str, Union[Tuple[float, float], float]]
 
-# ---- imports (all at column 0; no extra spaces)
 # stdlib
 import time
 import warnings
@@ -37,6 +35,12 @@ try:
     _reload(utils)
 except Exception:
     utils = None
+
+# ---------------------------------------------------------------------------
+# Brand colors (define once, globally)
+# ---------------------------------------------------------------------------
+GAS_RED   = "#D62728"
+OIL_GREEN = "#2CA02C"
 
 # ---- constants (column 0)
 # ---------------------------------------------------------------------------
