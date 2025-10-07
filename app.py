@@ -2154,11 +2154,9 @@ def _render_gauge_v2(
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
     sub_html = (
-        f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>"
-        if subtitle else ""
+        f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>" if subtitle else ""
     )
 
-    # ...rest of your function...
 
     fig = go.Figure(
         go.Indicator(
