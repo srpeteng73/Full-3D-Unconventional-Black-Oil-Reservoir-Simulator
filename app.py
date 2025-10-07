@@ -3499,7 +3499,13 @@ elif selected_tab == "User’s Manual":
     st.markdown("---")
     st.markdown("""
     ### 1. Introduction
-    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+st.markdown(
+    """
+### 1. Introduction
+Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+"""
+)
+
 
     ### 2. Quick Start Guide
     1.  **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
