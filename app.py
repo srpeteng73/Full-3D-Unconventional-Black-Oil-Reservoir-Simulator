@@ -102,24 +102,24 @@ def _resolve(name: str, fallback: str):
 
 # 3) Map nav labels -> renderer functions (rename targets if you already have them)
 PAGES = {
-    "Setup Preview": _resolve("render_setup_preview", "Setup Preview panel coming soon."),
-    "Generate 3D property volumes": _resolve("render_generate_volumes", "3D volumes generator coming soon."),
-    "PVT (Black-Oil)": _resolve("render_pvt_black_oil", "PVT (Black-Oil) panel coming soon."),
-    "MSW Wellbore": _resolve("render_msw_wellbore", "MSW Wellbore panel coming soon."),
-    "RTA": _resolve("render_rta", "RTA panel coming soon."),
-    "Results": _resolve("render_results_panel", "Results panel coming soon."),
-    "3D Viewer": _resolve("render_3d_viewer", "3D Viewer coming soon."),
-    "Slice Viewer": _resolve("render_slice_viewer", "Slice Viewer coming soon."),
-    "QA / Material Balance": _resolve("render_qa_material_balance", "QA / Material Balance coming soon."),
-    "Economics": _resolve("render_economics", "Economics panel coming soon."),
-    "EUR vs Lateral Length": _resolve("render_eur_vs_lateral", "EUR vs Lateral Length coming soon."),
-    "Field Match (CSV)": _resolve("render_field_match_csv", "Field Match (CSV) coming soon."),
-    "Automated Match": _resolve("render_automated_match", "Automated Match coming soon."),
-    "Uncertainty & Monte Carlo": _resolve("render_uncertainty_monte_carlo", "Uncertainty & Monte Carlo coming soon."),
-    "Well Placement Optimization": _resolve("render_well_placement_optimization", "Well Placement Optimization coming soon."),
-    "User’s Manual": _resolve("render_users_manual", "User’s Manual coming soon."),
-    "Solver & Profiling": _resolve("render_solver_profiling", "Solver & Profiling coming soon."),
-    "DFN Viewer": _resolve("render_dfn_viewer", "DFN Viewer coming soon."),
+    "Setup Preview": render_setup_preview,
+    "Generate 3D property volumes": render_generate_volumes,
+    "PVT (Black-Oil)": render_pvt_black_oil,
+    "MSW Wellbore": render_msw_wellbore,
+    "RTA": render_rta,
+    "Results": render_results_panel,
+    "3D Viewer": render_3d_viewer,
+    "Slice Viewer": render_slice_viewer,
+    "QA / Material Balance": render_qa_material_balance,
+    "Economics": render_economics,
+    "EUR vs Lateral Length": render_eur_vs_lateral,
+    "Field Match (CSV)": render_field_match_csv,
+    "Automated Match": render_automated_match,
+    "Uncertainty & Monte Carlo": render_uncertainty_monte_carlo,
+    "Well Placement Optimization": render_well_placement_optimization,
+    "User’s Manual": render_users_manual,  # ← add this line
+    "Solver & Profiling": render_solver_profiling,
+    "DFN Viewer": render_dfn_viewer,
 }
 
 # 4) Radio + dispatcher. Keep this near the top-level (not inside another tab),
@@ -3504,8 +3504,10 @@ elif selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
     st.markdown("""
-   st.markdown(
-    """
+  
+def render_users_manual():
+    st.markdown(
+        """
 ### 1. Introduction
 Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
 
@@ -3514,8 +3516,8 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 2. **Run Simulation:** Click **Run** to produce time-series rates and pressures.
 3. **Generate Geology:** Go to the **Generate 3D property volumes** tab and click the large button. This creates the 3D permeability and porosity grids required for the simulation.
 4. **View Results:** Use **Results**, **3D Viewer**, and **Slice Viewer** to inspect outputs.
-"""
-)
+        """
+    )
 
 
 
