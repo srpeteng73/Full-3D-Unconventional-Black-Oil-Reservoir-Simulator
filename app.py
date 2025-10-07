@@ -124,7 +124,7 @@ PAGES = {
 
 # 4) Radio + dispatcher. Keep this near the top-level (not inside another tab),
 #    and do NOT render any other panels below it (that would cause fall-through).
-# ---- LEFT MENU (only copy of the radio!) ----
+# ---- LEFT MENU (sidebar) ----
 with st.sidebar:
     selected = st.radio(
         "Navigation",
@@ -134,12 +134,12 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
+selected_tab = selected  # <— add this line right after the block
+
 # ---- DISPATCH (only copy!) ----
 # No undefined-function references and no second call
-page_fn = PAGES.get(
-    selected,
-    lambda: render_setup_preview() if "render_setup_preview" in globals() else st.info("Setup Preview"),
-)
+page_fn = PAGES.get(selected, lambda: st.info("Setup Preview"))
+
 page_fn()
 
 
@@ -1828,6 +1828,7 @@ st.write(
     'div.row-widget.stRadio > div > div[aria-checked="true"] {background-color: #e57373; color: white; border-color: #d32f2f;}</style>',
     unsafe_allow_html=True,
 )
+"""  # START: disable legacy nav block
 
 # ------------------------ TAB CONTENT DEFINITIONS ------------------------
 if selected_tab == "Setup Preview":
@@ -3594,3 +3595,4 @@ elif selected_tab == "DFN Viewer":
             - Each **red line** represents an individual natural fracture defined in the input file.
             - Use this for QC to verify locations/orientations inside the reservoir model.
             """)
+"""  # END: disable legacy nav block
