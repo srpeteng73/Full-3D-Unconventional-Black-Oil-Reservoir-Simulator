@@ -2330,27 +2330,40 @@ oil_rf_pct, gas_rf_pct = _recovery_to_date_pct(
 with st.container():
     c1, c2 = st.columns([1, 1], gap="small")
 
+    # --- OIL ---
     with c1:
+        v_o = float(eur_o) if eur_o is not None else 0.0
         oil_fig = _render_gauge_v2(
             title="EUR Oil",
-            value=float(eur_o or 0.0),
-            minmax=b["oil_mmbo"],
+            value=v_o,
+            minmax=b["oil_mmbo"],   # expects (lo, hi)
             unit_suffix="MMBO",
         )
-        # make it compact
-        oil_fig.update_layout(height=340, margin=dict(l=10, r=10, t=40, b=10))
-        oil_fig.update_traces(number={"font": {"size": 48}}, gauge={"bar": {"color": "#2CA02C", "thickness": 0.35}})
+        oil_fig.update_traces(
+            number={"font": {"size": 46}},
+            gauge={
+                "bar": {"color": "#2CA02C", "thickness": 0.30},
+                "axis": {"tickfont": {"size": 10}},
+            },
+        )
         st.plotly_chart(oil_fig, use_container_width=True, theme=None, key="eur_gauge_oil")
 
+    # --- GAS ---
     with c2:
+        v_g = float(eur_g) if eur_g is not None else 0.0
         gas_fig = _render_gauge_v2(
             title="EUR Gas",
-            value=float(eur_g or 0.0),
+            value=v_g,
             minmax=b["gas_bcf"],
             unit_suffix="BCF",
         )
-        gas_fig.update_layout(height=340, margin=dict(l=10, r=10, t=40, b=10))
-        gas_fig.update_traces(number={"font": {"size": 48}}, gauge={"bar": {"color": "#D62728", "thickness": 0.35}})
+        gas_fig.update_traces(
+            number={"font": {"size": 46}},
+            gauge={
+                "bar": {"color": "#D62728", "thickness": 0.30},
+                "axis": {"tickfont": {"size": 10}},
+            },
+        )
         st.plotly_chart(gas_fig, use_container_width=True, theme=None, key="eur_gauge_gas")
 
 # ---------- Expected ranges (play sanity envelope) ----------
