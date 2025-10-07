@@ -49,6 +49,102 @@ GAS_RED   = "#D62728"  # Plotly red for gas
 OIL_GREEN = "#2CA02C"  # Plotly green for oil
 
 # ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+import numpy as np
+
+def safe_power(x, p):
+    """Robust power that won't emit warnings or create complex numbers."""
+    x = np.asarray(x, dtype=float)
+    # replace NaN/Inf with 0
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    # negative base + non-integer exponent -> clamp to 0 to avoid complex domain
+    if not float(p).is_integer():
+        x = np.maximum(x, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        y = np.power(x, p)
+    # clean any residual nan/inf
+    return np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+
+# ---------------------------------------------------------------------------
+# Navigation (Tabs / Sections) — place after imports & constants
+# ---------------------------------------------------------------------------
+
+# 1) Define nav items exactly as shown in your left menu
+NAV_ITEMS = [
+    "Setup Preview",
+    "Generate 3D property volumes",
+    "PVT (Black-Oil)",
+    "MSW Wellbore",
+    "RTA",
+    "Results",
+    "3D Viewer",
+    "Slice Viewer",
+    "QA / Material Balance",
+    "Economics",
+    "EUR vs Lateral Length",
+    "Field Match (CSV)",
+    "Automated Match",
+    "Uncertainty & Monte Carlo",
+    "Well Placement Optimization",
+    "User’s Manual",
+    "Solver & Profiling",
+    "DFN Viewer",
+]
+
+# 2) Helpers: resolve renderer functions if you already have them defined elsewhere.
+#    If not present yet, show a friendly placeholder instead of crashing.
+def _resolve(name: str, fallback: str):
+    fn = globals().get(name)
+    if callable(fn):
+        return fn
+    return lambda: st.info(fallback)
+
+# 3) Map nav labels -> renderer functions (rename targets if you already have them)
+PAGES = {
+    "Setup Preview": _resolve("render_setup_preview", "Setup Preview panel coming soon."),
+    "Generate 3D property volumes": _resolve("render_generate_volumes", "3D volumes generator coming soon."),
+    "PVT (Black-Oil)": _resolve("render_pvt_black_oil", "PVT (Black-Oil) panel coming soon."),
+    "MSW Wellbore": _resolve("render_msw_wellbore", "MSW Wellbore panel coming soon."),
+    "RTA": _resolve("render_rta", "RTA panel coming soon."),
+    "Results": _resolve("render_results_panel", "Results panel coming soon."),
+    "3D Viewer": _resolve("render_3d_viewer", "3D Viewer coming soon."),
+    "Slice Viewer": _resolve("render_slice_viewer", "Slice Viewer coming soon."),
+    "QA / Material Balance": _resolve("render_qa_material_balance", "QA / Material Balance coming soon."),
+    "Economics": _resolve("render_economics", "Economics panel coming soon."),
+    "EUR vs Lateral Length": _resolve("render_eur_vs_lateral", "EUR vs Lateral Length coming soon."),
+    "Field Match (CSV)": _resolve("render_field_match_csv", "Field Match (CSV) coming soon."),
+    "Automated Match": _resolve("render_automated_match", "Automated Match coming soon."),
+    "Uncertainty & Monte Carlo": _resolve("render_uncertainty_monte_carlo", "Uncertainty & Monte Carlo coming soon."),
+    "Well Placement Optimization": _resolve("render_well_placement_optimization", "Well Placement Optimization coming soon."),
+    "User’s Manual": _resolve("render_users_manual", "User’s Manual coming soon."),
+    "Solver & Profiling": _resolve("render_solver_profiling", "Solver & Profiling coming soon."),
+    "DFN Viewer": _resolve("render_dfn_viewer", "DFN Viewer coming soon."),
+}
+
+# 4) Radio + dispatcher. Keep this near the top-level (not inside another tab),
+#    and do NOT render any other panels below it (that would cause fall-through).
+# ---- LEFT MENU ----
+with st.sidebar:
+    selected = st.radio(
+        "Navigation",
+        list(PAGES.keys()),
+        index=0,
+        key="nav_main",
+        label_visibility="collapsed",
+    )
+
+# ---- DISPATCH ----
+# Do not put other rendering below this line unless you intend it to show for all tabs.
+page_fn = PAGES.get(selected, render_setup_preview)
+page_fn()
+
+
+# Call the selected page renderer
+PAGES[selected]()
+
+
+# ---------------------------------------------------------------------------
 # Optional safety nets (helpers only)
 #   - harmless if your project already defines these elsewhere
 #   - keeps Cloud hot-reload / module order from biting you
@@ -339,39 +435,52 @@ except Exception:
     _ctr = None  # numeric cumulative optional
 
 def arps_rate(qi: float, Di: float, b: float, t) -> _np.ndarray:
-    """Robust Arps rate with exponential fallback and safe base clamp."""
+    """Robust Arps rate with exponential fallback and safe power."""
     t  = _np.asarray(t, float)
     t  = _np.maximum(t, 0.0)
-    qi = float(qi); Di = float(Di); b = float(b)
+
+    qi = float(qi)
+    Di = float(Di)
+    b  = float(b)
+
+    # Exponential decline (b ~ 0)
     if abs(b) < 1e-12:
         return qi * _np.exp(-Di * t)
+
+    # Hyperbolic: q = qi * (1 + b*Di*t)^(-1/b)
     base = 1.0 + b * Di * t
+    # guard against NaN/Inf and non-positive base
+    base = _np.nan_to_num(base, nan=0.0, posinf=0.0, neginf=0.0)
     base = _np.maximum(base, 1e-12)
-    return qi * _np.power(base, -1.0 / b)
+
+    exponent = -1.0 / b
+    return qi * safe_power(base, exponent)
+
 
 def arps_cum(qi: float, Di: float, b: float, t) -> _np.ndarray:
-    """Robust Arps cumulative (analytic), exponential for b≈0."""
+    """Robust Arps cumulative (analytic), exponential fallback for b≈0."""
     t  = _np.asarray(t, float)
     t  = _np.maximum(t, 0.0)
-    qi = float(qi); Di = float(Di); b = float(b)
+
+    qi = float(qi)
+    Di = float(Di)
+    b  = float(b)
+
+    # Exponential cumulative: Np(t) = (qi/Di) * (1 - e^{-Di t})
     if abs(b) < 1e-12:
         Di_safe = max(Di, 1e-16)
         return (qi / Di_safe) * (1.0 - _np.exp(-Di * t))
+
+    # Hyperbolic cumulative: Np = (qi / ((1-b)*Di)) * [1 - (1 + b*Di*t)^{(1-b)/b}]
     base = 1.0 + b * Di * t
+    base = _np.nan_to_num(base, nan=0.0, posinf=0.0, neginf=0.0)
     base = _np.maximum(base, 1e-12)
+
     one_minus_b = 1.0 - b
     denom = max(one_minus_b * Di, 1e-16)
     exponent = (one_minus_b / b)
-    return (qi / denom) * (1.0 - _np.power(base, exponent))
 
-def arps_cum_numeric(qi: float, Di: float, b: float, t) -> _np.ndarray:
-    """Optional numeric cumulative via integration of robust rate."""
-    if _ctr is None:
-        raise RuntimeError("scipy.integrate.cumulative_trapezoid not available.")
-    t = _np.asarray(t, float)
-    t = _np.maximum(t, 0.0)
-    q = arps_rate(qi, Di, b, t)
-    return _ctr(q, t, initial=0.0)
+    return (qi / denom) * (1.0 - safe_power(base, exponent))
 
 # Gauge helper with subtitle + unit suffix
 def _render_gauge_v2(
