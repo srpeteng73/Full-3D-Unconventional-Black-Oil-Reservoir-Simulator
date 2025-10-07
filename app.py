@@ -135,9 +135,10 @@ with st.sidebar:
     )
 
 # ---- DISPATCH ----
-# Do not put other rendering below this line unless you intend it to show for all tabs.
-page_fn = PAGES.get(selected, render_setup_preview)
+# Use a lambda fallback so we don't reference an undefined function
+page_fn = PAGES.get(selected, lambda: st.info("Setup Preview panel coming soon."))
 page_fn()
+
 
 
 # Call the selected page renderer
