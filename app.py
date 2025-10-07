@@ -1,46 +1,48 @@
 """App entrypoint and UI wiring."""
+from __future__ import annotations  # MUST be first (only the docstring may be above this line)
 
-    # MUST be first (only the docstring may be above this line):
-    from __future__ import annotations
+from typing import Dict, Tuple, Union
 
-    from typing import Dict, Tuple, Union
+# Type alias used in sanity bounds code (Py 3.8/3.9 compatible)
+Bounds = Dict[str, Union[Tuple[float, float], float]]
 
-    # Type alias used in sanity bounds code (Py 3.8/3.9 compatible)
-    Bounds = Dict[str, Union[Tuple[float, float], float]]
+# -----------------------------------------------------------------------------
+# Imports
+# -----------------------------------------------------------------------------
+# stdlib
+import time
+import warnings  # trap analytical power warnings for Arps
 
-    ## ---------------------------------------------------------------------------
-    # Imports
-    # ---------------------------------------------------------------------------
-    # stdlib
-    import time
-    import warnings  # trap analytical power warnings for Arps
-    # third-party
-    import numpy as np
-    import numpy as _np  # underscore alias used by some helper snippets
-    import numpy_financial as npf
-    import pandas as pd
-    import plotly.express as px
-    import plotly.graph_objects as go
-    import plotly.io as pio
-    from plotly.subplots import make_subplots
-    import streamlit as st
-    from scipy import stats
-    from scipy.integrate import cumulative_trapezoid  # sometimes used directly
-    from scipy.integrate import cumulative_trapezoid as _ctr  # helper alias
-    from scipy.interpolate import interp1d
-    from scipy.optimize import differential_evolution
-    # local modules
-    from core.full3d import simulate
-    from engines.fast import fallback_fast_solver  # used in preview & fallbacks
+# third-party
+import numpy as np
+import numpy as _np  # underscore alias used by some helper snippets
+import numpy_financial as npf
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.subplots import make_subplots
+import streamlit as st
+from scipy import stats
+from scipy.integrate import cumulative_trapezoid  # sometimes used directly
+from scipy.integrate import cumulative_trapezoid as _ctr  # helper alias
+from scipy.interpolate import interp1d
+from scipy.optimize import differential_evolution
 
-    # utils: hot-reload so edits to _render_gauge are picked up on reruns
-    try:
-        import utils
-        from importlib import reload as _reload
-        _reload(utils)  # ensure we’re using the latest utils during Streamlit reruns
-    except Exception:
-        utils = None  # utils may not exist in some environments; keep app running
-    # Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top).
+# local modules
+from core.full3d import simulate
+from engines.fast import fallback_fast_solver  # used in preview & fallbacks
+
+# utils: hot-reload so edits to _render_gauge are picked up on reruns
+try:
+    import utils
+    from importlib import reload as _reload
+    _reload(utils)  # ensure we’re using the latest utils during Streamlit reruns
+except Exception:
+    utils = None  # utils may not exist in some environments; keep app running
+
+# Forcing a redeploy on Streamlit Cloud (keep this comment, not at file top).
+
 
     # ---------------------------------------------------------------------------
     # Brand colors (define once, globally)
