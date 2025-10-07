@@ -2137,6 +2137,7 @@ def _recovery_to_date_pct(
 
     return oil_rf, gas_rf
 # >>> REPLACE EVERYTHING from your current def _render_gauge_v2(...) down to its return with THIS EXACT BLOCK:
+
 def _render_gauge_v2(
     title: str,
     value: float,
@@ -2145,13 +2146,11 @@ def _render_gauge_v2(
     unit_suffix: str = "",
     subtitle: str | None = None,
 ):
-    """
-    Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
-    Requires: go (plotly.graph_objects as go) and your gauge_max(...) helper.
-    """
+    # Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
+    # Requires: go (plotly.graph_objects as go) and your gauge_max(...) helper.
     import plotly.graph_objects as go
 
-    # normalize range and compute a reasonable vmax for the gauge
+    # Normalize inputs and compute a reasonable vmax
     lo, hi = (minmax if isinstance(minmax, (list, tuple)) and len(minmax) == 2 else (0.0, 1.0))
     vmax = gauge_max(value, hi, floor=max(lo, 0.1), safety=0.15)
 
