@@ -126,18 +126,73 @@ PAGES = {
 #    and do NOT render any other panels below it (that would cause fall-through).
 # ---- LEFT MENU ----
 with st.sidebar:
-    selected = st.radio(
-        "Navigation",
-        list(PAGES.keys()),
-        index=0,
-        key="nav_main",
-        label_visibility="collapsed",
-    )
+    selected = st.radio("Navigation", NAV_ITEMS, index=0, key="nav_main", label_visibility="collapsed")
+
+# --- Minimal page renderers to keep routing clean ---
+def render_setup_preview():
+    st.header("Setup Preview")
+    # TODO: move your existing setup preview section into this function
+
+def render_generate_volumes():
+    st.header("Generate 3D property volumes")
+
+def render_pvt_black_oil():
+    st.header("PVT (Black-Oil)")
+
+def render_msw_wellbore():
+    st.header("MSW Wellbore")
+
+def render_rta():
+    st.header("RTA")
+
+def render_results_panel():
+    st.header("Simulation Results")
+    # TODO: move your current "Simulation Results" code into this function
+
+def render_3d_viewer():
+    st.header("3D Viewer")
+    # TODO: place 3D visualization here; for now keeps the tab switching clean
+
+def render_slice_viewer():
+    st.header("Slice Viewer")
+
+def render_qa_material_balance():
+    st.header("QA / Material Balance")
+
+def render_economics():
+    st.header("Economics")
+
+def render_eur_vs_lateral():
+    st.header("EUR vs Lateral Length")
+
+def render_field_match_csv():
+    st.header("Field Match (CSV)")
+
+def render_automated_match():
+    st.header("Automated Match")
+
+def render_uncertainty_monte_carlo():
+    st.header("Uncertainty & Monte Carlo")
+
+def render_well_placement_optimization():
+    st.header("Well Placement Optimization")
+
+def render_users_manual():
+    st.header("User’s Manual")
+
+def render_solver_profiling():
+    st.header("Solver & Profiling")
+
+def render_dfn_viewer():
+    st.header("DFN Viewer")
+
+
 
 # ---- DISPATCH ----
-# Use a lambda fallback so we don't reference an undefined function
-page_fn = PAGES.get(selected, lambda: st.info("Setup Preview panel coming soon."))
+# Safe default that doesn't reference an undefined function
+page_fn = PAGES.get(selected, lambda: render_setup_preview() if 'render_setup_preview' in globals() else st.info("Setup Preview"))
 page_fn()
+
 
 
 
