@@ -2138,12 +2138,13 @@ def _recovery_to_date_pct(
     return oil_rf, gas_rf
 
 
-def _render_gauge(
+def _render_gauge_v2(
     title: str,
     value: float,
-    minmax: tuple[float, float],
-    color: str,
-    subtitle: str = "",
+    minmax=(0.0, 1.0),
+    fmt: str = "{:,.2f}",
+    unit_suffix: str = "",
+    subtitle: str | None = None,
 ):
     """
     Build a Plotly gauge+number figure with an optional subtitle (small text under the title).
@@ -2156,6 +2157,8 @@ def _render_gauge(
         f"<br><span style='font-size:12px;color:#666'>{subtitle}</span>"
         if subtitle else ""
     )
+
+    # ...rest of your function...
 
     fig = go.Figure(
         go.Indicator(
