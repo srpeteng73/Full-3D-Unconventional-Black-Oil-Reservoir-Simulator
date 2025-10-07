@@ -252,24 +252,29 @@ OIL_GREEN = "#2CA02C"
 
 
 
-    # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
-import numpy as np            #  ← delete this line (and any other imports here)
-import numpy as _np           #  ← delete if present
 
-    def safe_power(x, p):
-        """Robust power that won't emit warnings or create complex numbers."""
-        x = np.asarray(x, dtype=float)
-        # replace NaN/Inf with 0
-        x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        # negative base + non-integer exponent -> clamp to 0 to avoid complex domain
-        if not float(p).is_integer():
-            x = np.maximum(x, 0.0)
-        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
-            y = np.power(x, p)
-        # clean any residual nan/inf
-        return np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+def safe_power(x, p):
+    """Robust power that won't emit warnings or create complex numbers."""
+    x = np.asarray(x, dtype=float)
+    # replace NaN/Inf with 0
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
+    # negative base + non-integer exponent -> clamp to 0 to avoid complex domain
+    try:
+        non_integer_exp = not float(p).is_integer()
+    except Exception:
+        non_integer_exp = False
+    if non_integer_exp:
+        x = np.maximum(x, 0.0)
+
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        y = np.power(x, p)
+
+    # clean any residual nan/inf
+    return np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
 
     # ---------------------------------------------------------------------------
     # Navigation (Tabs / Sections) — place after imports & constants
