@@ -554,8 +554,8 @@ def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
             return abs(y_heel_ft - fault_y) > 2 * state['dy']
     return True
 
-
-st.set_page_config(page_title="3D Unconventional / Black-Oil Reservoir Simulator", layout="wide")
+# near the top of app.py (once)
+st.set_page_config(page_title="Reservoir Simulator", layout="wide")
 
 # ------------------------ Defaults ------------------------
 _setdefault("apply_preset_payload", None)
