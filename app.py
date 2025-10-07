@@ -1,15 +1,15 @@
 """App entrypoint and UI wiring."""
-from __future__ import annotations
+from __future__ import annotations  # optional on Py 3.11+, but fine to keep
 
 # ---- typing & aliases
 from typing import Dict, Tuple, Union
-Bounds = Dict[str, Union[Tuple[float, float], float]]
+Bounds = Dict[str, Union[Tuple[float, float], float]]  # optional if used
 
 # ---- stdlib
 import time
 import warnings
 
-# ---- third-party
+# ---- third-party (import only what you use)
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -23,7 +23,7 @@ from scipy.integrate import cumulative_trapezoid as _ctr
 from scipy.interpolate import interp1d
 from scipy.optimize import differential_evolution
 
-# ---- local modules (direct imports)
+# ---- local modules (required if you call them)
 from core.full3d import simulate
 from engines.fast import fallback_fast_solver
 
@@ -33,9 +33,9 @@ try:
     from importlib import reload as _reload
     _reload(utils)
 except Exception:
-    utils = None  # <-- no trailing period
+    utils = None  # no trailing period
 
-# ---- constants (column 0)
+# ---- constants (optional, keep if used)
 GAS_RED     = "#D62728"
 OIL_GREEN   = "#2CA02C"
 WATER_BLUE  = "#1F77B4"
