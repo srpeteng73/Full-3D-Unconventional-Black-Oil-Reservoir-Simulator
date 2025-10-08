@@ -1770,6 +1770,10 @@ selected_tab = st.sidebar.radio(
 
 # ======== Results tab ========
 if selected_tab == "Results":
+    sim = st.session_state.get("sim") if "sim" in st.session_state else None
+    if not isinstance(sim, dict):
+        st.info("Click **Run simulation** to compute and display the full 3D results.")
+        sim = {}
     # --- EXPECTS 'sim' already computed in run_simulation_engine and returned above ---
     t  = sim.get("t")
     qg = sim.get("qg")
