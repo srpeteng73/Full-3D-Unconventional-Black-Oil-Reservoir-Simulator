@@ -59,6 +59,14 @@ def safe_power(x, p):
 # ======================================================================
 # All page/UI code lives inside this function (prevents dangling-elif)
 # ======================================================================
+def render_users_manual():
+    st.markdown(r"""
+    ...your manual markdown...
+    """)  # end users manual
+
+
+
+
 def render_app() -> None:
     st.set_page_config(page_title="3D Unconventional & Black-Oil Simulator", layout="wide")
 
@@ -80,25 +88,11 @@ def render_app() -> None:
             return False
         return True
 
-   # ---- PAGES (indentation of elif must match the if below) ----
+      # ---- PAGES ----
 if selected_tab == "Overview":
     st.title("Full 3D Unconventional & Black-Oil Reservoir Simulator")
     render_users_manual()
 
-<!-- BEGIN OVERVIEW MARKDOWN -->
-
-### 1. Introduction
-(paste all of your existing Overview markdown here)
-
-### 3. Key Tabs Explained
-(your “Results / Economics / Field Match & Automated Match / 3D & Slice Viewers” text)
-
-### 4. Input Validation
-- Automated Match warns if any min bound > max bound.
-- Results sanity checks enforce realistic EURs for the selected play.
-
-<!-- END OVERVIEW MARKDOWN -->
-        """)  # end Overview markdown
 
     elif selected_tab == "Inputs":
         st.header("Model Inputs")
@@ -113,19 +107,21 @@ if selected_tab == "Overview":
 
     elif selected_tab == "Simulation":
         st.header("Run Simulation")
-        if not _require_inputs():
+        if "inputs" not in st.session_state:
+            st.info("No inputs found. Go to **Inputs** to configure parameters.")
             st.stop()
 
         if st.button("Run Simulation", type="primary"):
             inputs = st.session_state.inputs
             with st.spinner("Running simulation..."):
-                results = simulate(inputs)  # replace with your real call if different
+                results = simulate(inputs)  # adjust to your real call
             st.session_state.results = results
             st.success("Simulation complete. See **Results** tab.")
 
     elif selected_tab == "Results":
         st.header("Results")
-        if not _require_results():
+        if "results" not in st.session_state:
+            st.info("No results yet. Run a simulation on the **Simulation** page.")
             st.stop()
 
         results = st.session_state.results
@@ -141,7 +137,8 @@ if selected_tab == "Overview":
         st.header("Solver & Profiling")
         steps = st.slider("Benchmark steps", 10, 200, 50, 10)
         if st.button("Run tiny benchmark"):
-            if not _require_inputs():
+            if "inputs" not in st.session_state:
+                st.info("No inputs found. Go to **Inputs** to configure parameters.")
                 st.stop()
             inputs = st.session_state.inputs
             short_inputs = dict(inputs)
@@ -154,9 +151,9 @@ if selected_tab == "Overview":
                 timings["engines.fast.fallback_fast_solver"] = f"error: {e}"
             st.json(timings)
 
-# ---- Streamlit entrypoint
 if __name__ == "__main__":
     render_app()
+
 # ---------------------------------------------------------------------------
 # Brand colors (define once, globally)
 # ---------------------------------------------------------------------------
@@ -3639,44 +3636,28 @@ def safe_power(x, p):
         st.header("User’s Manual")
         st.markdown("---")
         st.markdown("""
-   
-   def render_users_manual():
-        st.markdown(
-            """
-    ### 1. Introduction
-    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
-
-    ### Quick Start
-    1. **Set Parameters:** Choose play, well geometry, and fluid model.
-    2. **Run Simulation:** Click **Run** to produce time-series rates and pressures.
-    3. **Generate Geology:** Go to the **Generate 3D property volumes** tab and click the large button. This creates the 3D permeability and porosity grids required for the simulation.
-    4. **View Results:** Use **Results**, **3D Viewer**, and **Slice Viewer** to inspect outputs.
-            """
-        )
-
-
-
-   
+      
 def render_users_manual():
     st.markdown(r"""
 ### 1. Introduction
 Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
 
 ### 2. Quick Start Guide
-1. **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
-2. **Apply Preset:** Click **Apply Preset**. This loads typical reservoir, fluid, and completion parameters into the sidebar.
-3. **Generate Geology:** Open **Generate 3D property volumes** and click the large button to create 3D permeability/porosity grids.
-4. **Run Simulation:** Go to **Results** and click **Run simulation**.
-5. **Analyze:** Review EUR gauges, rate–time plots, and cumulative production charts.
-6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
+1. Select a Play…
+2. Apply Preset…
+3. Generate Geology…
+4. Run Simulation…
+5. Analyze…
+6. Iterate…
 
 ### 3. Key Tabs Explained
-(keep your existing sections here…)
+(put your long text here, using plain ASCII quotes " like these)
 
 ### 4. Input Validation
-- **Automated Match:** warns if any min bound > max bound.
-- **Results:** sanity checks enforce realistic EURs for the selected play; physically inconsistent results are flagged or withheld.
+- Automated Match warns if any min bound > max bound.
+- Results sanity checks enforce realistic EURs…
     """)  # end users manual
+
 
     #### Results
     Primary dashboard for simulation outputs (EURs, rate-time, cumulative). Simulation runs only when you click **Run simulation** on this tab.
