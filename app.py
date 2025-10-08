@@ -2842,4 +2842,4 @@ elif selected_tab == "DFN Viewer":
             This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
             - Each **red line** represents an individual natural fracture defined in the input file.
             - Use this for QC to verify locations/orientations inside the reservoir model.
-            """). 
+            """)
