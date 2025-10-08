@@ -65,7 +65,6 @@ def _cum_trapz_days(t_days, y_per_day):
     y = _np.nan_to_num(_np.asarray(y_per_day, float), nan=0.0)
     return _ctr(y, t, initial=0.0)  # returns same length as t
 
-
 def _apply_economic_cutoffs(t, y, *, cutoff_days=None, min_rate=0.0):
     if y is None:
         return _np.asarray(t, float), None
@@ -81,7 +80,6 @@ def _apply_economic_cutoffs(t, y, *, cutoff_days=None, min_rate=0.0):
             mask[first:] = False
     return t[mask], y[mask]
 
-
 def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     """
     Compute cumulative volumes and EURs from rate vectors.
@@ -91,6 +89,11 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     qw : water rate, STB/d
     Returns dict with cum arrays and EURs (gas in BCF, oil/water in MMbbl).
     """
+    import numpy as np
+    from scipy.integrate import cumulative_trapezoid
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
     out = {}
 
     # Coerce & guard
@@ -133,17 +136,6 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
         out["eur_gor_scfstb"] = float(gas_scf / oil_stb)
 
     return out
-
-
-def _sanity_bounds_for_play(play_name: str):
-    s = (play_name or "").lower()
-    # Default (conservative, oil-window-ish)
-    bounds = dict(oil_mmbo=(0.3, 1.5), gas_bcf=(0.3, 3.0), max_eur_gor_scfstb=2000.0)
-    if "midland" in s:
-        # Restore realistic Midland oil-window ranges
-        bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
-    return bounds
-
 
 def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: str):
     """
@@ -205,6 +197,8 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
     return sim_like
 
 
+
+
 def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
@@ -231,13 +225,11 @@ def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
 
     return ok, " ".join(msgs) if msgs else "OK"
 
-
 def gauge_max(value, typical_hi, floor=0.1, safety=0.15):
     if _np.isnan(value) or value <= 0:
         return max(floor, typical_hi)
     # 95th-percentile-ish: typical_hi plus margin vs. observed value
-    return max(floor, typical_hi * (1.0 + safety), value * (1.25))
-
+    return max(floor, typical_hi*(1.0+safety), value*(1.25))
 
 def fmt_qty(v, unit):
     if unit == "BCF":
@@ -248,10 +240,11 @@ def fmt_qty(v, unit):
 # ===============================================================================
 
 
-# ---------------------- Plot Style Pack ----------------------
+# ---------------------- Plot Style Pack (Gas=RED, Oil=GREEN) ----------------------
 COLOR_GAS = COLOR_GAS if "COLOR_GAS" in globals() else "#1f77b4"
 COLOR_OIL = COLOR_OIL if "COLOR_OIL" in globals() else "#ff7f0e"
 COLOR_WATER = COLOR_WATER if "COLOR_WATER" in globals() else "#2ca02c"
+
 
 # Clean global template
 pio.templates.default = "plotly_white"
@@ -271,7 +264,7 @@ def _style_fig(fig, title, xlab, ylab_left, ylab_right=None):
 
 
 def rate_chart(t, qg=None, qo=None, qw=None):
-    """Dual-axis rate chart: Gas left, Liquids right."""
+    """Dual-axis rate chart: Gas left (red), Liquids right (green/blue)."""
     fig = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
     if qg is not None:
         fig.add_trace(
@@ -312,18 +305,15 @@ def _setdefault(k, v):
     if k not in st.session_state:
         st.session_state[k] = v
 
-
 def _on_play_change():
     # Clear prior results so the UI cannot show stale EURs
     st.session_state.sim = None
-
 
 def _safe_rerun():
     if hasattr(st, "rerun"):
         st.rerun()
     elif hasattr(st, "experimental_rerun"):
         st.experimental_rerun()
-
 
 def _sim_signature_from_state():
     """
@@ -333,18 +323,17 @@ def _sim_signature_from_state():
     s = st.session_state
     play = s.get("play_sel", "")
     engine = s.get("engine_type", "")
-    ctrl = s.get("pad_ctrl", "BHP")
-    bhp = float(s.get("pad_bhp_psi", 0.0))
-    r_m = float(s.get("pad_rate_mscfd", 0.0))
-    r_o = float(s.get("pad_rate_stbd", 0.0))
-    pb = float(s.get("pb_psi", 0.0))
-    rs = float(s.get("Rs_pb_scf_stb", 0.0))
-    bo = float(s.get("Bo_pb_rb_stb", 1.0))
+    ctrl  = s.get("pad_ctrl", "BHP")
+    bhp   = float(s.get("pad_bhp_psi", 0.0))
+    r_m   = float(s.get("pad_rate_mscfd", 0.0))
+    r_o   = float(s.get("pad_rate_stbd", 0.0))
+    pb    = float(s.get("pb_psi", 0.0))
+    rs    = float(s.get("Rs_pb_scf_stb", 0.0))
+    bo    = float(s.get("Bo_pb_rb_stb", 1.0))
     pinit = float(s.get("p_init_psi", 0.0))
     key = (play, engine, ctrl, bhp, r_m, r_o, pb, rs, bo, pinit)
     return hash(key)
-
-
+    
 def is_heel_location_valid(x_heel_ft, y_heel_ft, state):
     """Simple feasibility check for well placement (stay inside model and avoid fault strip)."""
     x_max = state['nx'] * state['dx'] - state['L_ft']
@@ -378,6 +367,7 @@ ENGINE_TYPES = [
 # Model Type options (must match the sidebar selectbox exactly)
 VALID_MODEL_TYPES = ["Unconventional Reservoir", "Black Oil Reservoir"]
 _setdefault("sim_mode", VALID_MODEL_TYPES[0])  # Default to the first allowed value
+_setdefault("sim_mode", VALID_MODEL_TYPES[0])
 _setdefault("dfn_segments", None)
 _setdefault("use_dfn_sink", True)
 _setdefault("use_auto_dfn", True)
@@ -637,7 +627,6 @@ PLAY_LIST = list(PLAY_PRESETS.keys())
 # Create a single 'state' dictionary from session_state for cleaner access
 # This makes the variable available globally for all tabs to use.
 state = {k: st.session_state.get(k, v) for k, v in defaults.items()}
-
 #### Part 2: Core Logic, Simulation Engine, and Sidebar UI ####
 
 # ------------------------ HELPER FUNCTIONS ------------------------
@@ -776,7 +765,7 @@ def eur_gauges(EUR_g_BCF, EUR_o_MMBO):
                     'bar': {'color': color, 'thickness': 0.28},
                     'bgcolor': 'white',
                     'borderwidth': 1,
-                    'bordercolor': '#cfe0ff',
+                    'bordercolor': '#cfe0ff',  # moved inside gauge:
                     'steps': [
                         {'range': [0, 0.6 * vmax], 'color': 'rgba(0,0,0,0.04)'},
                         {'range': [0.6 * vmax, 0.85 * vmax], 'color': 'rgba(0,0,0,0.07)'}
@@ -812,7 +801,6 @@ def semi_log_layout(title, xaxis="Day (log scale)", yaxis="Rate"):
 def ensure_3d(arr2d_or_3d):
     a = np.asarray(arr2d_or_3d)
     return a[None, ...] if a.ndim == 2 else a
-
 
 def get_k_slice(A, k):
     A3 = ensure_3d(A)
@@ -863,7 +851,9 @@ def _get_sim_preview():
     rng_preview = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)) + 999)
     try:
         # --- SAFETY NET FOR PREVIEW ---
-        # We explicitly watch for the classic Arps power failure.
+        # We explicitly watch for the classic Arps power failure:
+        # RuntimeWarning: invalid value encountered in power
+        # That happens if (1 + b*D*t) becomes negative and is raised to 1/b.
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always", RuntimeWarning)
             result = fallback_fast_solver(tmp, rng_preview)
@@ -880,11 +870,12 @@ def _get_sim_preview():
         st.exception(e)
         # Return a dummy structure to prevent crashing the UI layout
         return {'t': [0], 'qg': [0], 'qo': [0], 'EUR_g_BCF': 0, 'EUR_o_MMBO': 0}
-
 # ------------------------ Arps/decline safety helpers (ANALYTICAL ONLY) ------------------------
 def _sanitize_decline_params(state_like: dict) -> dict:
     """
-    Clamp 'b' into a safe (0,1) interval and force any negative declines positive.
+    Human note: Some builds feed different names for hyperbolic parameters.
+    We defensively scan keys for anything that LOOKS like a hyperbolic 'b' or a decline rate,
+    clamp 'b' into a safe (0,1) interval, and force any negative declines positive.
     This keeps (1 + b*D*t) from ever going negative during power().
     """
     SAFE_B_MIN, SAFE_B_MAX = 1.0e-6, 0.95
@@ -904,11 +895,14 @@ def _sanitize_decline_params(state_like: dict) -> dict:
 
     for k in list(state_like.keys()):
         lk = k.lower()
+        # Common patterns we've seen across fast proxies
         if lk in ("b", "b_oil", "b_gas", "b_liq", "b_decline", "b_hyp", "bhyp", "bexp"):
             state_like[k] = _clip_b(state_like[k])
+        # Decline rates frequently show up as D, Di, D1, decline_*, etc.
         if lk in ("d", "di", "d1", "decline", "decline_rate") or ("decline" in lk):
             state_like[k] = _abs_decline(state_like[k])
 
+    # Optional: mark that we sanitized to help debug later
     state_like["__analytical_sanitized__"] = True
     return state_like
 
@@ -940,34 +934,30 @@ def _nan_guard_result(result: dict) -> dict:
             arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
             out[key] = arr
     return out
-
 # -----------------------------------------------------------------------------------------------
 
 def generate_property_volumes(state):
     """Generates kx, ky, and phi volumes based on sidebar settings and stores them in session_state."""
     rng = np.random.default_rng(int(st.session_state.rng_seed))
     nz, ny, nx = int(state["nz"]), int(state["ny"]), int(state["nx"])
+    # Use the facies style from the state to generate the base 2D maps
     style = state.get("facies_style", "Continuous (Gaussian)")
     if "Continuous" in style:
         kx_mid = 0.05 + state["k_stdev"] * rng.standard_normal((ny, nx))
         ky_mid = (0.05 / state["anis_kxky"]) + state["k_stdev"] * rng.standard_normal((ny, nx))
         phi_mid = 0.10 + state["phi_stdev"] * rng.standard_normal((ny, nx))
     elif "Speckled" in style:
+        # High variance using log-normal distribution for more contrast
         kx_mid = np.exp(rng.normal(np.log(0.05), 1.5 + state["k_stdev"]*5, (ny, nx)))
         ky_mid = kx_mid / state["anis_kxky"]
         phi_mid = np.exp(rng.normal(np.log(0.10), 0.8 + state["phi_stdev"]*3, (ny, nx)))
     elif "Layered" in style:
+        # Vertical bands (variation primarily in y-direction)
         base_profile_k = 0.05 + state["k_stdev"] * rng.standard_normal(ny)
         kx_mid = np.tile(base_profile_k[:, None], (1, nx))
         ky_mid = kx_mid / state["anis_kxky"]
         base_profile_phi = 0.10 + state["phi_stdev"] * rng.standard_normal(ny)
         phi_mid = np.tile(base_profile_phi[:, None], (1, nx))
-    else:
-        # fallback to continuous if an unexpected style appears
-        kx_mid = 0.05 + state["k_stdev"] * rng.standard_normal((ny, nx))
-        ky_mid = (0.05 / state["anis_kxky"]) + state["k_stdev"] * rng.standard_normal((ny, nx))
-        phi_mid = 0.10 + state["phi_stdev"] * rng.standard_normal((ny, nx))
-
     # Apply a slight vertical trend and store in session_state
     kz_scale = np.linspace(0.95, 1.05, nz)[:, None, None]
     st.session_state.kx = np.clip(kx_mid[None, ...] * kz_scale, 1e-4, 5.0)
@@ -976,16 +966,24 @@ def generate_property_volumes(state):
     st.success("Successfully generated 3D property volumes!")
 
 
+def _sanity_bounds_for_play(play_name: str):
+    s = (play_name or "").lower()
+    # Default (conservative, oil-window-ish)
+    bounds = dict(oil_mmbo=(0.3, 1.5), gas_bcf=(0.3, 3.0), max_eur_gor_scfstb=2000.0)
+    if "midland" in s:
+        # Restore realistic Midland oil-window ranges
+        bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
+    return bounds
 def run_simulation_engine(state):
-    """
-    Clean, unified simulation entrypoint.
-    - Validates inputs
-    - Chooses Analytical vs. Full 3D engine
-    - Guards against NaNs
-    - Computes cumulatives & EURs
-    - Applies soft bounds for Analytical
-    - Stamps runtime & signature
-    """
+    out: dict = {}
+
+    import warnings
+    import time
+    import numpy as np
+    from scipy.integrate import cumulative_trapezoid
+    from core.full3d import simulate
+    from engines.fast import fallback_fast_solver
+
     t0 = time.time()
 
     # --- FINAL ROBUSTNESS CHECK FOR INPUTS ---
@@ -994,7 +992,29 @@ def run_simulation_engine(state):
             "FATAL INPUT ERROR: 'Stage spacing (ft)' must be a positive number. "
             f"Current value: {state.get('stage_spacing_ft')}"
         )
-        return None
+
+    # --- pull arrays from engine output ---
+    t = (out or {}).get('t')
+    qg = out.get("qg")
+    qo = out.get("qo")
+    qw = out.get("qw")
+
+    # Final guard so downstream integrals/UI never see NaN/Inf
+    import numpy as np
+    t  = np.nan_to_num(np.asarray(t,  float), nan=0.0, posinf=0.0, neginf=0.0)
+    qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
+    qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
+
+    # --- Authoritative cumulative & EURs ---
+    sim = dict(out)
+    sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
+
+    # --- Apply play bounds for Analytical (soft clamp for UI realism) ---
+    current_play = st.session_state.get("play_name", st.session_state.get("shale_play", ""))
+    engine_name  = st.session_state.get("engine_type", "")
+    sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
+
 
     if state.get('L_ft', 0) <= 0:
         st.error(
@@ -1002,17 +1022,25 @@ def run_simulation_engine(state):
             f"Current value: {state.get('L_ft')}"
         )
         return None
+    # --- END OF CHECK ---
 
+    # --- choose engine & run ---
     chosen_engine = st.session_state.get("engine_type", "")
     out = None
 
     try:
         if "Analytical" in chosen_engine:
+            # Call the fast analytical solver
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
+
+            # --- CRASH-PROOF ANALYTICAL CALL PATH ---
+            # 1) Run once while listening for the "invalid value encountered in power" warning
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always", RuntimeWarning)
                 out = fallback_fast_solver(state, rng)
                 bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
+
+                # 2) If we saw the classic Arps failure OR the output looks NaN-ish, sanitize & retry
                 if bad_power or _looks_nan_like(out):
                     st.info(
                         "Analytical model encountered an unstable hyperbolic power term. "
@@ -1020,9 +1048,11 @@ def run_simulation_engine(state):
                     )
                     safe_state = _sanitize_decline_params(state.copy())
                     out = fallback_fast_solver(safe_state, rng)
+
+                # 3) Guard against any remaining NaNs so plotting & EUR calc don't crash
                 out = _nan_guard_result(out)
         else:
-            # Full 3D implicit simulator
+            # Call the full 3D implicit simulator
             inputs = {
                 "engine": "implicit",
                 "nx": int(state.get("nx", 20)),
@@ -1060,33 +1090,20 @@ def run_simulation_engine(state):
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
         st.exception(e)
         return None
-
-    if not isinstance(out, dict):
-        st.error("Engine returned an unexpected result.")
-        return None
-
-    # Extract & guard arrays for downstream plotting/EUR calc
-    t = out.get("t")
-    qg = out.get("qg")
-    qo = out.get("qo")
-    qw = out.get("qw")
-
-    t = np.nan_to_num(np.asarray(t, float), nan=0.0, posinf=0.0, neginf=0.0)
-    qg = None if qg is None else np.nan_to_num(np.asarray(qg, float), nan=0.0, posinf=0.0, neginf=0.0)
-    qo = None if qo is None else np.nan_to_num(np.asarray(qo, float), nan=0.0, posinf=0.0, neginf=0.0)
-    qw = None if qw is None else np.nan_to_num(np.asarray(qw, float), nan=0.0, posinf=0.0, neginf=0.0)
-
-    # Build sim dict and compute EURs/cumulatives
+   
+    # --- Authoritative cumulative & EURs + soft bounds for Analytical ---
+    # Start from engine output
     sim = dict(out)
+
+    # Make sure the cleaned arrays are the ones used downstream
     sim["t"], sim["qg"], sim["qo"], sim["qw"] = t, qg, qo, qw
+
+    # Compute cumulative volumes and EURs (gas in BCF, oil/water in MMbbl)
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
 
     # Soft clamp ONLY for Analytical engine to keep the UI realistic during proxy debugging
-    current_play = st.session_state.get(
-        "play_name",
-        st.session_state.get("shale_play", st.session_state.get("play_sel", ""))
-    )
-    engine_name = st.session_state.get("engine_type", "")
+    current_play = st.session_state.get("play_name", st.session_state.get("shale_play", st.session_state.get("play_sel", "")))
+    engine_name  = st.session_state.get("engine_type", "")
     sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
 
     # Compatibility keys (older UI expects these exact names)
@@ -1097,14 +1114,21 @@ def run_simulation_engine(state):
     if "eur_water_MMBL" in sim:
         sim["EUR_w_MMBL"] = sim["eur_water_MMBL"]
 
-    # Runtime & signature
-    sim["runtime_s"] = float(sim.get("runtime_s", time.time() - t0))
+    # Preserve/compute runtime if not set yet
+    if "runtime_s" not in sim:
+        sim["runtime_s"] = time.time() - t0
+
+    # Add/refresh simulation signature so Results tab can detect stale outputs
     sim["_sim_signature"] = _sim_signature_from_state()
+
+    # This replaces any ad-hoc EUR calcs elsewhere — return the enriched result now
     return sim
 
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
+    
+    # --- All controls are now correctly inside the sidebar ---
 
     with st.expander("Engine & Presets", expanded=True):
         engine_type_ui = st.selectbox(
@@ -1131,7 +1155,7 @@ with st.sidebar:
             PLAY_LIST,
             index=_default_idx,
             key="play_sel",
-            label_visibility="visible",
+            label_visibility="visible", # Use a visible label in the sidebar
             on_change=_on_play_change,
         )
 
@@ -1153,38 +1177,25 @@ with st.sidebar:
     with st.expander("Grid & Heterogeneity", expanded=False):
         st.markdown("#### Grid (ft)")
         c1, c2, c3 = st.columns(3)
-        with c1:
-            st.number_input("nx", 1, 500, key="nx")
-        with c2:
-            st.number_input("ny", 1, 500, key="ny")
-        with c3:
-            st.number_input("nz", 1, 200, key="nz")
+        with c1: st.number_input("nx", 1, 500, key="nx")
+        with c2: st.number_input("ny", 1, 500, key="ny")
+        with c3: st.number_input("nz", 1, 200, key="nz")
         c1, c2, c3 = st.columns(3)
-        with c1:
-            st.number_input("dx", step=1.0, key="dx")
-        with c2:
-            st.number_input("dy", step=1.0, key="dy")
-        with c3:
-            st.number_input("dz", step=1.0, key="dz")
+        with c1: st.number_input("dx", step=1.0, key="dx")
+        with c2: st.number_input("dy", step=1.0, key="dy")
+        with c3: st.number_input("dz", step=1.0, key="dz")
 
         st.markdown("#### Heterogeneity & Anisotropy")
-        st.selectbox(
-            "Facies style",
-            ["Continuous (Gaussian)", "Speckled (high-variance)", "Layered (vertical bands)"],
-            key="facies_style",
-        )
-        st.slider("k stdev", 0.0, 0.20, float(st.session_state.k_stdev), 0.01, key="k_stdev",
-                  help="Standard deviation for permeability field generation.")
-        st.slider("ϕ stdev", 0.0, 0.20, float(st.session_state.phi_stdev), 0.01, key="phi_stdev",
-                  help="Standard deviation for porosity field generation.")
+        st.selectbox("Facies style", ["Continuous (Gaussian)", "Speckled (high-variance)", "Layered (vertical bands)"], key="facies_style")
+        st.slider("k stdev", 0.0, 0.20, float(st.session_state.k_stdev), 0.01, key="k_stdev", help="Standard deviation for permeability field generation.")
+        st.slider("ϕ stdev", 0.0, 0.20, float(st.session_state.phi_stdev), 0.01, key="phi_stdev", help="Standard deviation for porosity field generation.")
         st.slider("Anisotropy kx/ky", 0.5, 3.0, float(st.session_state.anis_kxky), 0.05, key="anis_kxky")
 
     with st.expander("Faults", expanded=False):
         st.checkbox("Enable fault TMULT", value=bool(st.session_state.use_fault), key="use_fault")
         fault_plane_choice = st.selectbox("Fault plane", ["i-plane (vertical)", "j-plane (vertical)"], index=0, key="fault_plane")
         max_idx = int(st.session_state.nx) - 2 if 'i-plane' in fault_plane_choice else int(st.session_state.ny) - 2
-        if st.session_state.fault_index > max_idx:
-            st.session_state.fault_index = max_idx
+        if st.session_state.fault_index > max_idx: st.session_state.fault_index = max_idx
         st.number_input("Plane index", 1, max(1, max_idx), key="fault_index")
         st.number_input("Transmissibility multiplier", value=float(st.session_state.fault_tm), step=0.01, key="fault_tm")
 
@@ -1206,7 +1217,7 @@ with st.sidebar:
         st.number_input("Pad RATE (Mscf/d)", value=float(st.session_state.pad_rate_mscfd), step=1000.0, key="pad_rate_mscfd")
         st.selectbox("Outer boundary", ["Infinite-acting", "Constant-p"], key="outer_bc")
         st.number_input("Boundary pressure (psi)", value=float(st.session_state.p_outer_psi), step=10.0, key="p_outer_psi")
-
+    
     with st.expander("DFN (Discrete Fracture Network)", expanded=False):
         st.checkbox("Use DFN-driven sink in solver", value=bool(st.session_state.use_dfn_sink), key="use_dfn_sink")
         st.checkbox("Auto-generate DFN from stages", value=bool(st.session_state.use_auto_dfn), key="use_auto_dfn")
@@ -1219,8 +1230,7 @@ with st.sidebar:
                 if dfn_up:
                     st.session_state.dfn_segments = parse_dfn_csv(dfn_up)
                     st.success(f"Loaded {len(st.session_state.dfn_segments)} segments")
-                else:
-                    st.warning("Please choose a CSV")
+                else: st.warning("Please choose a CSV")
         with c2:
             if st.button("Generate DFN"):
                 segs = gen_auto_dfn_from_stages(
@@ -1242,12 +1252,11 @@ with st.sidebar:
         st.checkbox("Use Intel MKL", value=bool(st.session_state.use_mkl), key="use_mkl")
         st.checkbox("Use PyAMG solver", value=bool(st.session_state.use_pyamg), key="use_pyamg")
         st.checkbox("Use NVIDIA cuSPARSE", value=bool(st.session_state.use_cusparse), key="use_cusparse")
-
+        
     st.markdown("---")
     st.markdown("##### Developed by:")
     st.markdown("##### Omar Nur, Petroleum Engineer")
     st.markdown("---")
-
 #### Part 3: Main Application UI - Primary Workflow Tabs ####
 # --- Tab list ---
 tab_names = [
@@ -1263,7 +1272,7 @@ tab_names = [
     "Economics",
     "EUR vs Lateral Length",
     "Field Match (CSV)",
-    "Automated Match",  # <-- NEW TAB
+    "Automated Match", # <-- NEW TAB
     "Uncertainty & Monte Carlo",
     "Well Placement Optimization",
     "User’s Manual",
@@ -1458,64 +1467,50 @@ elif selected_tab == "Control Panel":
         "Geomech α (1/psi)": st.session_state.get("geo_alpha"),
     }
     st.write(summary)
-
+    
 elif selected_tab == "Generate 3D property volumes":
     st.header("Generate 3D Property Volumes (kx, ky, ϕ)")
     st.info("Use this tab to (re)generate φ/k grids based on sidebar parameters.")
-
+    
     if st.button("Generate New Property Volumes", use_container_width=True, type="primary"):
         generate_property_volumes(state)
-
+        
     st.markdown("---")
-
+    
     if st.session_state.get('kx') is not None:
         st.markdown("### Mid-Layer Property Maps")
         kx_display = get_k_slice(st.session_state.kx, state['nz'] // 2)
         ky_display = get_k_slice(st.session_state.ky, state['nz'] // 2)
         phi_display = get_k_slice(st.session_state.phi, state['nz'] // 2)
-
+        
         c1, c2 = st.columns(2)
         with c1:
-            st.plotly_chart(px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis",
-                                      labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"),
-                            use_container_width=True)
+            st.plotly_chart(px.imshow(kx_display, origin="lower", color_continuous_scale="Viridis", labels=dict(color="mD"), title="<b>kx — mid-layer (mD)</b>"), use_container_width=True)
         with c2:
-            st.plotly_chart(px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis",
-                                      labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"),
-                            use_container_width=True)
-
-        st.plotly_chart(px.imshow(phi_display, origin="lower", color_continuous_scale="Magma",
-                                  labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"),
-                        use_container_width=True)
+            st.plotly_chart(px.imshow(ky_display, origin="lower", color_continuous_scale="Cividis", labels=dict(color="mD"), title="<b>ky — mid-layer (mD)</b>"), use_container_width=True)
+            
+        st.plotly_chart(px.imshow(phi_display, origin="lower", color_continuous_scale="Magma", labels=dict(color="ϕ"), title="<b>Porosity ϕ — mid-layer (fraction)</b>"), use_container_width=True)
     else:
         st.info("Click the button above to generate initial property volumes.")
+
 
 elif selected_tab == "PVT (Black-Oil)":
     st.header("PVT (Black-Oil) Analysis")
     P = np.linspace(max(1000, state["p_min_bhp_psi"]), max(2000, state["p_init_psi"] + 1000), 120)
-    Rs, Bo, Bg, mug = (
-        Rs_of_p(P, state["pb_psi"], state["Rs_pb_scf_stb"]),
-        Bo_of_p(P, state["pb_psi"], state["Bo_pb_rb_stb"]),
-        Bg_of_p(P),
-        mu_g_of_p(P, state["pb_psi"], state["mug_pb_cp"])
-    )
+    Rs, Bo, Bg, mug = (Rs_of_p(P, state["pb_psi"], state["Rs_pb_scf_stb"]), Bo_of_p(P, state["pb_psi"], state["Bo_pb_rb_stb"]), Bg_of_p(P), mu_g_of_p(P, state["pb_psi"], state["mug_pb_cp"]))
     f1 = go.Figure(go.Scatter(x=P, y=Rs, line=dict(color="firebrick", width=3)))
     f1.add_vline(x=state["pb_psi"], line_dash="dash", line_width=2, annotation_text="Bubble Point")
-    f1.update_layout(template="plotly_white", title="<b>Solution GOR Rs vs Pressure</b>",
-                     xaxis_title="Pressure (psi)", yaxis_title="Rs (scf/STB)")
+    f1.update_layout(template="plotly_white", title="<b>Solution GOR Rs vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="Rs (scf/STB)")
     st.plotly_chart(f1, use_container_width=True)
     f2 = go.Figure(go.Scatter(x=P, y=Bo, line=dict(color="seagreen", width=3)))
     f2.add_vline(x=state["pb_psi"], line_dash="dash", line_width=2, annotation_text="Bubble Point")
-    f2.update_layout(template="plotly_white", title="<b>Oil FVF Bo vs Pressure</b>",
-                     xaxis_title="Pressure (psi)", yaxis_title="Bo (rb/STB)")
+    f2.update_layout(template="plotly_white", title="<b>Oil FVF Bo vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="Bo (rb/STB)")
     st.plotly_chart(f2, use_container_width=True)
     f3 = go.Figure(go.Scatter(x=P, y=Bg, line=dict(color="steelblue", width=3)))
-    f3.update_layout(template="plotly_white", title="<b>Gas FVF Bg vs Pressure</b>",
-                     xaxis_title="Pressure (psi)", yaxis_title="Bg (rb/scf)")
+    f3.update_layout(template="plotly_white", title="<b>Gas FVF Bg vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="Bg (rb/scf)")
     st.plotly_chart(f3, use_container_width=True)
     f4 = go.Figure(go.Scatter(x=P, y=mug, line=dict(color="mediumpurple", width=3)))
-    f4.update_layout(template="plotly_white", title="<b>Gas viscosity μg vs Pressure</b>",
-                     xaxis_title="Pressure (psi)", yaxis_title="μg (cP)")
+    f4.update_layout(template="plotly_white", title="<b>Gas viscosity μg vs Pressure</b>", xaxis_title="Pressure (psi)", yaxis_title="μg (cP)")
     st.plotly_chart(f4, use_container_width=True)
 
 elif selected_tab == "MSW Wellbore":
@@ -1542,13 +1537,11 @@ elif selected_tab == "MSW Wellbore":
         c1_msw, c2_msw = st.columns(2)
         with c1_msw:
             fig_p = go.Figure(go.Scatter(x=np.arange(n_stages)*ss_ft, y=p_wellbore_at_stage, mode='lines+markers'))
-            fig_p.update_layout(title="<b>Wellbore Pressure Profile</b>", xaxis_title="Dist. from Heel (ft)",
-                                yaxis_title="Pressure (psi)", template="plotly_white")
+            fig_p.update_layout(title="<b>Wellbore Pressure Profile</b>", xaxis_title="Dist. from Heel (ft)", yaxis_title="Pressure (psi)", template="plotly_white")
             st.plotly_chart(fig_p, use_container_width=True)
         with c2_msw:
             fig_q = go.Figure(go.Bar(x=np.arange(n_stages)*ss_ft, y=q_dist * 100))
-            fig_q.update_layout(title="<b>Flow Contribution per Stage</b>", xaxis_title="Dist. from Heel (ft)",
-                                yaxis_title="Contribution (%)", template="plotly_white")
+            fig_q.update_layout(title="<b>Flow Contribution per Stage</b>", xaxis_title="Dist. from Heel (ft)", yaxis_title="Contribution (%)", template="plotly_white")
             st.plotly_chart(fig_q, use_container_width=True)
     except Exception as e:
         st.warning(f"Could not compute wellbore hydraulics. Error: {e}")
@@ -1598,6 +1591,7 @@ elif selected_tab == "Results":
     # ---- Run button ----
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
+        # Reset previous outputs and warnings each run
         st.session_state.sim = None
         st.session_state["sanity_warned"] = False
 
@@ -1612,7 +1606,7 @@ elif selected_tab == "Results":
 
     # ---- Fetch sim & guard against stale signatures ----
     sim = st.session_state.get("sim")
-    cur_sig = _sim_signature_from_state()
+    cur_sig  = _sim_signature_from_state()
     prev_sig = sim.get("_sim_signature") if isinstance(sim, dict) else None
     if (sim is not None) and (prev_sig is not None) and (cur_sig != prev_sig):
         st.session_state.sim = None
@@ -1665,10 +1659,37 @@ elif selected_tab == "Results":
         )
         st.session_state["sanity_warned"] = True
 
-    # ---- Gauges: Oil first (green), Gas second (red) ----
+    # ---- Ensure the gauge helper exists (failsafe; your top-level def should already exist) ----
+    if "render_semi_gauge" not in globals():
+        def render_semi_gauge(title, value, unit, vmin, vmax, bar_color):
+            v = 0.0 if value is None else float(value)
+            vdisp = max(vmin, min(v, vmax))
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=vdisp,
+                number={"valueformat": ".2f", "font": {"size": 36}},
+                title={"text": title, "font": {"size": 18}},
+                gauge={
+                    "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
+                    "bar": {"color": bar_color},
+                    "bgcolor": "rgba(0,0,0,0)",
+                    "shape": "angular",
+                    "threshold": None
+                },
+                domain={"x": [0, 1], "y": [0, 1]}
+            ))
+            fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
+            fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
+            fig.add_annotation(
+                text=f"{v:.2f} {unit}", showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5,
+                font=dict(size=28)
+            )
+            return fig
+
+    # ---- Gauges: Oil first (green), Gas second (red). Clamp DISPLAY to sane max ----
     c1, c2 = st.columns(2)
     with c1:
-        vmax_oil = max(OIL_MAX, eur_o)
+        vmax_oil = max(OIL_MAX, eur_o)  # expand if needed; else stick to sanity max
         fig_oil = render_semi_gauge("EUR Oil", min(eur_o, vmax_oil), "MMBO", 0.0, vmax_oil, "#22c55e")
         st.plotly_chart(fig_oil, use_container_width=True)
     with c2:
@@ -1677,7 +1698,7 @@ elif selected_tab == "Results":
         st.plotly_chart(fig_gas, use_container_width=True)
 
     # ===================== RATE & CUMULATIVE PLOTS =====================
-    t = sim.get("t"); qg = sim.get("qg"); qo = sim.get("qo"); qw = sim.get("qw")
+    t  = sim.get("t"); qg = sim.get("qg"); qo = sim.get("qo"); qw = sim.get("qw")
 
     # --- Semi-log Rate vs Time ---
     if t is not None and (qg is not None or qo is not None or qw is not None):
