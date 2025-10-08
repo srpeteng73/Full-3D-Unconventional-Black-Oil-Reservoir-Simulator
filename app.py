@@ -1,3 +1,12 @@
+Hello! As an expert programmer, I can certainly help you with that. The issue is that the gauge chart function is adding an extra, redundant text label below the chart, which already displays the title and value.
+
+I will fix this by:
+1.  Removing the duplicate definition of the `render_semi_gauge` function, which is a common source of bugs.
+2.  Removing the code that adds the extra text annotation (`fig.add_annotation(...)`) from the remaining function.
+
+This will result in cleaner, more professional-looking gauges that display the information correctly without repetition. Here is the corrected code:
+
+```python
 # Forcing a redeploy on Streamlit Cloud
 import time
 import numpy as np
@@ -55,8 +64,8 @@ def render_semi_gauge(title: str, value: float, unit: str,
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=vdisp,
-        number={"valueformat": ".2f", "font": {"size": 26}},
-        title={"text": title, "font": {"size": 16}},
+        number={"valueformat": ".2f", "font": {"size": 36}},
+        title={"text": title, "font": {"size": 18}},
         gauge={
             "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#9aa0a6"},
             "bar": {"color": bar_color, "thickness": 0.28},
@@ -66,46 +75,10 @@ def render_semi_gauge(title: str, value: float, unit: str,
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-    fig.update_layout(margin=dict(l=6, r=6, t=30, b=0), height=220)
-    fig.add_annotation(
-        text=f"{v:.2f} {unit}",
-        showarrow=False, yref="paper", y=0.02, xref="paper", x=0.5,
-        font=dict(size=20, color="#475569"),
-    )
+    fig.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=220)
+    # The redundant annotation below the gauge has been removed.
     return fig
 # =====================================================================
-
-# ---- Gauges helper (place at top-level, not inside any block) ----
-def render_semi_gauge(title: str, value: float, unit: str,
-                      vmin: float, vmax: float, bar_color: str):
-    """Semicircle gauge (0–180°) with crisp typography and responsive sizing."""
-    if value is None:
-        value = 0.0
-
-    vdisp = max(vmin, min(float(value), float(vmax)))  # clamp for display
-
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=vdisp,
-        number={"valueformat": ".2f", "font": {"size": 36}},
-        title={"text": title, "font": {"size": 18}},
-        gauge={
-            "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
-            "bar": {"color": bar_color},
-            "bgcolor": "rgba(0,0,0,0)",
-            "shape": "angular",
-            "threshold": None
-        },
-        domain={"x": [0, 1], "y": [0, 1]}
-    ))
-
-    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
-    fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
-    fig.add_annotation(
-        text=f"{value:.2f} {unit}",
-        showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5, font=dict(size=28)
-    )
-    return fig
 
 
 def _cum_trapz_days(t_days, y_per_day):
@@ -2878,4 +2851,4 @@ elif selected_tab == "DFN Viewer":
             This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
             - Each **red line** represents an individual natural fracture defined in the input file.
             - Use this for QC to verify locations/orientations inside the reservoir model.
-            """)
+            """). 
