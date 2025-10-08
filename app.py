@@ -1,12 +1,3 @@
-Hello! As an expert programmer, I can certainly help you with that. The issue is that the gauge chart function is adding an extra, redundant text label below the chart, which already displays the title and value.
-
-I will fix this by:
-1.  Removing the duplicate definition of the `render_semi_gauge` function, which is a common source of bugs.
-2.  Removing the code that adds the extra text annotation (`fig.add_annotation(...)`) from the remaining function.
-
-This will result in cleaner, more professional-looking gauges that display the information correctly without repetition. Here is the corrected code:
-
-```python
 # Forcing a redeploy on Streamlit Cloud
 import time
 import numpy as np
