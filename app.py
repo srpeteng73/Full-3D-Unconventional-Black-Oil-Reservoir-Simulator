@@ -80,10 +80,11 @@ def render_app() -> None:
             return False
         return True
 
-    # ---- PAGES (indentation of elif must match the if below) ----
-    if selected_tab == "Overview":
-        st.title("Full 3D Unconventional & Black-Oil Reservoir Simulator")
-        st.markdown(r"""
+   # ---- PAGES (indentation of elif must match the if below) ----
+if selected_tab == "Overview":
+    st.title("Full 3D Unconventional & Black-Oil Reservoir Simulator")
+    render_users_manual()
+
 <!-- BEGIN OVERVIEW MARKDOWN -->
 
 ### 1. Introduction
@@ -3670,7 +3671,7 @@ Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This 
 6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
 
 ### 3. Key Tabs Explained
-(…keep the rest of your manual here…)
+(keep your existing sections here…)
 
 ### 4. Input Validation
 - **Automated Match:** warns if any min bound > max bound.
