@@ -61,11 +61,45 @@ def safe_power(x, p):
 # ======================================================================
 def render_users_manual():
     st.markdown(r"""
-    ...your manual markdown...
+### 1. Introduction
+Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+
+### 2. Quick Start Guide
+1) Select a Play in the sidebar (Preset dropdown).
+2) Apply Preset to load typical reservoir, fluid, and completion parameters.
+3) Generate Geology: open **Generate 3D property volumes** and click the button to create 3D permeability/porosity grids.
+4) Run Simulation: go to **Results** and click **Run simulation**.
+5) Analyze: review EUR gauges, rate–time plots, and cumulative production charts.
+6) Iterate: tweak parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run.
+
+### 3. Key Tabs Explained
+
+#### Results
+Primary dashboard for outputs (EURs, rate–time, cumulative). Simulation runs only when you click **Run simulation** on this tab.
+
+#### Economics
+Financial model based on the Results profile.
+- Inputs: CAPEX, price decks, OPEX, fiscal terms.
+- Metrics: **NPV**, **IRR**, **Payout Period**.
+- Outputs: yearly & cumulative cash flows plus a detailed table.
+
+#### Field Match & Automated Match
+History matching against real data.
+- Field Match (CSV): upload with columns `Day` and one of `Oil_Rate_STBpd` or `Gas_Rate_Mscfd`. Adjust parameters and re-run to align curves.
+- Automated Match (genetic algorithm):
+  1) Upload data  
+  2) Select parameters (e.g., `xf_ft`, `k_stdev`)  
+  3) Set bounds  
+  4) Run Automated Match to minimize RMSE
+
+#### 3D & Slice Viewers
+- **3D Viewer:** interactive isosurfaces (perm/poro/pressure).
+- **Slice Viewer:** 2D cross-sections in X/Y/Z.
+
+### 4. Input Validation
+- Automated Match warns if any min bound > max bound.
+- Results sanity checks enforce realistic EURs; physically inconsistent results are flagged or withheld.
     """)  # end users manual
-
-
-
 
 def render_app() -> None:
     st.set_page_config(page_title="3D Unconventional & Black-Oil Simulator", layout="wide")
@@ -88,11 +122,10 @@ def render_app() -> None:
             return False
         return True
 
-      # ---- PAGES ----
-if selected_tab == "Overview":
-    st.title("Full 3D Unconventional & Black-Oil Reservoir Simulator")
-    render_users_manual()
-
+    # ---- PAGES ----
+    if selected_tab == "Overview":
+        st.title("Full 3D Unconventional & Black-Oil Reservoir Simulator")
+        render_users_manual()
 
     elif selected_tab == "Inputs":
         st.header("Model Inputs")
@@ -107,8 +140,7 @@ if selected_tab == "Overview":
 
     elif selected_tab == "Simulation":
         st.header("Run Simulation")
-        if "inputs" not in st.session_state:
-            st.info("No inputs found. Go to **Inputs** to configure parameters.")
+        if not _require_inputs():
             st.stop()
 
         if st.button("Run Simulation", type="primary"):
@@ -120,8 +152,7 @@ if selected_tab == "Overview":
 
     elif selected_tab == "Results":
         st.header("Results")
-        if "results" not in st.session_state:
-            st.info("No results yet. Run a simulation on the **Simulation** page.")
+        if not _require_results():
             st.stop()
 
         results = st.session_state.results
@@ -137,8 +168,7 @@ if selected_tab == "Overview":
         st.header("Solver & Profiling")
         steps = st.slider("Benchmark steps", 10, 200, 50, 10)
         if st.button("Run tiny benchmark"):
-            if "inputs" not in st.session_state:
-                st.info("No inputs found. Go to **Inputs** to configure parameters.")
+            if not _require_inputs():
                 st.stop()
             inputs = st.session_state.inputs
             short_inputs = dict(inputs)
@@ -150,9 +180,9 @@ if selected_tab == "Overview":
             except Exception as e:
                 timings["engines.fast.fallback_fast_solver"] = f"error: {e}"
             st.json(timings)
-
 if __name__ == "__main__":
     render_app()
+
 
 # ---------------------------------------------------------------------------
 # Brand colors (define once, globally)
