@@ -3638,8 +3638,8 @@ def safe_power(x, p):
         st.header("User’s Manual")
         st.markdown("---")
         st.markdown("""
-  
-    def render_users_manual():
+   
+   def render_users_manual():
         st.markdown(
             """
     ### 1. Introduction
@@ -3655,25 +3655,27 @@ def safe_power(x, p):
 
 
 
-    """  # END: disable legacy nav block
+   
+def render_users_manual():
+    st.markdown(r"""
+### 1. Introduction
+Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
 
-    """  # END: disable legacy nav block
+### 2. Quick Start Guide
+1. **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
+2. **Apply Preset:** Click **Apply Preset**. This loads typical reservoir, fluid, and completion parameters into the sidebar.
+3. **Generate Geology:** Open **Generate 3D property volumes** and click the large button to create 3D permeability/porosity grids.
+4. **Run Simulation:** Go to **Results** and click **Run simulation**.
+5. **Analyze:** Review EUR gauges, rate–time plots, and cumulative production charts.
+6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
 
-    def render_users_manual():
-        st.markdown(
-            """
-    ### 1. Introduction
-    Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
+### 3. Key Tabs Explained
+(…keep the rest of your manual here…)
 
-    ### 2. Quick Start Guide
-    1. **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
-    2. **Apply Preset:** Click **Apply Preset**. This loads typical reservoir, fluid, and completion parameters into the sidebar.
-    3. **Generate Geology:** Open **Generate 3D property volumes** and click the large button to create 3D permeability/porosity grids.
-    4. **Run Simulation:** Go to **Results** and click **Run simulation**.
-    5. **Analyze:** Review EUR gauges, rate–time plots, and cumulative production charts.
-    6. **Iterate:** Adjust sidebar parameters (e.g., frac half-length `xf_ft` or pad BHP `pad_bhp_psi`) and re-run to see the impact.
-
-    ### 3. Key Tabs Explained
+### 4. Input Validation
+- **Automated Match:** warns if any min bound > max bound.
+- **Results:** sanity checks enforce realistic EURs for the selected play; physically inconsistent results are flagged or withheld.
+    """)  # end users manual
 
     #### Results
     Primary dashboard for simulation outputs (EURs, rate-time, cumulative). Simulation runs only when you click **Run simulation** on this tab.
@@ -3699,10 +3701,6 @@ def safe_power(x, p):
     - **Automated Match:** warns if any min bound > max bound.  
     - **Results:** sanity checks enforce realistic EURs for the selected play; physically inconsistent results are flagged or withheld.
         """)  # end Overview markdown
-
-    elif selected_tab == "Solver & Profiling":
-        st.header("Solver & Profiling")
-
 
     elif selected_tab == "Solver & Profiling":
         st.header("Solver & Profiling")
