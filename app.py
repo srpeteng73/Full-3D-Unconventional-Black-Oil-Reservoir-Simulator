@@ -20,7 +20,7 @@ import warnings  # trap analytical power warnings for Arps
 from scipy.integrate import cumulative_trapezoid as _ctr
 import numpy as _np
 
-# ---- Gauges + EUR bounds helpers (module-scope; ensure always defined) ----
+# ---- EUR bounds & compact gauge helpers (module-scope; always defined) ----
 MIDLAND_BOUNDS = {
     "oil_mmbo": (0.4, 2.0),   # display sanity band
     "gas_bcf":  (0.2, 3.5),
@@ -29,8 +29,8 @@ MIDLAND_BOUNDS = {
 
 def enforce_midland_bounds(eur_o_mmbo: float, eur_g_bcf: float):
     """
-    Returns (eur_o_adj, eur_g_adj, reason) where the adjusted values are forced
-    inside Permian–Midland oil-window bands and an optional max GOR.
+    Clamp display-only EURs into Permian–Midland oil-window bands
+    and cap GOR if needed. Returns (eur_o_disp, eur_g_disp, note).
     """
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
@@ -39,43 +39,42 @@ def enforce_midland_bounds(eur_o_mmbo: float, eur_g_bcf: float):
     o = max(lo_o, min(float(eur_o_mmbo or 0.0), hi_o))
     g = max(lo_g, min(float(eur_g_bcf or 0.0), hi_g))
 
-    # Optional: if implied GOR is still above limit, trim gas to the limit
+    # Keep implied GOR in check (display-only)
     if o > 0:
-        gor = (g * 1.0e9) / (o * 1.0e6)  # scf/STB
+        gor = (g * 1.0e9) / (o * 1.0e6)
         if gor > max_gor:
             g = (max_gor * (o * 1.0e6)) / 1.0e9
 
-    return o, g, f"Display clamped to Midland oil-window: Oil [{lo_o}, {hi_o}] MMBO; Gas [{lo_g}, {hi_g}] BCF; GOR ≤ {max_gor:,.0f} scf/STB."
+    note = (f"Display clamped to Midland oil-window: "
+            f"Oil [{lo_o}, {hi_o}] MMBO; Gas [{lo_g}, {hi_g}] BCF; "
+            f"GOR ≤ {max_gor:,.0f} scf/STB.")
+    return o, g, note
 
 def render_semi_gauge(title: str, value: float, unit: str,
                       vmin: float, vmax: float, bar_color: str):
-    """
-    Compact semicircle gauge with clean typography. Kept small to fit two across.
-    """
+    """Compact semicircle gauge that fits two side-by-side on laptop screens."""
     import plotly.graph_objects as go
     v = 0.0 if value is None else float(value)
     vdisp = max(vmin, min(v, vmax))
-
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=vdisp,
-        number={"valueformat": ".2f", "font": {"size": 26}},   # smaller text
+        number={"valueformat": ".2f", "font": {"size": 26}},
         title={"text": title, "font": {"size": 16}},
         gauge={
             "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#9aa0a6"},
             "bar": {"color": bar_color, "thickness": 0.28},
             "bgcolor": "white",
             "shape": "angular",
-            "threshold": None
+            "threshold": None,
         },
-        domain={"x": [0, 1], "y": [0, 1]}
+        domain={"x": [0, 1], "y": [0, 1]},
     ))
-    fig.update_layout(margin=dict(l=6, r=6, t=30, b=0), height=220)  # shorter to fit screen
-    # Unit label under the number
+    fig.update_layout(margin=dict(l=6, r=6, t=30, b=0), height=220)  # shorter = fits better
     fig.add_annotation(
         text=f"{v:.2f} {unit}",
         showarrow=False, yref="paper", y=0.02, xref="paper", x=0.5,
-        font=dict(size=20, color="#475569")
+        font=dict(size=20, color="#475569"),
     )
     return fig
 
@@ -249,9 +248,6 @@ def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: s
     sim_like["eur_valid"] = eur_valid
     sim_like["eur_validation_msg"] = "OK" if eur_valid else " | ".join(msgs)
     return sim_like
-
-
-
 
 def validate_midland_eur(EUR_o_MMBO, EUR_g_BCF, *, pb_psi=None, Rs_pb=None):
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
@@ -1740,25 +1736,28 @@ elif selected_tab == "Results":
             )
             return fig
 
-    # ---- Enforce Midland display bounds & draw compact gauges ----
-eur_o_disp, eur_g_disp, clamp_note = enforce_midland_bounds(eur_o, eur_g)
+    # ---- Display EURs clamped to Midland bands & render compact gauges ----
+    eur_o_disp, eur_g_disp, clamp_note = enforce_midland_bounds(eur_o, eur_g)
 
-# Optional note to user (once per run)
-if not st.session_state.get("eur_bounds_noted"):
-    st.info(clamp_note)
-    st.session_state["eur_bounds_noted"] = True
+    if not st.session_state.get("eur_bounds_noted"):
+        st.info(clamp_note)
+        st.session_state["eur_bounds_noted"] = True
 
-c1, c2 = st.columns(2)
-with c1:
-    fig_oil = render_semi_gauge("EUR Oil", eur_o_disp, "MMBO",
-                                vmin=0.0, vmax=MIDLAND_BOUNDS["oil_mmbo"][1],
-                                bar_color="#22c55e")
-    st.plotly_chart(fig_oil, use_container_width=True)
-with c2:
-    fig_gas = render_semi_gauge("EUR Gas", eur_g_disp, "BCF",
-                                vmin=0.0, vmax=MIDLAND_BOUNDS["gas_bcf"][1],
-                                bar_color="#ef4444")
-    st.plotly_chart(fig_gas, use_container_width=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        fig_oil = render_semi_gauge(
+            "EUR Oil", eur_o_disp, "MMBO",
+            vmin=0.0, vmax=MIDLAND_BOUNDS["oil_mmbo"][1],
+            bar_color="#22c55e",
+        )
+        st.plotly_chart(fig_oil, use_container_width=True)
+    with c2:
+        fig_gas = render_semi_gauge(
+            "EUR Gas", eur_g_disp, "BCF",
+            vmin=0.0, vmax=MIDLAND_BOUNDS["gas_bcf"][1],
+            bar_color="#ef4444",
+        )
+        st.plotly_chart(fig_gas, use_container_width=True)
 
 
     # ===================== RATE & CUMULATIVE PLOTS =====================
