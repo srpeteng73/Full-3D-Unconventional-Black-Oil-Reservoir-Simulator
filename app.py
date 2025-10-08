@@ -3,6 +3,8 @@ import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+
+
 import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.io as pio
@@ -1800,13 +1802,12 @@ selected_tab = st.sidebar.radio(
 import plotly.graph_objects as go
 
 def render_semi_gauge(title: str, value: float, unit: str,
-                      vmin: float, vmax: float, bar_color: str) -> go.Figure:
+                      vmin: float, vmax: float, bar_color: str):
     """Semicircle gauge (0–180°) with crisp typography and responsive sizing."""
     if value is None:
         value = 0.0
 
-    # Clamp to range for display
-    vdisp = max(vmin, min(value, vmax))
+    vdisp = max(vmin, min(value, vmax))  # clamp for display
 
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -1823,19 +1824,14 @@ def render_semi_gauge(title: str, value: float, unit: str,
         domain={"x": [0, 1], "y": [0, 1]}
     ))
 
-    # Make it a semicircle by cropping top half via layout
-    fig.update_layout(
-        margin=dict(l=10, r=10, t=30, b=10),
-        height=310,
-    )
-    # Visual cue of the full range arc
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
     fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
     fig.add_annotation(
         text=f"{value:.2f} {unit}",
-        showarrow=False,
-        yref="paper", y=0.0, xref="paper", x=0.5, font=dict(size=28)
+        showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5,
+        font=dict(size=28)
     )
-    return fige
+    return fig
 
 
 # ======== Results tab ========
