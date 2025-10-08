@@ -1890,11 +1890,8 @@ elif selected_tab == "Slice Viewer":
 # ======== QA / Material Balance ========
 elif selected_tab == "QA / Material Balance":
     """
-    Quick material-balance sanity plots:
-      - P_avg vs time
-      - Gas P/Z vs Gp (linear extrapolation -> GIIP)
-      - Oil F vs Et (slope -> OOIP)
-    Uses arrays in the last sim; gracefully bails if pieces are missing.
+    Quick material-balance sanity plots.
+    - Generates synthetic pressure for analytical models to enable MB plots.
     """
     st.header("QA / Material Balance")
     sim = st.session_state.get("sim")
@@ -1903,107 +1900,115 @@ elif selected_tab == "QA / Material Balance":
         st.warning("Run a simulation on the 'Results' tab to view QA plots.")
         st.stop()
 
-    pavg = sim.get("p_avg_psi") or sim.get("pm_mid_psi")
-    if pavg is None:
-        st.info("Average reservoir pressure time series was not returned by the solver. Cannot generate Material Balance plots.")
+    pavg = sim.get("p_avg_psi")
+    
+    # --- Check for missing pressure and generate a synthetic profile if needed ---
+    if pavg is None and "Analytical" in st.session_state.get("engine_type", ""):
+        st.info("Analytical model does not compute average pressure. Generating a synthetic pressure profile using material balance principles...")
+        try:
+            # Estimate total pore volume and compressibility
+            phi_avg = 0.10 # Assume average porosity for bulk calculation
+            ct = state.get('ct_1_over_psi', 15e-6)
+            Vp = state['nx'] * state['ny'] * state['nz'] * state['dx'] * state['dy'] * state['dz'] * phi_avg
+            
+            # Get production volumes
+            t = np.asarray(sim['t'], float)
+            qo = np.asarray(sim['qo'], float)
+            qg = np.asarray(sim['qg'], float)
+            Np = cumulative_trapezoid(qo, t, initial=0.0)
+            Gp = cumulative_trapezoid(qg * 1000.0, t, initial=0.0) # Gp in scf
+            
+            # Use PVT functions
+            p_init = state["p_init_psi"]
+            pb = state["pb_psi"]
+            Rs_pb = state["Rs_pb_scf_stb"]
+            Bo_pb = state["Bo_pb_rb_stb"]
+            
+            # Underground withdrawal in reservoir bbls
+            Bo = Bo_of_p(p_init, pb, Bo_pb) # Simplified: use initial Bo for withdrawal calc
+            Bg = Bg_of_p(p_init) # Simplified: use initial Bg
+            Rs = Rs_of_p(p_init, pb, Rs_pb) # Simplified
+            underground_withdrawal = Np * Bo + (Gp - Np * Rs) * Bg
+            
+            # Calculate pressure drop and the synthetic profile
+            delta_p = underground_withdrawal / (Vp * ct)
+            pavg = p_init - delta_p
+            sim['p_avg_psi'] = pavg # Store it for this session
+            st.success("Synthetic pressure profile generated successfully!")
+        except Exception as e:
+            st.error(f"Failed to generate synthetic pressure profile: {e}")
+            st.stop()
+            
+    elif pavg is None:
+        st.error("Average reservoir pressure time series was not returned by the solver. Cannot generate Material Balance plots.")
         st.stop()
 
-    # 1) Average pressure vs time
-    if "t" in sim and len(sim["t"]) == len(pavg):
-        fig_p = go.Figure(go.Scatter(x=sim["t"], y=pavg, name="p̄ reservoir (psi)"))
-        fig_p.update_layout(
-            template="plotly_white",
-            title_text="<b>Average Reservoir Pressure</b>",
-            xaxis_title="Time (days)", yaxis_title="Pressure (psi)"
-        )
-        st.plotly_chart(fig_p, use_container_width=True, theme=None)
+    # --- Plotting Section ---
+    st.markdown("#### Figure 1: Average Reservoir Pressure vs. Time")
+    fig_p = go.Figure(go.Scatter(x=sim["t"], y=pavg, name="p̄ reservoir (psi)"))
+    fig_p.update_layout(
+        template="plotly_white",
+        xaxis_title="Time (days)", yaxis_title="Pressure (psi)"
+    )
+    st.plotly_chart(fig_p, use_container_width=True, theme=None)
+    with st.expander("About this chart"):
+        st.markdown("This plot shows the depletion of the average reservoir pressure over time. For analytical models, this profile is estimated from production volumes.")
 
-    # Need both gas & oil rate series for the MB calcs below
-    if not all(k in sim for k in ("t", "qg", "qo")) or len(sim["t"]) < 2:
-        st.warning("Simulation data is missing required rate arrays ('qg', 'qo') for this analysis.")
-        st.stop()
-
-    t  = np.asarray(sim["t"], float)
-    qg = np.asarray(sim["qg"], float)
-    qo = np.asarray(sim["qo"], float)
-
-    # 2) Gas P/Z vs Gp (linear extrapolation -> GIIP)
-    st.markdown("### Gas Material Balance")
+    t  = np.asarray(sim["t"], float); qg = np.asarray(sim["qg"], float); qo = np.asarray(sim["qo"], float)
+    
+    # --- Gas Material Balance ---
+    st.markdown("---")
+    st.markdown("### Gas Material Balance (P/Z vs. Gp)")
     Gp_MMscf  = cumulative_trapezoid(qg, t, initial=0.0) / 1e3
     z_factors = z_factor_approx(np.asarray(pavg), p_init_psi=state["p_init_psi"])
     p_over_z  = np.asarray(pavg) / np.maximum(z_factors, 1e-12)
-    fit_start = max(1, len(Gp_MMscf) // 4)  # avoid noisy early-time points
+    fit_start = max(1, len(Gp_MMscf) // 4)
 
     if len(Gp_MMscf[fit_start:]) > 1:
         slope, intercept, _, _, _ = stats.linregress(Gp_MMscf[fit_start:], p_over_z[fit_start:])
         giip_bcf = max(0.0, -intercept / slope / 1000.0) if slope != 0 else 0.0
-        sim_eur_g_bcf = sim.get("EUR_g_BCF", np.trapz(qg, t) / 1e6)
-
-        c1, c2 = st.columns(2)
-        c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF")
-        c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF",
-                  delta=(f"{(giip_bcf - sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim" if sim_eur_g_bcf > 0 else None))
-
+        
+        st.markdown("#### Figure 2: Gas P/Z Plot")
         fig_pz_gas = go.Figure()
         fig_pz_gas.add_trace(go.Scatter(x=Gp_MMscf, y=p_over_z, mode="markers", name="P/Z Data"))
         x_fit = np.array([0.0, giip_bcf * 1000.0]); y_fit = slope * x_fit + intercept
-        fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines",
-                                        name="Linear Extrapolation", line=dict(dash="dash")))
-        fig_pz_gas.update_layout(
-            title="<b>P/Z vs. Cumulative Gas Production</b>",
-            xaxis_title="Gp - Cumulative Gas Production (MMscf)",
-            yaxis_title="P/Z", template="plotly_white"
-        )
+        fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines", name="Linear Extrapolation", line=dict(dash="dash")))
+        fig_pz_gas.update_layout(xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white")
         st.plotly_chart(fig_pz_gas, use_container_width=True)
-    else:
-        st.info("Not enough data points for Gas Material Balance plot.")
+        with st.expander("About this chart"):
+            st.markdown("This is a classic material balance plot for gas reservoirs. For a volumetric reservoir, the data should follow a straight line. Extrapolating this line to a P/Z of zero gives an estimate of the Gas-Initially-In-Place (GIIP).")
+        st.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF")
 
-    # 3) Oil F vs Et (slope -> OOIP)
+    # --- Oil Material Balance (Havlena-Odeh) ---
     st.markdown("---")
-    st.markdown("### Oil Material Balance")
-
+    st.markdown("### Oil Material Balance (Havlena-Odeh)")
     Np_STB = cumulative_trapezoid(qo, t, initial=0.0)
     Gp_scf = cumulative_trapezoid(qg * 1_000.0, t, initial=0.0)
     Rp     = np.divide(Gp_scf, Np_STB, out=np.zeros_like(Gp_scf), where=Np_STB > 1e-3)
-
     Bo     = Bo_of_p(pavg, state["pb_psi"], state["Bo_pb_rb_stb"])
     Rs     = Rs_of_p(pavg, state["pb_psi"], state["Rs_pb_scf_stb"])
     Bg     = Bg_of_p(pavg)
-
     p_init = state["p_init_psi"]
     Boi    = Bo_of_p(p_init, state["pb_psi"], state["Bo_pb_rb_stb"])
     Rsi    = Rs_of_p(p_init, state["pb_psi"], state["Rs_pb_scf_stb"])
-
     F  = Np_STB * (Bo + (Rp - Rs) * Bg)
     Et = (Bo - Boi) + (Rsi - Rs) * Bg
-
+    
     fit_start_oil = max(1, len(F) // 4)
     if len(F[fit_start_oil:]) > 1:
         slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_oil:], F[fit_start_oil:])
         ooip_mmstb = max(0.0, slope_oil / 1e6)
-        sim_eur_o_mmstb = sim.get("EUR_o_MMBO", np.trapz(qo, t) / 1e6)
-        rec_factor = (sim_eur_o_mmstb / ooip_mmstb * 100.0) if ooip_mmstb > 0 else 0.0
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB")
-        c2.metric("Material Balance OOIP (F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
-        c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
-
+        
+        st.markdown("#### Figure 3: Havlena-Odeh F vs. Et Plot")
         fig_mbe_oil = go.Figure()
         fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode="markers", name="F vs Et Data"))
         x_fit_oil = np.array([0.0, np.nanmax(Et)]); y_fit_oil = slope_oil * x_fit_oil
-        fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode="lines",
-                                         name=f"Slope (OOIP) = {ooip_mmstb:.2f} MMSTB",
-                                         line=dict(dash="dash")))
-        fig_mbe_oil.update_layout(
-            title="<b>F vs. Et (Havlena–Odeh)</b>",
-            xaxis_title="Et - Total Expansion (rb/STB)",
-            yaxis_title="F - Underground Withdrawal (rb)",
-            template="plotly_white"
-        )
+        fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode="lines", name=f"Slope (OOIP) = {ooip_mmstb:.2f} MMSTB", line=dict(dash="dash")))
+        fig_mbe_oil.update_layout(xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
         st.plotly_chart(fig_mbe_oil, use_container_width=True)
-    else:
-        st.info("Not enough data points for Oil Material Balance plot.")
+        with st.expander("About this chart"):
+            st.markdown("The Havlena-Odeh method linearizes the material balance equation. Plotting underground withdrawal (F) against total fluid expansion (Et) should yield a straight line whose slope is the Oil-Initially-In-Place (OOIP).")
+        st.metric("Material Balance OOIP (from F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
 
 # ======== Economics ========
 elif selected_tab == "Economics":
@@ -2132,10 +2137,74 @@ elif selected_tab == "Economics":
 
 # ======== EUR vs Lateral Length ========
 elif selected_tab == "EUR vs Lateral Length":
-    """Future multi-run study of EUR vs. Lateral Length."""
     st.header("EUR vs Lateral Length Sensitivity")
-    st.info("This feature is not yet implemented. It will allow you to run multiple simulations to see how EUR changes with lateral length.")
+    st.info("This module runs the fast analytical model multiple times to build a sensitivity of EUR to changes in lateral length.")
 
+    # --- 1. Define Sensitivity Parameters ---
+    st.markdown("#### 1. Define Sensitivity Range")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        L_min = st.number_input("Min Lateral Length (ft)", 1000.0, 20000.0, 5000.0, 500.0)
+    with c2:
+        L_max = st.number_input("Max Lateral Length (ft)", 1000.0, 20000.0, 15000.0, 500.0)
+    with c3:
+        n_steps = st.number_input("Number of Steps", 2, 50, 10, 1)
+
+    # --- 2. Run Sensitivity ---
+    if st.button("🚀 Run Sensitivity Analysis", use_container_width=True, type="primary"):
+        results = []
+        base_state = state.copy()
+        lat_lengths = np.linspace(L_min, L_max, int(n_steps))
+        progress_bar = st.progress(0, "Starting sensitivity analysis...")
+
+        for i, length in enumerate(lat_lengths):
+            temp_state = base_state.copy()
+            temp_state['L_ft'] = length
+            
+            # Run the fast solver
+            sim_result = fallback_fast_solver(temp_state, np.random.default_rng(i))
+            
+            # Recalculate EURs authoritatively
+            t = np.asarray(sim_result.get("t", []))
+            qo = np.asarray(sim_result.get("qo", []))
+            qg = np.asarray(sim_result.get("qg", []))
+            eur_o = np.trapz(qo, t) / 1e6 if len(t) > 1 else 0.0
+            eur_g = np.trapz(qg, t) / 1e6 if len(t) > 1 else 0.0
+
+            results.append({
+                "Lateral Length (ft)": length,
+                "EUR Oil (MMBO)": eur_o,
+                "EUR Gas (BCF)": eur_g
+            })
+            progress_bar.progress((i + 1) / n_steps, f"Running case {i+1}/{int(n_steps)}...")
+        
+        st.session_state.sensitivity_results = pd.DataFrame(results)
+        progress_bar.empty()
+
+    # --- 3. Display Results ---
+    if 'sensitivity_results' in st.session_state:
+        df_sens = st.session_state.sensitivity_results
+        st.markdown("---")
+        st.markdown("### Sensitivity Results")
+
+        st.markdown("#### Figure 1: EUR vs. Lateral Length")
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_trace(go.Scatter(x=df_sens["Lateral Length (ft)"], y=df_sens["EUR Oil (MMBO)"], name="EUR Oil", mode='lines+markers', line=dict(color=COLOR_OIL)), secondary_y=False)
+        fig.add_trace(go.Scatter(x=df_sens["Lateral Length (ft)"], y=df_sens["EUR Gas (BCF)"], name="EUR Gas", mode='lines+markers', line=dict(color=COLOR_GAS)), secondary_y=True)
+        fig.update_layout(template="plotly_white", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        fig.update_xaxes(title_text="Lateral Length (ft)")
+        fig.update_yaxes(title_text="EUR Oil (MMBO)", secondary_y=False)
+        fig.update_yaxes(title_text="EUR Gas (BCF)", secondary_y=True)
+        st.plotly_chart(fig, use_container_width=True)
+        with st.expander("About this chart"):
+            st.markdown("This plot shows how the Estimated Ultimate Recovery (EUR) for both oil and gas is expected to change as the lateral length of the well increases. It helps in identifying the point of diminishing returns for drilling longer laterals.")
+
+        st.markdown("#### Table 1: Sensitivity Data")
+        st.dataframe(df_sens.style.format({
+            "Lateral Length (ft)": "{:,.0f}",
+            "EUR Oil (MMBO)": "{:.2f}",
+            "EUR Gas (BCF)": "{:.2f}"
+        }), use_container_width=True)
 # ======== Field Match (CSV) ========
 elif selected_tab == "Field Match (CSV)":
     """
@@ -2215,24 +2284,40 @@ elif selected_tab == "Field Match (CSV)":
 elif selected_tab == "Automated Match":
     """
     Differential Evolution-based auto history match.
-    - Select parameters + bounds; optimizer minimizes error vs field rates.
-    - Uses your fast proxy for quick iterations.
     """
     st.header("Automated History Matching")
     st.info("This module uses a genetic algorithm (Differential Evolution) to automatically find the best parameters to match historical data.")
 
     # --- 1. Load Data ---
     with st.expander("1. Load Historical Data", expanded=True):
-        uploaded_file_match = st.file_uploader("Upload field production CSV", type="csv", key="auto_match_uploader")
-        if uploaded_file_match:
-            try:
-                st.session_state.field_data_auto_match = pd.read_csv(uploaded_file_match)
-                st.success("File loaded successfully.")
-            except Exception as e:
-                st.error(f"Error reading CSV file: {e}")
-
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            uploaded_file_match = st.file_uploader("Upload field production CSV", type="csv", key="auto_match_uploader")
+            if uploaded_file_match:
+                try:
+                    st.session_state.field_data_auto_match = pd.read_csv(uploaded_file_match)
+                    st.success("File loaded successfully.")
+                except Exception as e:
+                    st.error(f"Error reading CSV file: {e}")
+        with c2:
+            st.write("") # Spacer
+            st.write("") # Spacer
+            if st.button("Load Demo Data", use_container_width=True):
+                rng = np.random.default_rng(42)
+                days = np.arange(0, 1096, 30)
+                oil_rate = 1200 * np.exp(-days / 500) + rng.normal(0, 30, size=days.shape)
+                gas_rate = 2200 * np.exp(-days / 600) + rng.normal(0, 80, size=days.shape)
+                demo_df = pd.DataFrame({
+                    "Day": days,
+                    "Gas_Rate_Mscfd": np.clip(gas_rate, 0, None),
+                    "Oil_Rate_STBpd": np.clip(oil_rate, 0, None)
+                })
+                st.session_state.field_data_auto_match = demo_df
+                st.success("Demo production data loaded!")
+        
         field_data = st.session_state.get("field_data_auto_match")
         if field_data is not None:
+            st.markdown("#### Table 1: Loaded Production Data (first 5 rows)")
             st.dataframe(field_data.head())
             if not ({'Day', 'Oil_Rate_STBpd'}.issubset(field_data.columns) or
                     {'Day', 'Gas_Rate_Mscfd'}.issubset(field_data.columns)):
@@ -2272,7 +2357,7 @@ elif selected_tab == "Automated Match":
 
         # --- 3. Configure and Run ---
         with st.expander("3. Configure and Run Optimization", expanded=True):
-            error_metric = st.selectbox("Error Metric to Minimize", ["RMSE (Oil)", "RMSE (Gas)", "RMSE (Combined)"])
+            error_metric = st.selectbox("Error Metric to Minimize", ["RMSE (Oil)", "RMSE (Gas)", "RMSE (Combined)"], help="Choose which production stream(s) to prioritize for the match.")
             max_iter = st.slider("Max Iterations", 5, 50, 15)
 
             run_auto_match = st.button(
@@ -2281,39 +2366,30 @@ elif selected_tab == "Automated Match":
             )
 
             if run_auto_match:
+                # Objective function remains the same
                 def objective_function(params, param_names, base_state, field_df, metric):
-                    """Return scalar error to minimize."""
-                    temp = base_state.copy()
-                    for name, value in zip(param_names, params):
-                        temp[name] = value
-
+                    temp = base_state.copy();
+                    for name, value in zip(param_names, params): temp[name] = value
                     sim_result = fallback_fast_solver(temp, np.random.default_rng())
                     t_sim, qo_sim, qg_sim = sim_result['t'], sim_result['qo'], sim_result['qg']
                     t_field = field_df['Day'].values
-
                     f_qo = interp1d(t_sim, qo_sim, bounds_error=False, fill_value="extrapolate")
                     f_qg = interp1d(t_sim, qg_sim, bounds_error=False, fill_value="extrapolate")
                     qo_hat, qg_hat = f_qo(t_field), f_qg(t_field)
-
                     err_o = err_g = 0.0
-                    if 'Oil_Rate_STBpd' in field_df.columns:
-                        err_o = float(np.sqrt(np.mean((qo_hat - field_df['Oil_Rate_STBpd'].values)**2)))
-                    if 'Gas_Rate_Mscfd' in field_df.columns:
-                        err_g = float(np.sqrt(np.mean((qg_hat - field_df['Gas_Rate_Mscfd'].values)**2)))
-
+                    if 'Oil_Rate_STBpd' in field_df.columns: err_o = float(np.sqrt(np.mean((qo_hat - field_df['Oil_Rate_STBpd'].values)**2)))
+                    if 'Gas_Rate_Mscfd' in field_df.columns: err_g = float(np.sqrt(np.mean((qg_hat - field_df['Gas_Rate_Mscfd'].values)**2)))
                     if "Combined" in metric: return err_o + err_g
-                    elif "Oil" in metric:    return err_o
-                    else:                    return err_g
+                    elif "Oil" in metric: return err_o
+                    else: return err_g
 
                 with st.spinner("Running optimization... This may take several minutes."):
                     param_names = list(bounds.keys())
                     bounds_list = [bounds[p] for p in param_names]
                     result = differential_evolution(
-                        objective_function,
-                        bounds=bounds_list,
+                        objective_function, bounds=bounds_list,
                         args=(param_names, state.copy(), field_data, error_metric),
-                        maxiter=int(max_iter),
-                        disp=True
+                        maxiter=int(max_iter), disp=True
                     )
                     st.session_state.auto_match_result = result
 
@@ -2326,137 +2402,196 @@ elif selected_tab == "Automated Match":
             c1, c2 = st.columns([1, 2])
             with c1:
                 st.metric("Final Error (RMSE)", f"{result.fun:.2f}")
-                st.markdown("##### Best-Fit Parameters:")
+                st.markdown("##### Table 2: Best-Fit Parameters")
                 best_params_df = pd.DataFrame({'Parameter': list(bounds.keys()), 'Value': result.x})
                 st.table(best_params_df.style.format({'Value': '{:.2f}'}))
 
             with c2:
-                # Run one final simulation with the best parameters
                 best_state = state.copy()
-                for name, value in zip(list(bounds.keys()), result.x):
-                    best_state[name] = value
-
+                for name, value in zip(list(bounds.keys()), result.x): best_state[name] = value
                 final_sim = fallback_fast_solver(best_state, np.random.default_rng())
-
+                
+                st.markdown("#### Figure 1: Final History Match")
                 fig_match = make_subplots(specs=[[{"secondary_y": True}]])
                 if 'Gas_Rate_Mscfd' in field_data.columns:
-                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'],
-                                                   mode='markers', name='Field Gas',
-                                                   marker=dict(color=COLOR_GAS, symbol='cross')), secondary_y=False)
-                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qg'],
-                                                   mode='lines', name='Best Match Gas',
-                                                   line=dict(color=COLOR_GAS, width=3)), secondary_y=False)
+                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color=COLOR_GAS, symbol='cross')), secondary_y=False)
+                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qg'], mode='lines', name='Best Match Gas', line=dict(color=COLOR_GAS, width=3)), secondary_y=False)
                 if 'Oil_Rate_STBpd' in field_data.columns:
-                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'],
-                                                   mode='markers', name='Field Oil',
-                                                   marker=dict(color=COLOR_OIL, symbol='x')), secondary_y=True)
-                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qo'],
-                                                   mode='lines', name='Best Match Oil',
-                                                   line=dict(color=COLOR_OIL, width=3)), secondary_y=True)
+                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color=COLOR_OIL, symbol='x')), secondary_y=True)
+                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qo'], mode='lines', name='Best Match Oil', line=dict(color=COLOR_OIL, width=3)), secondary_y=True)
 
-                fig_match.update_layout(title="<b>Final History Match</b>",
-                                        template="plotly_white", xaxis_title="Time (days)")
+                fig_match.update_layout(template="plotly_white", xaxis_title="Time (days)")
                 st.plotly_chart(fig_match, use_container_width=True)
-
+                with st.expander("About this chart"):
+                    st.markdown("This chart compares the historical field data (markers) against the production forecast generated using the best-fit parameters found by the optimization algorithm (solid lines).")# ======== Uncertainty & Monte Carlo ========
 # ======== Uncertainty & Monte Carlo ========
 elif selected_tab == "Uncertainty & Monte Carlo":
-    """
-    Quick Monte Carlo around selected parameters.
-    - Samples distributions and runs the fast proxy; aggregates P10/P50/P90.
-    """
-    st.header("Uncertainty & Monte Carlo")
+    st.header("Uncertainty & Monte Carlo Analysis")
 
-    p1, p2, p3 = st.columns(3)
-    with p1:
-        uc_k   = st.checkbox("k stdev", True)
-        k_mean = st.slider("k_stdev Mean", 0.0, 0.2, state['k_stdev'], 0.01)
-        k_std  = st.slider("k_stdev Stdev", 0.0, 0.1, 0.02, 0.005)
-    with p2:
-        uc_xf  = st.checkbox("xf_ft", True)
-        xf_mean = st.slider("xf_ft Mean (ft)", 100.0, 500.0, state['xf_ft'], 10.0)
-        xf_std  = st.slider("xf_ft Stdev (ft)", 0.0, 100.0, 30.0, 5.0)
-    with p3:
-        uc_int = st.checkbox("pad_interf", False)
-        int_min = st.slider("Interference Min", 0.0, 0.8, state['pad_interf'], 0.01)
-        int_max = st.slider("Interference Max", 0.0, 0.8, 0.5, 0.01)
+    # --- Section 1: Probabilistic Forecast (Monte Carlo) ---
+    st.subheader("1. Probabilistic Forecast (Monte Carlo)")
+    st.info("This analysis runs many simulations with randomly sampled inputs to understand the overall range and probability of outcomes (e.g., P10, P50, P90).")
+    
+    with st.expander("Configure Monte Carlo Parameters"):
+        p1, p2, p3 = st.columns(3)
+        with p1:
+            uc_k   = st.checkbox("k stdev", True)
+            k_mean = st.slider("k_stdev Mean", 0.0, 0.2, state['k_stdev'], 0.01, key="mc_k_mean")
+            k_std  = st.slider("k_stdev Stdev", 0.0, 0.1, 0.02, 0.005, key="mc_k_std")
+        with p2:
+            uc_xf  = st.checkbox("xf_ft", True)
+            xf_mean = st.slider("xf_ft Mean (ft)", 100.0, 500.0, state['xf_ft'], 10.0, key="mc_xf_mean")
+            xf_std  = st.slider("xf_ft Stdev (ft)", 0.0, 100.0, 30.0, 5.0, key="mc_xf_std")
+        with p3:
+            uc_int = st.checkbox("pad_interf", False)
+            int_min = st.slider("Interference Min", 0.0, 0.8, state['pad_interf'], 0.01, key="mc_int_min")
+            int_max = st.slider("Interference Max", 0.0, 0.8, 0.5, 0.01, key="mc_int_max")
 
-    num_runs = st.number_input("Number of Monte Carlo runs", 10, 500, 50, 10)
+        num_runs = st.number_input("Number of Monte Carlo runs", 10, 500, 50, 10)
 
     if st.button("Run Monte Carlo Simulation", key="run_mc"):
+        # (Existing Monte Carlo logic remains the same)
         qg_runs, qo_runs, eur_g, eur_o = [], [], [], []
         bar_mc = st.progress(0, text="Running Monte Carlo simulation...")
         base_state = state.copy()
         rng_mc = np.random.default_rng(st.session_state.rng_seed + 1)
-
         for i in range(int(num_runs)):
             temp = base_state.copy()
-            if uc_k:
-                temp['k_stdev'] = stats.truncnorm.rvs(
-                    (0 - k_mean) / k_std, (0.2 - k_mean) / k_std,
-                    loc=k_mean, scale=k_std, random_state=rng_mc
-                )
-            if uc_xf:
-                temp['xf_ft'] = stats.truncnorm.rvs(
-                    (100 - xf_mean) / xf_std, (500 - xf_mean) / xf_std,
-                    loc=xf_mean, scale=xf_std, random_state=rng_mc
-                )
-            if uc_int:
-                temp['pad_interf'] = stats.uniform.rvs(
-                    loc=int_min, scale=int_max - int_min, random_state=rng_mc
-                )
-
+            if uc_k: temp['k_stdev'] = stats.truncnorm.rvs((0 - k_mean) / k_std, (0.2 - k_mean) / k_std, loc=k_mean, scale=k_std, random_state=rng_mc)
+            if uc_xf: temp['xf_ft'] = stats.truncnorm.rvs((100 - xf_mean) / xf_std, (500 - xf_mean) / xf_std, loc=xf_mean, scale=xf_std, random_state=rng_mc)
+            if uc_int: temp['pad_interf'] = stats.uniform.rvs(loc=int_min, scale=int_max - int_min, random_state=rng_mc)
             res = fallback_fast_solver(temp, rng_mc)
             qg_runs.append(res['qg']); qo_runs.append(res['qo'])
             eur_g.append(res['EUR_g_BCF']); eur_o.append(res['EUR_o_MMBO'])
             bar_mc.progress((i + 1) / int(num_runs), f"Run {i+1}/{int(num_runs)}")
-
-        st.session_state.mc_results = {
-            't': res['t'],
-            'qg_runs': np.array(qg_runs),
-            'qo_runs': np.array(qo_runs),
-            'eur_g': np.array(eur_g),
-            'eur_o': np.array(eur_o),
-        }
+        st.session_state.mc_results = {'t': res['t'], 'qg_runs': np.array(qg_runs), 'qo_runs': np.array(qo_runs), 'eur_g': np.array(eur_g), 'eur_o': np.array(eur_o)}
         bar_mc.empty()
 
     if 'mc_results' in st.session_state:
+        # (Existing Monte Carlo plotting logic remains the same)
         mc = st.session_state.mc_results
         p10_g, p50_g, p90_g = np.percentile(mc['qg_runs'], [90, 50, 10], axis=0)
         p10_o, p50_o, p90_o = np.percentile(mc['qo_runs'], [90, 50, 10], axis=0)
-
+        st.markdown("#### Figure 1: Probabilistic Forecasts")
         c1, c2 = st.columns(2)
         with c1:
-            fig = go.Figure([
-                go.Scatter(x=mc['t'], y=p90_g, fill=None, mode='lines', line_color='lightgrey', name='P10'),
-                go.Scatter(x=mc['t'], y=p10_g, fill='tonexty', mode='lines', line_color='lightgrey', name='P90'),
-                go.Scatter(x=mc['t'], y=p50_g, mode='lines', line_color='red', name='P50'),
-            ])
-            st.plotly_chart(
-                fig.update_layout(**semi_log_layout("Gas Rate Probabilistic Forecast", yaxis="Gas Rate (Mscf/d)")),
-                use_container_width=True, theme="streamlit"
-            )
-            st.plotly_chart(
-                px.histogram(x=mc['eur_g'], nbins=30, labels={'x': 'Gas EUR (BCF)'})
-                  .update_layout(title="<b>Distribution of Gas EUR</b>", template="plotly_white"),
-                use_container_width=True, theme="streamlit"
-            )
+            fig = go.Figure([go.Scatter(x=mc['t'], y=p90_g, fill=None, mode='lines', line_color='lightgrey', name='P10'), go.Scatter(x=mc['t'], y=p10_g, fill='tonexty', mode='lines', line_color='lightgrey', name='P90'), go.Scatter(x=mc['t'], y=p50_g, mode='lines', line_color='red', name='P50')])
+            st.plotly_chart(fig.update_layout(**semi_log_layout("Gas Rate Forecast", yaxis="Gas Rate (Mscf/d)")), use_container_width=True)
         with c2:
-            fig = go.Figure([
-                go.Scatter(x=mc['t'], y=p90_o, fill=None, mode='lines', line_color='lightgreen', name='P10'),
-                go.Scatter(x=mc['t'], y=p10_o, fill='tonexty', mode='lines', line_color='lightgreen', name='P90'),
-                go.Scatter(x=mc['t'], y=p50_o, mode='lines', line_color='green', name='P50'),
-            ])
-            st.plotly_chart(
-                fig.update_layout(**semi_log_layout("Oil Rate Probabilistic Forecast", yaxis="Oil Rate (STB/d)")),
-                use_container_width=True, theme="streamlit"
-            )
-            st.plotly_chart(
-                px.histogram(x=mc['eur_o'], nbins=30, labels={'x': 'Oil EUR (MMSTB)'},
-                             color_discrete_sequence=['green'])
-                  .update_layout(title="<b>Distribution of Oil EUR</b>", template="plotly_white"),
-                use_container_width=True, theme="streamlit"
-            )
+            fig = go.Figure([go.Scatter(x=mc['t'], y=p90_o, fill=None, mode='lines', line_color='lightgreen', name='P10'), go.Scatter(x=mc['t'], y=p10_o, fill='tonexty', mode='lines', line_color='lightgreen', name='P90'), go.Scatter(x=mc['t'], y=p50_o, mode='lines', line_color='green', name='P50')])
+            st.plotly_chart(fig.update_layout(**semi_log_layout("Oil Rate Forecast", yaxis="Oil Rate (STB/d)")), use_container_width=True)
+        st.markdown("#### Figure 2: EUR Distributions")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(px.histogram(x=mc['eur_g'], nbins=30, labels={'x': 'Gas EUR (BCF)'}).update_layout(title="<b>Distribution of Gas EUR</b>", template="plotly_white"), use_container_width=True)
+        with c2:
+            st.plotly_chart(px.histogram(x=mc['eur_o'], nbins=30, labels={'x': 'Oil EUR (MMSTB)'}, color_discrete_sequence=['green']).update_layout(title="<b>Distribution of Oil EUR</b>", template="plotly_white"), use_container_width=True)
 
+    st.markdown("---")
+
+    # --- Section 2: Deterministic Sensitivity (Tornado Chart) ---
+    st.subheader("2. Sensitivity Analysis (Tornado Chart)")
+    st.info("This analysis varies one parameter at a time (from a low P10 to a high P90 value) to see which inputs have the biggest impact on the final result.")
+
+    with st.expander("Configure Tornado Chart Parameters"):
+        tornado_output = st.selectbox("Select Output for Tornado Chart", ["EUR Oil (MMBO)", "EUR Gas (BCF)"])
+        
+        # Define parameters for sensitivity
+        params_to_test = {
+            "Frac Half-Length (xf_ft)": (state['xf_ft'] * 0.8, state['xf_ft'], state['xf_ft'] * 1.2),
+            "Initial Pressure (p_init_psi)": (state['p_init_psi'] * 0.9, state['p_init_psi'], state['p_init_psi'] * 1.1),
+            "Pad Interference (pad_interf)": (0.0, state['pad_interf'], 0.6),
+            "Permeability StDev (k_stdev)": (0.01, state['k_stdev'], 0.15)
+        }
+        
+        tornado_params = {}
+        st.markdown("###### Define Low (P90), Base (P50), and High (P10) values for each parameter:")
+        for name, (p90, p50, p10) in params_to_test.items():
+            key_name = name.split('(')[1].split(')')[0]
+            tornado_params[key_name] = st.slider(name, float(p90), float(p10), (float(p90), float(p50), float(p10)))
+
+    if st.button("🚀 Run Tornado Analysis", use_container_width=True):
+        base_state = state.copy()
+        tornado_results = []
+        
+        # 1. Run Base Case (all P50 values)
+        for param, values in tornado_params.items():
+            base_state[param] = values[1] # Set to P50
+        base_sim = fallback_fast_solver(base_state, np.random.default_rng())
+        base_eur = base_sim['EUR_o_MMBO'] if "Oil" in tornado_output else base_sim['EUR_g_BCF']
+
+        # 2. Loop through each parameter for low and high cases
+        progress_bar = st.progress(0, "Starting Tornado analysis...")
+        total_runs = len(tornado_params) * 2
+        run_count = 0
+        
+        for param, (low_val, base_val, high_val) in tornado_params.items():
+            # Run Low Case
+            temp_state = base_state.copy()
+            temp_state[param] = low_val
+            low_sim = fallback_fast_solver(temp_state, np.random.default_rng())
+            low_eur = low_sim['EUR_o_MMBO'] if "Oil" in tornado_output else low_sim['EUR_g_BCF']
+            run_count += 1
+            progress_bar.progress(run_count / total_runs, f"Running Low Case for {param}...")
+
+            # Run High Case
+            temp_state[param] = high_val
+            high_sim = fallback_fast_solver(temp_state, np.random.default_rng())
+            high_eur = high_sim['EUR_o_MMBO'] if "Oil" in tornado_output else high_sim['EUR_g_BCF']
+            run_count += 1
+            progress_bar.progress(run_count / total_runs, f"Running High Case for {param}...")
+
+            tornado_results.append({
+                "Parameter": param,
+                "Low_Value_EUR": low_eur,
+                "High_Value_EUR": high_eur,
+                "Swing": abs(high_eur - low_eur)
+            })
+        
+        st.session_state.tornado_df = pd.DataFrame(tornado_results).sort_values(by="Swing", ascending=True)
+        st.session_state.tornado_base_eur = base_eur
+        progress_bar.empty()
+
+    if 'tornado_df' in st.session_state:
+        df_tornado = st.session_state.tornado_df
+        base_eur = st.session_state.tornado_base_eur
+        
+        st.markdown("---")
+        st.markdown(f"#### Figure 3: Tornado Chart for {tornado_output}")
+        
+        fig_tornado = go.Figure()
+        fig_tornado.add_trace(go.Bar(
+            y=df_tornado["Parameter"],
+            x=df_tornado["Low_Value_EUR"],
+            name="Low Case (P90)",
+            orientation='h',
+            marker=dict(color='rgba(255, 0, 0, 0.6)')
+        ))
+        fig_tornado.add_trace(go.Bar(
+            y=df_tornado["Parameter"],
+            x=df_tornado["High_Value_EUR"],
+            name="High Case (P10)",
+            orientation='h',
+            marker=dict(color='rgba(0, 128, 0, 0.6)')
+        ))
+        
+        fig_tornado.update_layout(
+            barmode='overlay',
+            title=f"Sensitivity of {tornado_output}",
+            xaxis_title=tornado_output,
+            yaxis_title="Parameter",
+            template="plotly_white",
+            height=400 + len(df_tornado) * 25
+        )
+        fig_tornado.add_vline(x=base_eur, line_width=2, line_dash="dash", line_color="black", annotation_text="Base Case")
+        st.plotly_chart(fig_tornado, use_container_width=True)
+        with st.expander("About this chart"):
+            st.markdown(f"""
+            This Tornado chart ranks the input parameters by their impact on the final **{tornado_output}**.
+            - The **black dashed line** represents the Base Case EUR.
+            - Each horizontal bar shows the range of EUR outcomes when a single parameter is varied from its Low to High value, while all other parameters are held at their Base value.
+            - **Longer bars indicate a higher sensitivity**, meaning that uncertainty in that parameter has a larger effect on the forecast.
+            """)
 # ======== Well Placement Optimization ========
 elif selected_tab == "Well Placement Optimization":
     """
