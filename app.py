@@ -983,7 +983,6 @@ def run_simulation_engine(state):
     sim = _apply_play_bounds_to_results(sim, current_play, engine_name)
 
 
-        return None
     if state.get('L_ft', 0) <= 0:
         st.error(
             "FATAL INPUT ERROR: 'Lateral length (ft)' must be a positive number. "
@@ -2076,7 +2075,7 @@ else:
         st.plotly_chart(fig3d, use_container_width=True)
 
 
-elif selected_tab == "Slice Viewer":
+if selected_tab == "Slice Viewer":
     st.header("Slice Viewer")
     sim_data = st.session_state.get("sim")
     if sim_data is None and st.session_state.get('kx') is None:
@@ -2108,7 +2107,7 @@ elif selected_tab == "Slice Viewer":
         else:
             st.warning(f"Data for '{prop_slice}' not found.")
 
-elif selected_tab == "QA / Material Balance":
+if selected_tab == "QA / Material Balance":
     st.header("QA / Material Balance")
     sim = st.session_state.get("sim")
 
@@ -2190,7 +2189,7 @@ elif selected_tab == "QA / Material Balance":
     else:
         st.info("Not enough data points for Oil Material Balance plot.")
         
-elif selected_tab == "Economics":
+if selected_tab == "Economics":
     st.header("Financial Model")
     if st.session_state.get("sim") is None:
         st.info("Run a simulation on the 'Results' tab first to populate the financial model.")
@@ -2311,11 +2310,11 @@ elif selected_tab == "Economics":
             'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
         }), use_container_width=True)
 
-elif selected_tab == "EUR vs Lateral Length":
+if selected_tab == "EUR vs Lateral Length":
     st.header("EUR vs Lateral Length Sensitivity")
     st.info("This feature is not yet implemented. It will allow you to run multiple simulations to see how EUR changes with lateral length.")
 
-elif selected_tab == "Field Match (CSV)":
+if selected_tab == "Field Match (CSV)":
     st.header("Field Match (CSV)")
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -2366,7 +2365,7 @@ elif selected_tab == "Field Match (CSV)":
                 )
         elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
             st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
-elif selected_tab == "Automated Match":
+if selected_tab == "Automated Match":
     st.header("Automated History Matching")
     st.info("This module uses a genetic algorithm (Differential Evolution) to automatically find the best parameters to match historical data.")
 
@@ -2478,7 +2477,7 @@ elif selected_tab == "Automated Match":
                 fig_match.update_layout(title="<b>Final History Match</b>", template="plotly_white", xaxis_title="Time (days)")
                 st.plotly_chart(fig_match, use_container_width=True)
 
-elif selected_tab == "Uncertainty & Monte Carlo":
+if selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo")
     p1, p2, p3 = st.columns(3)
     with p1:
@@ -2557,7 +2556,7 @@ elif selected_tab == "Uncertainty & Monte Carlo":
                 ), use_container_width=True, theme="streamlit"
             )
 
-elif selected_tab == "Well Placement Optimization":
+if selected_tab == "Well Placement Optimization":
     st.header("Well Placement Optimization")
     st.markdown("#### 1. General Parameters")
     c1_opt, c2_opt, c3_opt = st.columns(3)
@@ -2674,7 +2673,7 @@ elif selected_tab == "Well Placement Optimization":
         )
         st.plotly_chart(fig_opt, use_container_width=True, theme="streamlit")
 
-elif selected_tab == "User’s Manual":
+if selected_tab == "User’s Manual":
     st.header("User’s Manual")
     st.markdown("---")
     st.markdown("""
@@ -2722,7 +2721,7 @@ elif selected_tab == "User’s Manual":
     -   In the **Automated Match** tab, the interface will warn you if a minimum bound is set higher than its corresponding maximum bound.
     -   On the **Results** tab, sanity checks are performed to ensure the final EURs are reasonable for the selected play type. If the results are physically inconsistent (e.g., an oil well producing an unrealistic amount of gas), an error message will be displayed, and the results will be withheld to prevent misinterpretation.
     """)
-elif selected_tab == "Solver & Profiling":
+if selected_tab == "Solver & Profiling":
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
     st.markdown("### Current Numerical Solver Settings")
@@ -2744,7 +2743,7 @@ elif selected_tab == "Solver & Profiling":
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-elif selected_tab == "DFN Viewer":
+if selected_tab == "DFN Viewer":
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
     if segs is None or len(segs) == 0:
