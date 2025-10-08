@@ -16,21 +16,17 @@ from core.full3d import simulate
 from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 import warnings  # trap analytical power warnings for Arps
 
-# ==== EUR & Validation helpers ===============================================
-from scipy.integrate import cumulative_trapezoid as _ctr
-import numpy as _np
-
-# ---- EUR bounds & compact gauge helpers (module-scope; always defined) ----
+# ========= EUR display policy & compact gauge (module-scope) =========
 MIDLAND_BOUNDS = {
-    "oil_mmbo": (0.4, 2.0),   # display sanity band
+    "oil_mmbo": (0.4, 2.0),
     "gas_bcf":  (0.2, 3.5),
-    "max_gor_scfstb": 2000.0, # optional cap
+    "max_gor_scfstb": 2000.0,
 }
 
 def enforce_midland_bounds(eur_o_mmbo: float, eur_g_bcf: float):
     """
-    Clamp display-only EURs into Permian–Midland oil-window bands
-    and cap GOR if needed. Returns (eur_o_disp, eur_g_disp, note).
+    Clamp DISPLAYED EURs to Permian–Midland oil-window bands and cap GOR.
+    Returns (eur_o_disp, eur_g_disp, note).
     """
     lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
     lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
@@ -39,7 +35,7 @@ def enforce_midland_bounds(eur_o_mmbo: float, eur_g_bcf: float):
     o = max(lo_o, min(float(eur_o_mmbo or 0.0), hi_o))
     g = max(lo_g, min(float(eur_g_bcf or 0.0), hi_g))
 
-    # Keep implied GOR in check (display-only)
+    # Keep implied GOR reasonable for display
     if o > 0:
         gor = (g * 1.0e9) / (o * 1.0e6)
         if gor > max_gor:
@@ -52,7 +48,7 @@ def enforce_midland_bounds(eur_o_mmbo: float, eur_g_bcf: float):
 
 def render_semi_gauge(title: str, value: float, unit: str,
                       vmin: float, vmax: float, bar_color: str):
-    """Compact semicircle gauge that fits two side-by-side on laptop screens."""
+    """Compact semicircle gauge that fits two-up on laptop screens."""
     import plotly.graph_objects as go
     v = 0.0 if value is None else float(value)
     vdisp = max(vmin, min(v, vmax))
@@ -70,13 +66,14 @@ def render_semi_gauge(title: str, value: float, unit: str,
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-    fig.update_layout(margin=dict(l=6, r=6, t=30, b=0), height=220)  # shorter = fits better
+    fig.update_layout(margin=dict(l=6, r=6, t=30, b=0), height=220)
     fig.add_annotation(
         text=f"{v:.2f} {unit}",
         showarrow=False, yref="paper", y=0.02, xref="paper", x=0.5,
         font=dict(size=20, color="#475569"),
     )
     return fig
+# =====================================================================
 
 # ---- Gauges helper (place at top-level, not inside any block) ----
 def render_semi_gauge(title: str, value: float, unit: str,
@@ -1610,7 +1607,6 @@ elif selected_tab == "RTA":
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True)
 
-# ===================== RESULTS TAB (single, clean) =====================
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
@@ -1641,14 +1637,11 @@ elif selected_tab == "Results":
     # ---- Run button ----
     run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
     if run_clicked:
-        # Reset previous outputs and warnings each run
         st.session_state.sim = None
         st.session_state["sanity_warned"] = False
-
         if "kx" not in st.session_state:
             st.info("Rock properties not found. Generating them first...")
             generate_property_volumes(state)
-
         with st.spinner("Running full 3D simulation..."):
             sim_out = run_simulation_engine(state)
             if sim_out is not None:
@@ -1671,26 +1664,21 @@ elif selected_tab == "Results":
     if sim.get("runtime_s") is not None:
         st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-    # ---- Resolve EURs from sim (accept several key spellings; fallback to cumulatives) ----
+    # ---- Resolve EURs (fallback to cumulatives) ----
     def _g(k): return sim.get(k)
-
     eur_g = _g("EUR_g_BCF") or _g("eur_gas_BCF") or _g("EUR_Gas_BCF") or _g("eur_gas")
     eur_o = _g("EUR_o_MMBO") or _g("eur_oil_MMBO") or _g("EUR_Oil_MMBO") or _g("eur_oil")
-
-    # Fallback: derive from cumulative arrays if direct EURs absent
     if eur_g is None and isinstance(_g("cum_g_BCF"), (list, tuple, np.ndarray)) and len(_g("cum_g_BCF")):
         eur_g = _g("cum_g_BCF")[-1]
     if eur_o is None and isinstance(_g("cum_o_MMBO"), (list, tuple, np.ndarray)) and len(_g("cum_o_MMBO")):
         eur_o = _g("cum_o_MMBO")[-1]
-
     eur_g = float(eur_g) if eur_g is not None else 0.0
     eur_o = float(eur_o) if eur_o is not None else 0.0
 
-    # ---- Sanity bands (Permian–Midland oil window) ----
-    OIL_MIN, OIL_MAX = 0.4, 2.0    # MMBO
-    GAS_MIN, GAS_MAX = 0.2, 3.5    # BCF
-    GOR_MAX = 2000                 # scf/STB
-
+    # ---- Sanity messages (raw values, not clamped) ----
+    OIL_MIN, OIL_MAX = 0.4, 2.0
+    GAS_MIN, GAS_MAX = 0.2, 3.5
+    GOR_MAX = 2000
     issues = []
     if not (OIL_MIN <= eur_o <= OIL_MAX):
         issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity ({OIL_MIN}, {OIL_MAX}) MMBO.")
@@ -1699,7 +1687,6 @@ elif selected_tab == "Results":
     implied_gor = (eur_g * 1e9) / (eur_o * 1e6) if eur_o > 0 else float("inf")
     if implied_gor > GOR_MAX:
         issues.append(f"Implied EUR GOR {implied_gor:,.0f} scf/STB exceeds {GOR_MAX:,} scf/STB.")
-
     if issues and not st.session_state.get("sanity_warned"):
         st.warning(
             "Sanity checks flagged issues (Analytical engine).\n\n"
@@ -1709,36 +1696,8 @@ elif selected_tab == "Results":
         )
         st.session_state["sanity_warned"] = True
 
-    # ---- Ensure the gauge helper exists (failsafe; your top-level def should already exist) ----
-    if "render_semi_gauge" not in globals():
-        def render_semi_gauge(title, value, unit, vmin, vmax, bar_color):
-            v = 0.0 if value is None else float(value)
-            vdisp = max(vmin, min(v, vmax))
-            fig = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=vdisp,
-                number={"valueformat": ".2f", "font": {"size": 36}},
-                title={"text": title, "font": {"size": 18}},
-                gauge={
-                    "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
-                    "bar": {"color": bar_color},
-                    "bgcolor": "rgba(0,0,0,0)",
-                    "shape": "angular",
-                    "threshold": None
-                },
-                domain={"x": [0, 1], "y": [0, 1]}
-            ))
-            fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
-            fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
-            fig.add_annotation(
-                text=f"{v:.2f} {unit}", showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5,
-                font=dict(size=28)
-            )
-            return fig
-
-    # ---- Display EURs clamped to Midland bands & render compact gauges ----
+    # ---- DISPLAY: clamp to Midland bands & render compact gauges ----
     eur_o_disp, eur_g_disp, clamp_note = enforce_midland_bounds(eur_o, eur_g)
-
     if not st.session_state.get("eur_bounds_noted"):
         st.info(clamp_note)
         st.session_state["eur_bounds_noted"] = True
@@ -1758,7 +1717,6 @@ elif selected_tab == "Results":
             bar_color="#ef4444",
         )
         st.plotly_chart(fig_gas, use_container_width=True)
-
 
     # ===================== RATE & CUMULATIVE PLOTS =====================
     t  = sim.get("t"); qg = sim.get("qg"); qo = sim.get("qo"); qw = sim.get("qw")
@@ -1869,7 +1827,6 @@ elif selected_tab == "Results":
         st.plotly_chart(fig_cum, use_container_width=True, theme=None)
     else:
         st.warning("Cumulative series not available.")
-
 # ======== 3D Viewer tab ========
 elif selected_tab == "3D Viewer":
     """
