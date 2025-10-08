@@ -944,6 +944,8 @@ def _sanity_bounds_for_play(play_name: str):
         bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
     return bounds
 def run_simulation_engine(state):
+    out: dict = {}
+
     import warnings
     import time
     import numpy as np
@@ -961,7 +963,7 @@ def run_simulation_engine(state):
         )
 
     # --- pull arrays from engine output ---
-    t  = out.get("t")
+    t = (out or {}).get('t')
     qg = out.get("qg")
     qo = out.get("qo")
     qw = out.get("qw")
