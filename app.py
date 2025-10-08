@@ -1124,8 +1124,6 @@ def run_simulation_engine(state):
     # This replaces any ad-hoc EUR calcs elsewhere — return the enriched result now
     return sim
 
-
-  
     # --- Build sim dict and compute EURs/cumulatives ---
     sim = dict(out) if isinstance(out, dict) else {}
     sim["t"], sim["qg"], sim["qo"], sim["qw"] = t, qg, qo, qw
@@ -1617,6 +1615,7 @@ elif selected_tab == "RTA":
     fig2.update_layout(**semi_log_layout("R2. Log-log derivative", yaxis="Slope"))
     st.plotly_chart(fig2, use_container_width=True)
 
+# ===================== RESULTS TAB (single, clean) =====================
 elif selected_tab == "Results":
     st.header("Simulation Results")
 
@@ -1644,22 +1643,23 @@ elif selected_tab == "Results":
             key="eur_min_rate_oil_stbd",
         )
 
-    # DEFINITIVE FIX
-run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
-if run_clicked:
-    # ALWAYS CLEAR THE PREVIOUS RESULT BEFORE A NEW RUN
-    st.session_state.sim = None 
-    
-    if "kx" not in st.session_state:
-        st.info("Rock properties not found. Generating them first...")
-        generate_property_volumes(state)
-    with st.spinner("Running full 3D simulation..."):
-        sim_out = run_simulation_engine(state)
-        # Only update the session state if the simulation was successful
-        if sim_out is not None:
-            st.session_state.sim = sim_out
-            
-    # ---- fetch sim & guard against stale signatures ----
+    # ---- Run button ----
+    run_clicked = st.button("Run simulation", type="primary", use_container_width=True)
+    if run_clicked:
+        # Reset previous outputs and warnings each run
+        st.session_state.sim = None
+        st.session_state["sanity_warned"] = False
+
+        if "kx" not in st.session_state:
+            st.info("Rock properties not found. Generating them first...")
+            generate_property_volumes(state)
+
+        with st.spinner("Running full 3D simulation..."):
+            sim_out = run_simulation_engine(state)
+            if sim_out is not None:
+                st.session_state.sim = sim_out
+
+    # ---- Fetch sim & guard against stale signatures ----
     sim = st.session_state.get("sim")
     cur_sig  = _sim_signature_from_state()
     prev_sig = sim.get("_sim_signature") if isinstance(sim, dict) else None
@@ -1668,214 +1668,94 @@ if run_clicked:
         sim = None
         st.info("Play/engine/physics changed. Please click **Run simulation** to refresh results.")
 
-    if sim is None:
-        st.info("Click **Run simulation** to compute and display the full 3D results.")
-    else:
-        if sim.get("runtime_s") is not None:
-             st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
-
-        # --- Sanity gate: block publishing if EURs are out-of-bounds ---
-        eur_g = float(sim.get("EUR_g_BCF", 0.0))
-        eur_o = float(sim.get("EUR_o_MMBO", 0.0))
-
-        play_name = st.session_state.get("play_sel", "")
-        b = _sanity_bounds_for_play(play_name)
-
-        implied_eur_gor = (1000.0 * eur_g / eur_o) if eur_o > 1e-12 else np.inf
-        gor_cap = float(b.get("max_eur_gor_scfstb", 2000.0))
-        tol = 1e-6
-
-        # --- CORRECTED SANITY CHECK BLOCK ---
-        issues = []
-        chosen_engine = st.session_state.get("engine_type", "")
-
-        # Check Gas EUR
-        if not (b["gas_bcf"][0] <= eur_g <= b["gas_bcf"][1]):
-            issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity {b['gas_bcf']} BCF")
-        
-        # Check Oil EUR
-        if eur_o < b["oil_mmbo"][0] or eur_o > b["oil_mmbo"][1]:
-            issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity {b['oil_mmbo']} MMBO")
-        
-        # Only apply the strict GOR check for the reliable Analytical Model
-        if "Analytical" in chosen_engine:
-            if implied_eur_gor > (gor_cap + tol):
-                issues.append(
-                    f"Implied EUR GOR {implied_eur_gor:,.0f} scf/STB exceeds {gor_cap:,.0f}"
-                )
-        
-        # --- END OF CORRECTED SANITY CHECK BLOCK ---
-
-        if issues:
-            chosen_engine = st.session_state.get("engine_type", "")
-            hint = (
-                " Tip: Try increasing the 'Pad BHP (psi)' in the sidebar to be closer to the 'pb_psi' "
-                "to reduce gas production."
-            )
-            if "Analytical" in chosen_engine:
-                # During proxy debugging, warn but do not block publishing
-                st.warning(
-                    "Sanity checks flagged issues (Analytical engine), but results are shown for debugging.\n\n"
-                    "Details:\n- " + "\n- ".join(issues) + hint
-                )
-            else:
-                st.error(
-                    "Production results failed sanity checks and were not published.\n\n"
-                    "Details:\n- " + "\n- ".join(issues) + hint
-                )
-                st.stop()
-
-        # ---- Validation gate (engine-side) ----
-        eur_valid = bool(sim.get("eur_valid", True))
-        eur_msg = sim.get("eur_validation_msg", "OK")
-        if not eur_valid:
-            st.error(
-                "Production results failed sanity checks and were not published.\n\n"
-                f"Details: {eur_msg}\n\n"
-                "Please review PVT, controls, and units; then re-run.",
-                icon="🚫",
-            )
-            st.stop()
-
-
-        
- # ======== Results tab ========
-if selected_tab == "Results":
-    # Pull simulation results safely
-    sim = st.session_state.get("sim") if "sim" in st.session_state else None
     if not isinstance(sim, dict):
         st.info("Click **Run simulation** to compute and display the full 3D results.")
         st.stop()
 
-    # ---- Resolve EURs (prefer session_state; fall back to old locals if present) ----
-    eur_oil_mmbo = (
-        sim.get("eur_oil_mmbo")
-        or sim.get("EUR_Oil_MMBO")
-        or sim.get("eur_oil")
-        or locals().get("eur_o")     # fallback to your previous variables if still present
-    )
-    eur_gas_bcf = (
-        sim.get("eur_gas_bcf")
-        or sim.get("EUR_Gas_BCF")
-        or sim.get("eur_gas")
-        or locals().get("eur_g")     # fallback to your previous variables if still present
-    )
+    # ---- Success banner ----
+    if sim.get("runtime_s") is not None:
+        st.success(f"Simulation complete in {sim.get('runtime_s', 0):.2f} seconds.")
 
-    # Coerce to floats (handles numpy types / None)
-    eur_oil_mmbo = float(eur_oil_mmbo) if eur_oil_mmbo is not None else 0.0
-    eur_gas_bcf  = float(eur_gas_bcf)  if eur_gas_bcf  is not None else 0.0
+    # ---- Resolve EURs from sim (accept several key spellings; fallback to cumulatives) ----
+    def _g(k): return sim.get(k)
 
-    # ---- Permian–Midland (oil window) sanity bands ----
+    eur_g = _g("EUR_g_BCF") or _g("eur_gas_BCF") or _g("EUR_Gas_BCF") or _g("eur_gas")
+    eur_o = _g("EUR_o_MMBO") or _g("eur_oil_MMBO") or _g("EUR_Oil_MMBO") or _g("eur_oil")
+
+    # Fallback: derive from cumulative arrays if direct EURs absent
+    if eur_g is None and isinstance(_g("cum_g_BCF"), (list, tuple, np.ndarray)) and len(_g("cum_g_BCF")):
+        eur_g = _g("cum_g_BCF")[-1]
+    if eur_o is None and isinstance(_g("cum_o_MMBO"), (list, tuple, np.ndarray)) and len(_g("cum_o_MMBO")):
+        eur_o = _g("cum_o_MMBO")[-1]
+
+    eur_g = float(eur_g) if eur_g is not None else 0.0
+    eur_o = float(eur_o) if eur_o is not None else 0.0
+
+    # ---- Sanity bands (Permian–Midland oil window) ----
     OIL_MIN, OIL_MAX = 0.4, 2.0    # MMBO
     GAS_MIN, GAS_MAX = 0.2, 3.5    # BCF
     GOR_MAX = 2000                 # scf/STB
 
-    sanity_msgs = []
-    if eur_oil_mmbo < OIL_MIN or eur_oil_mmbo > OIL_MAX:
-        sanity_msgs.append(f"Oil EUR {eur_oil_mmbo:.2f} MMBO outside sanity ({OIL_MIN}, {OIL_MAX}) MMBO.")
-    if eur_gas_bcf < GAS_MIN or eur_gas_bcf > GAS_MAX:
-        sanity_msgs.append(f"Gas EUR {eur_gas_bcf:.2f} BCF outside sanity ({GAS_MIN}, {GAS_MAX}) BCF.")
+    issues = []
+    if not (OIL_MIN <= eur_o <= OIL_MAX):
+        issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity ({OIL_MIN}, {OIL_MAX}) MMBO.")
+    if not (GAS_MIN <= eur_g <= GAS_MAX):
+        issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity ({GAS_MIN}, {GAS_MAX}) BCF.")
+    implied_gor = (eur_g * 1e9) / (eur_o * 1e6) if eur_o > 0 else float("inf")
+    if implied_gor > GOR_MAX:
+        issues.append(f"Implied EUR GOR {implied_gor:,.0f} scf/STB exceeds {GOR_MAX:,} scf/STB.")
 
-    # Implied GOR ≈ scf/STB
-    implied_gor = None
-    if eur_oil_mmbo > 0:
-        implied_gor = (eur_gas_bcf * 1e9) / (eur_oil_mmbo * 1e6)  # scf/STB
-        if implied_gor > GOR_MAX:
-            sanity_msgs.append(f"Implied EUR GOR {implied_gor:,.0f} scf/STB exceeds {GOR_MAX:,} scf/STB.")
-
-    if sanity_msgs:
+    if issues and not st.session_state.get("sanity_warned"):
         st.warning(
             "Sanity checks flagged issues (Analytical engine).\n\n"
-            + "\n".join(f"- {m}" for m in sanity_msgs)
+            + "\n".join(f"- {m}" for m in issues)
             + "\n\n**Tip:** If gas looks too high for the oil window, try increasing **Pad BHP (psi)** "
               "toward **pb_psi** to reduce gas liberation."
         )
+        st.session_state["sanity_warned"] = True
 
-    # ---- Layout: Oil (left, green) then Gas (right, red) ----
+    # ---- Ensure the gauge helper exists (failsafe; your top-level def should already exist) ----
+    if "render_semi_gauge" not in globals():
+        def render_semi_gauge(title, value, unit, vmin, vmax, bar_color):
+            v = 0.0 if value is None else float(value)
+            vdisp = max(vmin, min(v, vmax))
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=vdisp,
+                number={"valueformat": ".2f", "font": {"size": 36}},
+                title={"text": title, "font": {"size": 18}},
+                gauge={
+                    "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
+                    "bar": {"color": bar_color},
+                    "bgcolor": "rgba(0,0,0,0)",
+                    "shape": "angular",
+                    "threshold": None
+                },
+                domain={"x": [0, 1], "y": [0, 1]}
+            ))
+            fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
+            fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
+            fig.add_annotation(
+                text=f"{v:.2f} {unit}", showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5,
+                font=dict(size=28)
+            )
+            return fig
+
+    # ---- Gauges: Oil first (green), Gas second (red). Clamp DISPLAY to sane max ----
     c1, c2 = st.columns(2)
-
     with c1:
-        # vmax ensures the needle always fits; prefers sanity max but expands if needed
-        vmax_oil = max(OIL_MAX, eur_oil_mmbo if eur_oil_mmbo > 0 else OIL_MAX)
-        fig_oil = render_semi_gauge(
-            title="EUR Oil",
-            value=eur_oil_mmbo,
-            unit="MMBO",
-            vmin=0.0,
-            vmax=vmax_oil,
-            bar_color="#22c55e",  # green
-        )
+        vmax_oil = max(OIL_MAX, eur_o)  # expand if needed; else stick to sanity max
+        fig_oil = render_semi_gauge("EUR Oil", min(eur_o, vmax_oil), "MMBO", 0.0, vmax_oil, "#22c55e")
         st.plotly_chart(fig_oil, use_container_width=True)
-
     with c2:
-        vmax_gas = max(GAS_MAX, eur_gas_bcf if eur_gas_bcf > 0 else GAS_MAX)
-        fig_gas = render_semi_gauge(
-            title="EUR Gas",
-            value=eur_gas_bcf,
-            unit="BCF",
-            vmin=0.0,
-            vmax=vmax_gas,
-            bar_color="#ef4444",  # red
-        )
+        vmax_gas = max(GAS_MAX, eur_g)
+        fig_gas = render_semi_gauge("EUR Gas", min(eur_g, vmax_gas), "BCF", 0.0, vmax_gas, "#ef4444")
         st.plotly_chart(fig_gas, use_container_width=True)
 
-    # (Optional) keep your existing rate/cumulative sections below this point
+    # ===================== RATE & CUMULATIVE PLOTS =====================
+    t  = sim.get("t"); qg = sim.get("qg"); qo = sim.get("qo"); qw = sim.get("qw")
 
- # ======== Page view selection (radio) ========
-selected_tab = st.sidebar.radio(
-    "View",
-    ["Results", "3D Viewer", "Debug"],
-    index=0
-)
-
-import plotly.graph_objects as go
-
-def render_semi_gauge(title: str, value: float, unit: str,
-                      vmin: float, vmax: float, bar_color: str):
-    """Semicircle gauge (0–180°) with crisp typography and responsive sizing."""
-    if value is None:
-        value = 0.0
-
-    vdisp = max(vmin, min(value, vmax))  # clamp for display
-
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=vdisp,
-        number={"valueformat": ".2f", "font": {"size": 36}},
-        title={"text": title, "font": {"size": 18}},
-        gauge={
-            "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
-            "bar": {"color": bar_color},
-            "bgcolor": "rgba(0,0,0,0)",
-            "shape": "angular",
-            "threshold": None
-        },
-        domain={"x": [0, 1], "y": [0, 1]}
-    ))
-
-    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
-    fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
-    fig.add_annotation(
-        text=f"{value:.2f} {unit}",
-        showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5,
-        font=dict(size=28)
-    )
-    return fig
-
-
-# ======== Results tab ========
-if selected_tab == "Results":
-    sim = st.session_state.get("sim") if "sim" in st.session_state else None
-    if not isinstance(sim, dict):
-        st.info("Click **Run simulation** to compute and display the full 3D results.")
-        sim = {}
-    # --- EXPECTS 'sim' already computed in run_simulation_engine and returned above ---
-    t  = sim.get("t")
-    qg = sim.get("qg")
-    qo = sim.get("qo")
-    qw = sim.get("qw")
-
-    # --- Semi-log Rate vs Time (with decade lines & cycles) ---
+    # --- Semi-log Rate vs Time ---
     if t is not None and (qg is not None or qo is not None or qw is not None):
         t_arr = np.asarray(t, float)
         t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
@@ -1928,23 +1808,11 @@ if selected_tab == "Results":
                               showgrid=True, gridcolor="rgba(0,0,0,0.15)")
         fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
         st.plotly_chart(fig_rate, use_container_width=True, theme=None)
-
-        with st.expander("How to read this plot"):
-            st.markdown(
-                "- **Semi-log X** emphasizes early-time behavior and decline trends.\n"
-                "- **Vertical dotted lines** mark decade boundaries on time (1, 10, 100, … days).\n"
-                "- **Cycles** = number of log decades spanned on the x-axis.\n"
-                "- Gas is on the **left axis**; liquids (oil/water) on the **right axis**.\n"
-                "- Look for slope changes that may indicate **boundary effects** or **flow regime transitions**."
-            )
     else:
         st.warning("Rate series not available.")
 
-    # --- Semi-log Cumulative vs Time (with decade lines & cycles) ---
-    cum_g = sim.get("cum_g_BCF")
-    cum_o = sim.get("cum_o_MMBO")
-    cum_w = sim.get("cum_w_MMBL")
-
+    # --- Semi-log Cumulative vs Time ---
+    cum_g = sim.get("cum_g_BCF"); cum_o = sim.get("cum_o_MMBO"); cum_w = sim.get("cum_w_MMBL")
     if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
         t_arr = np.asarray(t, float)
         t_min = float(np.nanmin(t_arr[t_arr > 0])) if np.any(t_arr > 0) else 1.0
@@ -1991,39 +1859,32 @@ if selected_tab == "Results":
                              showgrid=True, gridcolor="rgba(0,0,0,0.15)")
         fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
         st.plotly_chart(fig_cum, use_container_width=True, theme=None)
-
-        with st.expander("How to read this plot"):
-            st.markdown(
-                "- **Semi-log X** shows cumulative growth vs. decades of time.\n"
-                "- **Cum Gas (left)** and **Cum Oil/Water (right)** track recoveries directly tied to EUR.\n"
-                "- Expect smooth, monotonic curves; kinks often reflect **operating changes** or **model boundaries**."
-            )
     else:
         st.warning("Cumulative series not available.")
 
 # ======== 3D Viewer tab ========
 elif selected_tab == "3D Viewer":
+    """
+    Interactive 3D isosurface viewer for model properties and simulation results.
+    - Pulls 3D arrays from session_state (kx, phi) and from the last sim (pressure, ΔP, OOIP).
+    - Lets the user choose downsampling + isosurface cut to keep it fast and legible.
+    """
     st.subheader("3D Viewer")
-    st.info("Render your 3D grid / fractures / saturation maps here.")
 
-# ======== Debug tab ========
-elif selected_tab == "Debug":
-    st.subheader("Debug")
-    st.json(sim)
+    # -- Gather inputs --
+    sim     = st.session_state.get("sim") or {}
+    kx_vol  = st.session_state.get("kx")           # expected shape: (nz, ny, nx)
+    phi_vol = st.session_state.get("phi")          # expected shape: (nz, ny, nx)
 
-else:
-    pass
-
-    sim = st.session_state.get("sim") or {}
-    kx_vol = st.session_state.get("kx")   # expected (nz, ny, nx)
-    phi_vol = st.session_state.get("phi") # expected (nz, ny, nx)
-
-    # If nothing at all is available, bail early
+    # If nothing is available, guide the user and exit the tab early.
     if kx_vol is None and phi_vol is None and not sim:
-        st.warning("Please generate rock properties or run a simulation to enable the 3D viewer.")
+        st.info(
+            "Render your 3D grid / fractures / saturation maps here.\n\n"
+            "No 3D properties yet — generate rock properties or run a simulation."
+        )
         st.stop()
 
-    # Build the property list only from fields that actually exist
+    # Build the menu only with properties that actually exist.
     menu = []
     if kx_vol is not None:
         menu.append("Permeability (kx)")
@@ -2042,30 +1903,33 @@ else:
 
     prop_3d = st.selectbox("Select property to view:", menu, index=0)
 
+    # Viewer controls
     c1, c2 = st.columns(2)
     with c1:
         ds = st.slider(
             "Downsample factor",
-            1, 10,
-            int(st.session_state.get("vol_downsample", 2)),
-            1,
-            key="vol_ds"
+            min_value=1, max_value=10,
+            value=int(st.session_state.get("vol_downsample", 2)),
+            step=1,
+            help="Larger values speed up rendering by skipping voxels.",
+            key="vol_ds",
         )
     with c2:
         iso_rel = st.slider(
             "Isosurface value (relative)",
-            0.05, 0.95,
-            float(st.session_state.get("iso_value_rel", 0.85)),
-            0.05,
-            key="iso_val_rel"
+            min_value=0.05, max_value=0.95,
+            value=float(st.session_state.get("iso_value_rel", 0.85)),
+            step=0.05,
+            help="Relative cut inside the min–max value range.",
+            key="iso_val_rel",
         )
 
-    # Resolve grid spacing (accept *_ft or raw)
+    # Grid spacing (accept *_ft fallbacks)
     dx = float(state.get("dx_ft", state.get("dx", 1.0)))
     dy = float(state.get("dy_ft", state.get("dy", 1.0)))
     dz = float(state.get("dz_ft", state.get("dz", 1.0)))
 
-    # Select data and styling
+    # Resolve data + styling for the selected property
     data_3d = None
     colorscale = "Viridis"
     colorbar_title = ""
@@ -2084,7 +1948,7 @@ else:
         colorbar_title = "Pressure (psi)"
     elif prop_3d.startswith("Pressure Change"):
         p_final = sim.get("press_matrix")
-        p_init = sim.get("p_init_3d")
+        p_init  = sim.get("p_init_3d")
         if p_final is not None and p_init is not None:
             data_3d = (np.asarray(p_init) - np.asarray(p_final))  # ΔP = Pin − Pfinal
             colorscale = "Inferno"
@@ -2094,7 +1958,7 @@ else:
         colorscale = "Plasma"
         colorbar_title = "OOIP (STB/cell)"
 
-    # Validate
+    # Basic validation
     if data_3d is None:
         st.warning(f"Data for '{prop_3d}' not found. Please run a simulation.")
         st.stop()
@@ -2104,15 +1968,15 @@ else:
         st.warning("3D data is not in the expected (nz, ny, nx) shape.")
         st.stop()
 
-    # Downsample (use your helper if available)
+    # Downsample (prefer a helper if you have one)
     try:
-        data_ds = downsample_3d(data_3d, ds)
+        data_ds = downsample_3d(data_3d, ds)  # your helper (if present)
     except Exception:
-        # simple stride fallback
-        data_ds = data_3d[::ds, ::ds, ::ds]
+        data_ds = data_3d[::ds, ::ds, ::ds]   # simple stride fallback
 
+    # Isosurface cut
     vmin, vmax = float(np.nanmin(data_ds)), float(np.nanmax(data_ds))
-    isoval = vmin + (vmax - vmin) * iso_rel
+    isoval = vmin + (vmax - vmin) * float(iso_rel)
 
     # Build coordinates consistent with (nz, ny, nx)
     nz, ny, nx = data_ds.shape
@@ -2121,15 +1985,13 @@ else:
     x = np.arange(nx) * dx * ds
     Z, Y, X = np.meshgrid(z, y, x, indexing="ij")  # shapes (nz, ny, nx)
 
+    # Render the 3D isosurface
     with st.spinner("Generating 3D plot..."):
         fig3d = go.Figure(
             go.Isosurface(
-                x=X.ravel(),
-                y=Y.ravel(),
-                z=Z.ravel(),
+                x=X.ravel(), y=Y.ravel(), z=Z.ravel(),
                 value=data_ds.ravel(),
-                isomin=isoval,
-                isomax=vmax,
+                isomin=isoval, isomax=vmax,
                 surface_count=1,
                 caps=dict(x_show=False, y_show=False, z_show=False),
                 colorscale=colorscale,
@@ -2137,10 +1999,10 @@ else:
             )
         )
 
-        # Optional horizontal well overlay (best-effort)
+        # Optional: draw a horizontal well (best-effort based on state)
         try:
-            L_ft = float(state.get("L_ft", nx * dx))
-            n_lat = int(state.get("n_laterals", 1))
+            L_ft   = float(state.get("L_ft", nx * dx))
+            n_lat  = int(state.get("n_laterals", 1))
             y_span = ny * dy * ds
             y_positions = ([y_span/3.0, 2*y_span/3.0] if n_lat >= 2 else [y_span/2.0])
             z_mid = (nz * dz * ds) / 2.0
@@ -2148,16 +2010,15 @@ else:
             for i, y_pos in enumerate(y_positions):
                 fig3d.add_trace(
                     go.Scatter3d(
-                        x=[0.0, L_ft],
-                        y=[y_pos, y_pos],
-                        z=[z_mid, z_mid],
+                        x=[0.0, L_ft], y=[y_pos, y_pos], z=[z_mid, z_mid],
                         mode="lines",
                         line=dict(width=8),
-                        name=("Well" if i == 0 else ""),
+                        name=("Well" if i == 0 else None),
                         showlegend=(i == 0),
                     )
                 )
         except Exception:
+            # If we can't compute the overlay, silently skip it.
             pass
 
         fig3d.update_layout(
@@ -2169,44 +2030,99 @@ else:
                 aspectmode="data",
             ),
             margin=dict(l=0, r=0, b=0, t=40),
+            template="plotly_white",
         )
 
         st.plotly_chart(fig3d, use_container_width=True)
 
+# ======== Debug tab ========
+elif selected_tab == "Debug":
+    """Raw JSON dump of the latest simulation dictionary for quick inspection."""
+    st.subheader("Debug")
+    st.json(st.session_state.get("sim"))
 
-if selected_tab == "Slice Viewer":
+# ======== Slice Viewer ========
+elif selected_tab == "Slice Viewer":
+    """
+    2D slice explorer for any (nz, ny, nx) volume.
+    Lets you scroll through i / j / k planes with live imshow rendering.
+    """
     st.header("Slice Viewer")
-    sim_data = st.session_state.get("sim")
-    if sim_data is None and st.session_state.get('kx') is None:
-        st.warning("Please generate rock properties or run a simulation to enable the slice viewer.")
-    else:
-        prop_list = ['Permeability (kx)', 'Permeability (ky)', 'Porosity (ϕ)']
-        if sim_data and sim_data.get('press_matrix') is not None:
-            prop_list.append('Pressure (psi)')
-        c1, c2 = st.columns(2)
-        with c1:
-            prop_slice = st.selectbox("Select property:", prop_list)
-        with c2:
-            plane_slice = st.selectbox("Select plane:", ["k-plane (z, top-down)", "j-plane (y, side-view)", "i-plane (x, end-view)"])
-        data_3d = (st.session_state.get('kx') if 'kx' in prop_slice else st.session_state.get('ky') if 'ky' in prop_slice else st.session_state.get('phi') if 'ϕ' in prop_slice else sim_data.get('press_matrix'))
-        if data_3d is not None:
-            nz, ny, nx = data_3d.shape
-            if "k-plane" in plane_slice:
-                idx, axis_name = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2), "k"
-                data_2d, labels = data_3d[idx, :, :], dict(x="i-index", y="j-index")
-            elif "j-plane" in plane_slice:
-                idx, axis_name = st.slider("j-index (y-layer)", 0, ny - 1, ny // 2), "j"
-                data_2d, labels = data_3d[:, idx, :], dict(x="i-index", y="k-index")
-            else:
-                idx, axis_name = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2), "i"
-                data_2d, labels = data_3d[:, :, idx], dict(x="j-index", y="k-index")
-            fig = px.imshow(data_2d, origin="lower", aspect='equal', labels=labels, color_continuous_scale='viridis')
-            fig.update_layout(title=f"<b>{prop_slice} @ {axis_name} = {idx}</b>")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning(f"Data for '{prop_slice}' not found.")
 
-if selected_tab == "QA / Material Balance":
+    sim_data = st.session_state.get("sim")
+    have_kx  = st.session_state.get('kx') is not None
+    have_ky  = st.session_state.get('ky') is not None
+    have_phi = st.session_state.get('phi') is not None
+
+    if sim_data is None and not (have_kx or have_ky or have_phi):
+        st.warning("Please generate rock properties or run a simulation to enable the slice viewer.")
+        st.stop()
+
+    # Build property options based on availability
+    prop_list = []
+    if have_kx:  prop_list.append('Permeability (kx)')
+    if have_ky:  prop_list.append('Permeability (ky)')
+    if have_phi: prop_list.append('Porosity (ϕ)')
+    if sim_data and sim_data.get('press_matrix') is not None:
+        prop_list.append('Pressure (psi)')
+
+    c1, c2 = st.columns(2)
+    with c1:
+        prop_slice = st.selectbox("Select property:", prop_list)
+    with c2:
+        plane_slice = st.selectbox(
+            "Select plane:",
+            ["k-plane (z, top-down)", "j-plane (y, side-view)", "i-plane (x, end-view)"]
+        )
+
+    # Choose the volume to slice
+    if 'kx' in prop_slice:
+        data_3d = st.session_state.get('kx')
+    elif 'ky' in prop_slice:
+        data_3d = st.session_state.get('ky')
+    elif 'ϕ' in prop_slice:
+        data_3d = st.session_state.get('phi')
+    else:
+        data_3d = sim_data.get('press_matrix') if sim_data else None
+
+    if data_3d is not None:
+        data_3d = np.asarray(data_3d)
+        if data_3d.ndim != 3:
+            st.warning("3D data is not in the expected (nz, ny, nx) shape.")
+            st.stop()
+
+        nz, ny, nx = data_3d.shape
+
+        # Plane selection + index slider
+        if "k-plane" in plane_slice:
+            idx, axis_name = st.slider("k-index (z-layer)", 0, nz - 1, nz // 2), "k"
+            data_2d, labels = data_3d[idx, :, :], dict(x="i-index", y="j-index")
+        elif "j-plane" in plane_slice:
+            idx, axis_name = st.slider("j-index (y-layer)", 0, ny - 1, ny // 2), "j"
+            data_2d, labels = data_3d[:, idx, :], dict(x="i-index", y="k-index")
+        else:
+            idx, axis_name = st.slider("i-index (x-layer)", 0, nx - 1, nx // 2), "i"
+            data_2d, labels = data_3d[:, :, idx], dict(x="j-index", y="k-index")
+
+        # Render the slice
+        fig = px.imshow(
+            data_2d, origin="lower", aspect='equal',
+            labels=labels, color_continuous_scale='viridis'
+        )
+        fig.update_layout(title=f"<b>{prop_slice} @ {axis_name} = {idx}</b>", template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning(f"Data for '{prop_slice}' not found.")
+
+# ======== QA / Material Balance ========
+elif selected_tab == "QA / Material Balance":
+    """
+    Quick material-balance sanity plots:
+      - P_avg vs time
+      - Gas P/Z vs Gp (linear extrapolation -> GIIP)
+      - Oil F vs Et (slope -> OOIP)
+    Uses arrays in the last sim; gracefully bails if pieces are missing.
+    """
     st.header("QA / Material Balance")
     sim = st.session_state.get("sim")
 
@@ -2219,201 +2135,241 @@ if selected_tab == "QA / Material Balance":
         st.info("Average reservoir pressure time series was not returned by the solver. Cannot generate Material Balance plots.")
         st.stop()
 
+    # 1) Average pressure vs time
     if "t" in sim and len(sim["t"]) == len(pavg):
         fig_p = go.Figure(go.Scatter(x=sim["t"], y=pavg, name="p̄ reservoir (psi)"))
-        fig_p.update_layout(template="plotly_white", title_text="<b>Average Reservoir Pressure</b>", xaxis_title="Time (days)", yaxis_title="Pressure (psi)")
+        fig_p.update_layout(
+            template="plotly_white",
+            title_text="<b>Average Reservoir Pressure</b>",
+            xaxis_title="Time (days)", yaxis_title="Pressure (psi)"
+        )
         st.plotly_chart(fig_p, use_container_width=True, theme=None)
-    
+
+    # Need both gas & oil rate series for the MB calcs below
     if not all(k in sim for k in ("t", "qg", "qo")) or len(sim["t"]) < 2:
         st.warning("Simulation data is missing required rate arrays ('qg', 'qo') for this analysis.")
         st.stop()
 
-    t = np.asarray(sim["t"], float)
+    t  = np.asarray(sim["t"], float)
     qg = np.asarray(sim["qg"], float)
     qo = np.asarray(sim["qo"], float)
-    
+
+    # 2) Gas P/Z vs Gp (linear extrapolation -> GIIP)
     st.markdown("### Gas Material Balance")
-    # ... (rest of the code is identical and correct)
-    Gp_MMscf = cumulative_trapezoid(qg, t, initial=0.0) / 1e3
+    Gp_MMscf  = cumulative_trapezoid(qg, t, initial=0.0) / 1e3
     z_factors = z_factor_approx(np.asarray(pavg), p_init_psi=state["p_init_psi"])
-    p_over_z = np.asarray(pavg) / np.maximum(z_factors, 1e-12)
-    fit_start = max(1, len(Gp_MMscf) // 4)
+    p_over_z  = np.asarray(pavg) / np.maximum(z_factors, 1e-12)
+    fit_start = max(1, len(Gp_MMscf) // 4)  # avoid noisy early-time points
+
     if len(Gp_MMscf[fit_start:]) > 1:
         slope, intercept, _, _, _ = stats.linregress(Gp_MMscf[fit_start:], p_over_z[fit_start:])
         giip_bcf = max(0.0, -intercept / slope / 1000.0) if slope != 0 else 0.0
         sim_eur_g_bcf = sim.get("EUR_g_BCF", np.trapz(qg, t) / 1e6)
+
         c1, c2 = st.columns(2)
         c1.metric("Simulator Gas EUR", f"{sim_eur_g_bcf:.2f} BCF")
-        c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF", delta=(f"{(giip_bcf - sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim" if sim_eur_g_bcf > 0 else None))
+        c2.metric("Material Balance GIIP (from P/Z)", f"{giip_bcf:.2f} BCF",
+                  delta=(f"{(giip_bcf - sim_eur_g_bcf)/sim_eur_g_bcf:.1%} vs Sim" if sim_eur_g_bcf > 0 else None))
+
         fig_pz_gas = go.Figure()
         fig_pz_gas.add_trace(go.Scatter(x=Gp_MMscf, y=p_over_z, mode="markers", name="P/Z Data"))
-        x_fit = np.array([0.0, giip_bcf * 1000.0])
-        y_fit = slope * x_fit + intercept
-        fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines", name="Linear Extrapolation", line=dict(dash="dash")))
-        fig_pz_gas.update_layout(title="<b>P/Z vs. Cumulative Gas Production</b>", xaxis_title="Gp - Cumulative Gas Production (MMscf)", yaxis_title="P/Z", template="plotly_white")
+        x_fit = np.array([0.0, giip_bcf * 1000.0]); y_fit = slope * x_fit + intercept
+        fig_pz_gas.add_trace(go.Scatter(x=x_fit, y=y_fit, mode="lines",
+                                        name="Linear Extrapolation", line=dict(dash="dash")))
+        fig_pz_gas.update_layout(
+            title="<b>P/Z vs. Cumulative Gas Production</b>",
+            xaxis_title="Gp - Cumulative Gas Production (MMscf)",
+            yaxis_title="P/Z", template="plotly_white"
+        )
         st.plotly_chart(fig_pz_gas, use_container_width=True)
     else:
         st.info("Not enough data points for Gas Material Balance plot.")
-    
+
+    # 3) Oil F vs Et (slope -> OOIP)
     st.markdown("---")
     st.markdown("### Oil Material Balance")
+
     Np_STB = cumulative_trapezoid(qo, t, initial=0.0)
     Gp_scf = cumulative_trapezoid(qg * 1_000.0, t, initial=0.0)
-    Rp = np.divide(Gp_scf, Np_STB, out=np.zeros_like(Gp_scf), where=Np_STB > 1e-3)
-    Bo = Bo_of_p(pavg, state["pb_psi"], state["Bo_pb_rb_stb"])
-    Rs = Rs_of_p(pavg, state["pb_psi"], state["Rs_pb_scf_stb"])
-    Bg = Bg_of_p(pavg)
+    Rp     = np.divide(Gp_scf, Np_STB, out=np.zeros_like(Gp_scf), where=Np_STB > 1e-3)
+
+    Bo     = Bo_of_p(pavg, state["pb_psi"], state["Bo_pb_rb_stb"])
+    Rs     = Rs_of_p(pavg, state["pb_psi"], state["Rs_pb_scf_stb"])
+    Bg     = Bg_of_p(pavg)
+
     p_init = state["p_init_psi"]
-    Boi = Bo_of_p(p_init, state["pb_psi"], state["Bo_pb_rb_stb"])
-    Rsi = Rs_of_p(p_init, state["pb_psi"], state["Rs_pb_scf_stb"])
-    F = Np_STB * (Bo + (Rp - Rs) * Bg)
+    Boi    = Bo_of_p(p_init, state["pb_psi"], state["Bo_pb_rb_stb"])
+    Rsi    = Rs_of_p(p_init, state["pb_psi"], state["Rs_pb_scf_stb"])
+
+    F  = Np_STB * (Bo + (Rp - Rs) * Bg)
     Et = (Bo - Boi) + (Rsi - Rs) * Bg
+
     fit_start_oil = max(1, len(F) // 4)
     if len(F[fit_start_oil:]) > 1:
         slope_oil, _, _, _, _ = stats.linregress(Et[fit_start_oil:], F[fit_start_oil:])
         ooip_mmstb = max(0.0, slope_oil / 1e6)
         sim_eur_o_mmstb = sim.get("EUR_o_MMBO", np.trapz(qo, t) / 1e6)
         rec_factor = (sim_eur_o_mmstb / ooip_mmstb * 100.0) if ooip_mmstb > 0 else 0.0
+
         c1, c2, c3 = st.columns(3)
         c1.metric("Simulator Oil EUR", f"{sim_eur_o_mmstb:.2f} MMSTB")
         c2.metric("Material Balance OOIP (F vs Et)", f"{ooip_mmstb:.2f} MMSTB")
         c3.metric("Implied Recovery Factor", f"{rec_factor:.1f}%")
+
         fig_mbe_oil = go.Figure()
         fig_mbe_oil.add_trace(go.Scatter(x=Et, y=F, mode="markers", name="F vs Et Data"))
-        x_fit_oil = np.array([0.0, np.nanmax(Et)])
-        y_fit_oil = slope_oil * x_fit_oil
-        fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode="lines", name=f"Slope (OOIP) = {ooip_mmstb:.2f} MMSTB", line=dict(dash="dash")))
-        fig_mbe_oil.update_layout(title="<b>F vs. Et (Havlena–Odeh)</b>", xaxis_title="Et - Total Expansion (rb/STB)", yaxis_title="F - Underground Withdrawal (rb)", template="plotly_white")
+        x_fit_oil = np.array([0.0, np.nanmax(Et)]); y_fit_oil = slope_oil * x_fit_oil
+        fig_mbe_oil.add_trace(go.Scatter(x=x_fit_oil, y=y_fit_oil, mode="lines",
+                                         name=f"Slope (OOIP) = {ooip_mmstb:.2f} MMSTB",
+                                         line=dict(dash="dash")))
+        fig_mbe_oil.update_layout(
+            title="<b>F vs. Et (Havlena–Odeh)</b>",
+            xaxis_title="Et - Total Expansion (rb/STB)",
+            yaxis_title="F - Underground Withdrawal (rb)",
+            template="plotly_white"
+        )
         st.plotly_chart(fig_mbe_oil, use_container_width=True)
     else:
         st.info("Not enough data points for Oil Material Balance plot.")
-        
-if selected_tab == "Economics":
+
+# ======== Economics ========
+elif selected_tab == "Economics":
+    """
+    Simple yearly cash-flow model driven by the latest simulation.
+    Includes NPV/IRR/payout and a formatted table of yearly metrics.
+    """
     st.header("Financial Model")
+
     if st.session_state.get("sim") is None:
         st.info("Run a simulation on the 'Results' tab first to populate the financial model.")
     else:
         sim = st.session_state["sim"]
         t = np.asarray(sim.get("t", []), float)
 
-        # Handle potentially missing simulation outputs by creating zero-arrays
-        qo_raw = sim.get("qo")
-        qg_raw = sim.get("qg")
-        qw_raw = sim.get("qw")
+        # Safe extraction for rate series (fall back to zeros of length t)
+        qo = np.nan_to_num(np.asarray(sim.get("qo")), nan=0.0) if sim.get("qo") is not None else np.zeros_like(t)
+        qg = np.nan_to_num(np.asarray(sim.get("qg")), nan=0.0) if sim.get("qg") is not None else np.zeros_like(t)
+        qw = np.nan_to_num(np.asarray(sim.get("qw")), nan=0.0) if sim.get("qw") is not None else np.zeros_like(t)
 
-        qo = np.nan_to_num(np.asarray(qo_raw), nan=0.0) if qo_raw is not None else np.zeros_like(t)
-        qg = np.nan_to_num(np.asarray(qg_raw), nan=0.0) if qg_raw is not None else np.zeros_like(t)
-        qw = np.nan_to_num(np.asarray(qw_raw), nan=0.0) if qw_raw is not None else np.zeros_like(t)
-        
         st.subheader("Economic Assumptions")
         c1, c2, c3, c4 = st.columns(4)
-        with c1: capex = st.number_input("CAPEX ($MM)", 1.0, 100.0, 15.0, 0.5, key="econ_capex") * 1e6
-        with c2: oil_price = st.number_input("Oil price ($/bbl)", 0.0, 500.0, 75.0, 1.0, key="econ_oil_price")
-        with c3: gas_price = st.number_input("Gas price ($/Mcf)", 0.0, 50.0, 2.50, 0.1, key="econ_gas_price")
-        with c4: disc_rate = st.number_input("Discount rate (fraction)", 0.0, 1.0, 0.10, 0.01, key="econ_disc")
+        with c1: capex      = st.number_input("CAPEX ($MM)", 1.0, 100.0, 15.0, 0.5, key="econ_capex") * 1e6
+        with c2: oil_price  = st.number_input("Oil price ($/bbl)", 0.0, 500.0, 75.0, 1.0, key="econ_oil_price")
+        with c3: gas_price  = st.number_input("Gas price ($/Mcf)", 0.0, 50.0, 2.50, 0.1, key="econ_gas_price")
+        with c4: disc_rate  = st.number_input("Discount rate (fraction)", 0.0, 1.0, 0.10, 0.01, key="econ_disc")
+
         c1, c2, c3, c4 = st.columns(4)
         with c1: royalty = st.number_input("Royalty (fraction)", 0.0, 0.99, 0.20, 0.01, key="econ_royalty")
-        with c2: tax = st.number_input("Severance tax (fraction)", 0.0, 0.99, 0.045, 0.005, key="econ_tax")
+        with c2: tax     = st.number_input("Severance tax (fraction)", 0.0, 0.99, 0.045, 0.005, key="econ_tax")
         with c3: opex_bpd = st.number_input("OPEX ($/bbl liquids)", 0.0, 200.0, 6.0, 0.5, key="econ_opex")
         with c4: wd_cost = st.number_input("Water disposal ($/bbl)", 0.0, 50.0, 1.5, 0.1, key="econ_wd")
-        
-        # --- Robust Yearly Cash Flow Calculation ---
+
+        # ---- Aggregate to yearly totals (trap small series gracefully) ----
         df_yearly = pd.DataFrame()
         if len(t) > 1:
             df = pd.DataFrame({'days': t, 'oil_stb_d': qo, 'gas_mscf_d': qg, 'water_stb_d': qw})
             df['year'] = (df['days'] / 365.25).astype(int)
-            
-            yearly_data = []
-            for year, group in df.groupby('year'):
-                days_in_year = group['days'].values
-                if len(days_in_year) > 1:
-                    yearly_data.append({
-                        'year': year,
-                        'oil_stb': np.trapz(group['oil_stb_d'].values, days_in_year),
-                        'gas_mscf': np.trapz(group['gas_mscf_d'].values, days_in_year),
-                        'water_stb': np.trapz(group['water_stb_d'].values, days_in_year),
-                    })
-            if yearly_data:
-                df_yearly = pd.DataFrame(yearly_data)
 
+            rows = []
+            for year, g in df.groupby('year'):
+                d = g['days'].values
+                if len(d) > 1:
+                    rows.append({
+                        'year': year,
+                        'oil_stb':   float(np.trapz(g['oil_stb_d'].values, d)),
+                        'gas_mscf':  float(np.trapz(g['gas_mscf_d'].values, d)),
+                        'water_stb': float(np.trapz(g['water_stb_d'].values, d)),
+                    })
+            if rows:
+                df_yearly = pd.DataFrame(rows)
+
+        # ---- Build cash flows ----
         if not df_yearly.empty:
             df_yearly['Revenue'] = (df_yearly['oil_stb'] * oil_price) + (df_yearly['gas_mscf'] * gas_price)
             df_yearly['Royalty'] = df_yearly['Revenue'] * royalty
-            df_yearly['Taxes'] = (df_yearly['Revenue'] - df_yearly['Royalty']) * tax
-            df_yearly['OPEX'] = (df_yearly['oil_stb'] + df_yearly['water_stb']) * opex_bpd + (df_yearly['water_stb'] * wd_cost)
+            df_yearly['Taxes']   = (df_yearly['Revenue'] - df_yearly['Royalty']) * tax
+            df_yearly['OPEX']    = (df_yearly['oil_stb'] + df_yearly['water_stb']) * opex_bpd + (df_yearly['water_stb'] * wd_cost)
             df_yearly['Net Cash Flow'] = df_yearly['Revenue'] - df_yearly['Royalty'] - df_yearly['Taxes'] - df_yearly['OPEX']
             cash_flows = [-capex] + df_yearly['Net Cash Flow'].tolist()
         else:
             cash_flows = [-capex]
 
-        # --- Financial Metrics ---
-        npv = npf.npv(disc_rate, cash_flows) if cash_flows else 0
+        # ---- Financial KPIs ----
+        npv = npf.npv(disc_rate, cash_flows) if cash_flows else 0.0
         try:
             irr = npf.irr(cash_flows) if len(cash_flows) > 1 else np.nan
         except ValueError:
             irr = np.nan
 
-        # --- Payout Calculation & Final DataFrame for Display ---
         display_df = pd.DataFrame({'year': range(-1, len(cash_flows)-1), 'Net Cash Flow': cash_flows})
         display_df['Cumulative Cash Flow'] = display_df['Net Cash Flow'].cumsum()
-        
+
+        # Payout = interpolation within the first positive year
         payout_period = np.nan
         if (display_df['Cumulative Cash Flow'] > 0).any():
-            first_positive_idx_loc = display_df['Cumulative Cash Flow'].gt(0).idxmax()
-            if first_positive_idx_loc > 0 and display_df['Cumulative Cash Flow'].iloc[first_positive_idx_loc-1] < 0:
-                last_neg_cum_flow = display_df['Cumulative Cash Flow'].iloc[first_positive_idx_loc - 1]
-                current_year_ncf = display_df['Net Cash Flow'].iloc[first_positive_idx_loc]
-                payout_period = (display_df['year'].iloc[first_positive_idx_loc-1]) + (-last_neg_cum_flow / current_year_ncf if current_year_ncf > 0 else np.inf)
+            first_pos = display_df['Cumulative Cash Flow'].gt(0).idxmax()
+            if first_pos > 0 and display_df['Cumulative Cash Flow'].iloc[first_pos-1] < 0:
+                last_neg = display_df['Cumulative Cash Flow'].iloc[first_pos - 1]
+                ncf_year = display_df['Net Cash Flow'].iloc[first_pos]
+                payout_period = (display_df['year'].iloc[first_pos-1]) + (-last_neg / ncf_year if ncf_year > 0 else np.inf)
 
         st.subheader("Key Financial Metrics")
         m1, m2, m3 = st.columns(3)
         m1.metric("NPV", f"${npv/1e6:,.2f} MM", help="Net Present Value at the specified discount rate.")
         m2.metric("IRR", f"{irr:.1%}" if pd.notna(irr) and np.isfinite(irr) else "N/A", help="Internal Rate of Return.")
         m3.metric("Payout Period (Years)", f"{payout_period:.2f}" if pd.notna(payout_period) else "N/A", help="Time until initial investment is recovered.")
-        
+
         st.subheader("Cash Flow Details")
         c1, c2 = st.columns(2)
         with c1:
-            fig_ncf = px.bar(display_df, x='year', y='Net Cash Flow', title="<b>Yearly Net Cash Flow</b>", labels={'year':'Year', 'Net Cash Flow':'Cash Flow ($)'})
+            fig_ncf = px.bar(display_df, x='year', y='Net Cash Flow',
+                             title="<b>Yearly Net Cash Flow</b>",
+                             labels={'year':'Year', 'Net Cash Flow':'Cash Flow ($)'})
             fig_ncf.update_layout(template='plotly_white', bargap=0.2)
             st.plotly_chart(fig_ncf, use_container_width=True)
         with c2:
-            fig_cum = px.line(display_df, x='year', y='Cumulative Cash Flow', title="<b>Cumulative Cash Flow</b>", markers=True, labels={'year':'Year', 'Cumulative Cash Flow':'Cash Flow ($)'})
-            fig_cum.add_hline(y=0, line_dash="dash", line_color="red")
+            fig_cum = px.line(display_df, x='year', y='Cumulative Cash Flow',
+                              title="<b>Cumulative Cash Flow</b>", markers=True,
+                              labels={'year':'Year', 'Cumulative Cash Flow':'Cash Flow ($)'})
+            fig_cum.add_hline(y=0, line_dash="dash")
             fig_cum.update_layout(template='plotly_white')
             st.plotly_chart(fig_cum, use_container_width=True)
-        
-        # --- DEFINITIVE FIX FOR TABLE DISPLAY ---
+
+        # Yearly table (merge production if available)
         st.markdown("##### Yearly Cash Flow Table")
-        # Start with the financial-only dataframe
         final_table = display_df.copy()
-        
-        # If there is production data, merge it in.
         if not df_yearly.empty:
-            # We only need the production and revenue columns from df_yearly
-            cols_to_merge = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX']
-            final_table = pd.merge(final_table, df_yearly[cols_to_merge], on='year', how='left')
+            cols = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX']
+            final_table = pd.merge(final_table, df_yearly[cols], on='year', how='left')
 
-        # Ensure all required columns exist, filling with 0 if they don't
-        display_cols = ['year', 'oil_stb', 'gas_mscf', 'water_stb', 'Revenue', 'Royalty', 'Taxes', 'OPEX', 'Net Cash Flow', 'Cumulative Cash Flow']
-        for col in display_cols:
-            if col not in final_table.columns:
-                final_table[col] = 0
-        
-        # Reorder columns to the desired display order and fill any remaining NaNs
-        final_table = final_table[display_cols].fillna(0)
-        
-        st.dataframe(final_table.style.format({
-            'oil_stb': '{:,.0f}', 'gas_mscf': '{:,.0f}', 'water_stb': '{:,.0f}',
-            'Revenue': '${:,.0f}', 'Royalty': '${:,.0f}', 'Taxes': '${:,.0f}',
-            'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
-        }), use_container_width=True)
+        need_cols = ['year','oil_stb','gas_mscf','water_stb','Revenue','Royalty','Taxes','OPEX','Net Cash Flow','Cumulative Cash Flow']
+        for c in need_cols:
+            if c not in final_table.columns:
+                final_table[c] = 0
+        final_table = final_table[need_cols].fillna(0)
 
-if selected_tab == "EUR vs Lateral Length":
+        st.dataframe(
+            final_table.style.format({
+                'oil_stb': '{:,.0f}', 'gas_mscf': '{:,.0f}', 'water_stb': '{:,.0f}',
+                'Revenue': '${:,.0f}', 'Royalty': '${:,.0f}', 'Taxes': '${:,.0f}',
+                'OPEX': '${:,.0f}', 'Net Cash Flow': '${:,.0f}', 'Cumulative Cash Flow': '${:,.0f}'
+            }),
+            use_container_width=True
+        )
+
+# ======== EUR vs Lateral Length ========
+elif selected_tab == "EUR vs Lateral Length":
+    """Future multi-run study of EUR vs. Lateral Length."""
     st.header("EUR vs Lateral Length Sensitivity")
     st.info("This feature is not yet implemented. It will allow you to run multiple simulations to see how EUR changes with lateral length.")
 
-if selected_tab == "Field Match (CSV)":
+# ======== Field Match (CSV) ========
+elif selected_tab == "Field Match (CSV)":
+    """
+    Manual history matching against CSV field data.
+    - Upload CSV with columns: Day, and either/both Oil_Rate_STBpd, Gas_Rate_Mscfd.
+    - Plots sim vs markers and offers a simple layout for quick checks.
+    """
     st.header("Field Match (CSV)")
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -2428,28 +2384,45 @@ if selected_tab == "Field Match (CSV)":
         st.write("")
         if st.button("Load Demo Data", use_container_width=True):
             rng = np.random.default_rng(123)
-            days = np.arange(0, 731, 15)
-            oil_rate = 950 * np.exp(-days / 400) + rng.uniform(-25, 25, size=days.shape)
+            days     = np.arange(0, 731, 15)
+            oil_rate = 950 * np.exp(-days / 400)  + rng.uniform(-25, 25, size=days.shape)
             gas_rate = 8000 * np.exp(-days / 500) + rng.uniform(-200, 200, size=days.shape)
-            oil_rate = np.clip(oil_rate, 0, None)
-            gas_rate = np.clip(gas_rate, 0, None)
-            demo_df = pd.DataFrame({"Day": days, "Gas_Rate_Mscfd": gas_rate, "Oil_Rate_STBpd": oil_rate})
+            demo_df  = pd.DataFrame({"Day": days,
+                                     "Gas_Rate_Mscfd": np.clip(gas_rate, 0, None),
+                                     "Oil_Rate_STBpd": np.clip(oil_rate, 0, None)})
             st.session_state.field_data_match = demo_df
             st.success("Demo production data loaded successfully!")
+
     if 'field_data_match' in st.session_state:
         st.markdown("---")
         st.markdown("#### Loaded Production Data (first 5 rows)")
         st.dataframe(st.session_state.field_data_match.head(), use_container_width=True)
-        if st.session_state.get("sim") is not None and st.session_state.get("field_data_match") is not None:
-            sim_data = st.session_state.sim
+
+        if st.session_state.get("sim") is not None:
+            sim_data   = st.session_state.sim
             field_data = st.session_state.field_data_match
+
             fig_match = go.Figure()
-            fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'], mode='lines', name='Simulated Gas', line=dict(color="#d62728")))
-            fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'], mode='lines', name='Simulated Oil', line=dict(color="#2ca02c"), yaxis="y2"))
+            if sim_data.get('t') is not None:
+                if sim_data.get('qg') is not None:
+                    fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qg'],
+                                                   mode='lines', name='Simulated Gas',
+                                                   line=dict(color="#d62728")))
+                if sim_data.get('qo') is not None:
+                    fig_match.add_trace(go.Scatter(x=sim_data['t'], y=sim_data['qo'],
+                                                   mode='lines', name='Simulated Oil',
+                                                   line=dict(color="#2ca02c"), yaxis="y2"))
+
+            # Field markers if columns are present
             if {'Day', 'Gas_Rate_Mscfd'}.issubset(field_data.columns):
-                fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color="#d62728", symbol='cross')))
+                fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'],
+                                               mode='markers', name='Field Gas',
+                                               marker=dict(color="#d62728", symbol='cross')))
             if {'Day', 'Oil_Rate_STBpd'}.issubset(field_data.columns):
-                fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color="#2ca02c", symbol='cross'), yaxis="y2"))
+                fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'],
+                                               mode='markers', name='Field Oil',
+                                               marker=dict(color="#2ca02c", symbol='cross'), yaxis="y2"))
+
             layout_config = semi_log_layout("Field Match: Simulation vs. Actual", yaxis="Gas Rate (Mscf/d)")
             layout_config.update(
                 yaxis=dict(title="Gas Rate (Mscf/d)"),
@@ -2462,9 +2435,16 @@ if selected_tab == "Field Match (CSV)":
                     "This plot compares simulated production (solid lines) to historical data ('x' markers). "
                     "Tune sidebar parameters and re-run until the match is reasonable; then use the calibrated model for forecasting."
                 )
-        elif st.session_state.get("sim") is None and st.session_state.get("field_data_match") is not None:
+        else:
             st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
-if selected_tab == "Automated Match":
+
+# ======== Automated Match ========
+elif selected_tab == "Automated Match":
+    """
+    Differential Evolution-based auto history match.
+    - Select parameters + bounds; optimizer minimizes error vs field rates.
+    - Uses your fast proxy for quick iterations.
+    """
     st.header("Automated History Matching")
     st.info("This module uses a genetic algorithm (Differential Evolution) to automatically find the best parameters to match historical data.")
 
@@ -2477,28 +2457,41 @@ if selected_tab == "Automated Match":
                 st.success("File loaded successfully.")
             except Exception as e:
                 st.error(f"Error reading CSV file: {e}")
-        
+
         field_data = st.session_state.get("field_data_auto_match")
         if field_data is not None:
             st.dataframe(field_data.head())
-            # Validate columns
-            if not ({'Day', 'Oil_Rate_STBpd'}.issubset(field_data.columns) or {'Day', 'Gas_Rate_Mscfd'}.issubset(field_data.columns)):
+            if not ({'Day', 'Oil_Rate_STBpd'}.issubset(field_data.columns) or
+                    {'Day', 'Gas_Rate_Mscfd'}.issubset(field_data.columns)):
                 st.error("CSV must contain 'Day' and at least one of 'Oil_Rate_STBpd' or 'Gas_Rate_Mscfd'.")
-                field_data = None # Invalidate data
-    
+                field_data = None  # invalidate
+
     if field_data is not None:
         # --- 2. Select Parameters ---
         with st.expander("2. Select Parameters and Define Bounds", expanded=True):
-            param_options = {'xf_ft': (100.0, 500.0), 'hf_ft': (50.0, 300.0), 'k_stdev': (0.0, 0.2), 'pad_interf': (0.0, 0.8), 'p_init_psi': (3000.0, 8000.0)}
-            selected_params = st.multiselect("Parameters to vary:", options=list(param_options.keys()), default=['xf_ft', 'k_stdev'])
-            
+            param_options = {
+                'xf_ft': (100.0, 500.0),
+                'hf_ft': (50.0, 300.0),
+                'k_stdev': (0.0, 0.2),
+                'pad_interf': (0.0, 0.8),
+                'p_init_psi': (3000.0, 8000.0),
+            }
+            selected_params = st.multiselect(
+                "Parameters to vary:", options=list(param_options.keys()),
+                default=['xf_ft', 'k_stdev']
+            )
+
             bounds, valid_bounds = {}, True
             if selected_params:
                 cols = st.columns(len(selected_params))
                 for i, param in enumerate(selected_params):
                     with cols[i]:
                         st.markdown(f"**{param}**")
-                        min_val, max_val = st.slider("Range", param_options[param][0], param_options[param][1], (param_options[param][0], param_options[param][1]), key=f"range_{param}")
+                        min_val, max_val = st.slider(
+                            "Range", param_options[param][0], param_options[param][1],
+                            (param_options[param][0], param_options[param][1]),
+                            key=f"range_{param}"
+                        )
                         if min_val >= max_val:
                             st.error("Min must be less than Max.")
                             valid_bounds = False
@@ -2508,115 +2501,142 @@ if selected_tab == "Automated Match":
         with st.expander("3. Configure and Run Optimization", expanded=True):
             error_metric = st.selectbox("Error Metric to Minimize", ["RMSE (Oil)", "RMSE (Gas)", "RMSE (Combined)"])
             max_iter = st.slider("Max Iterations", 5, 50, 15)
-            
-            run_auto_match = st.button("🚀 Run Automated Match", use_container_width=True, type="primary", disabled=not (valid_bounds and selected_params))
-            
+
+            run_auto_match = st.button(
+                "🚀 Run Automated Match", use_container_width=True, type="primary",
+                disabled=not (valid_bounds and selected_params)
+            )
+
             if run_auto_match:
-                # Objective function for the optimizer
-                def objective_function(params, param_names, base_state, field_data, error_metric):
-                    temp_state = base_state.copy()
+                def objective_function(params, param_names, base_state, field_df, metric):
+                    """Return scalar error to minimize."""
+                    temp = base_state.copy()
                     for name, value in zip(param_names, params):
-                        temp_state[name] = value
-                    
-                    sim_result = fallback_fast_solver(temp_state, np.random.default_rng())
-                    
+                        temp[name] = value
+
+                    sim_result = fallback_fast_solver(temp, np.random.default_rng())
                     t_sim, qo_sim, qg_sim = sim_result['t'], sim_result['qo'], sim_result['qg']
-                    t_field = field_data['Day'].values
-                    
+                    t_field = field_df['Day'].values
+
                     f_qo = interp1d(t_sim, qo_sim, bounds_error=False, fill_value="extrapolate")
                     f_qg = interp1d(t_sim, qg_sim, bounds_error=False, fill_value="extrapolate")
-                    qo_sim_interp, qg_sim_interp = f_qo(t_field), f_qg(t_field)
+                    qo_hat, qg_hat = f_qo(t_field), f_qg(t_field)
 
-                    error_oil, error_gas = 0, 0
-                    if 'Oil_Rate_STBpd' in field_data.columns:
-                        qo_field = field_data['Oil_Rate_STBpd'].values
-                        error_oil = np.sqrt(np.mean((qo_sim_interp - qo_field)**2))
-                    if 'Gas_Rate_Mscfd' in field_data.columns:
-                        qg_field = field_data['Gas_Rate_Mscfd'].values
-                        error_gas = np.sqrt(np.mean((qg_sim_interp - qg_field)**2))
+                    err_o = err_g = 0.0
+                    if 'Oil_Rate_STBpd' in field_df.columns:
+                        err_o = float(np.sqrt(np.mean((qo_hat - field_df['Oil_Rate_STBpd'].values)**2)))
+                    if 'Gas_Rate_Mscfd' in field_df.columns:
+                        err_g = float(np.sqrt(np.mean((qg_hat - field_df['Gas_Rate_Mscfd'].values)**2)))
 
-                    if "Combined" in error_metric: return error_oil + error_gas
-                    elif "Oil" in error_metric: return error_oil
-                    else: return error_gas
+                    if "Combined" in metric: return err_o + err_g
+                    elif "Oil" in metric:    return err_o
+                    else:                    return err_g
 
                 with st.spinner("Running optimization... This may take several minutes."):
-                    param_names, bounds_list = list(bounds.keys()), [bounds[p] for p in bounds.keys()]
-                    result = differential_evolution(objective_function, bounds=bounds_list, args=(param_names, state.copy(), field_data, error_metric), maxiter=max_iter, disp=True)
+                    param_names = list(bounds.keys())
+                    bounds_list = [bounds[p] for p in param_names]
+                    result = differential_evolution(
+                        objective_function,
+                        bounds=bounds_list,
+                        args=(param_names, state.copy(), field_data, error_metric),
+                        maxiter=int(max_iter),
+                        disp=True
+                    )
                     st.session_state.auto_match_result = result
-        
+
         # --- 4. Display Results ---
         if 'auto_match_result' in st.session_state:
             st.markdown("---")
             st.header("Optimization Results")
             result = st.session_state.auto_match_result
-            
-            c1, c2 = st.columns([1,2])
+
+            c1, c2 = st.columns([1, 2])
             with c1:
                 st.metric("Final Error (RMSE)", f"{result.fun:.2f}")
                 st.markdown("##### Best-Fit Parameters:")
                 best_params_df = pd.DataFrame({'Parameter': list(bounds.keys()), 'Value': result.x})
                 st.table(best_params_df.style.format({'Value': '{:.2f}'}))
-            
+
             with c2:
                 # Run one final simulation with the best parameters
                 best_state = state.copy()
                 for name, value in zip(list(bounds.keys()), result.x):
                     best_state[name] = value
-                
+
                 final_sim = fallback_fast_solver(best_state, np.random.default_rng())
-                
+
                 fig_match = make_subplots(specs=[[{"secondary_y": True}]])
                 if 'Gas_Rate_Mscfd' in field_data.columns:
-                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'], mode='markers', name='Field Gas', marker=dict(color=COLOR_GAS, symbol='cross')), secondary_y=False)
-                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qg'], mode='lines', name='Best Match Gas', line=dict(color=COLOR_GAS, width=3)), secondary_y=False)
+                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Gas_Rate_Mscfd'],
+                                                   mode='markers', name='Field Gas',
+                                                   marker=dict(color=COLOR_GAS, symbol='cross')), secondary_y=False)
+                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qg'],
+                                                   mode='lines', name='Best Match Gas',
+                                                   line=dict(color=COLOR_GAS, width=3)), secondary_y=False)
                 if 'Oil_Rate_STBpd' in field_data.columns:
-                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'], mode='markers', name='Field Oil', marker=dict(color=COLOR_OIL, symbol='x')), secondary_y=True)
-                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qo'], mode='lines', name='Best Match Oil', line=dict(color=COLOR_OIL, width=3)), secondary_y=True)
-                
-                fig_match.update_layout(title="<b>Final History Match</b>", template="plotly_white", xaxis_title="Time (days)")
+                    fig_match.add_trace(go.Scatter(x=field_data['Day'], y=field_data['Oil_Rate_STBpd'],
+                                                   mode='markers', name='Field Oil',
+                                                   marker=dict(color=COLOR_OIL, symbol='x')), secondary_y=True)
+                    fig_match.add_trace(go.Scatter(x=final_sim['t'], y=final_sim['qo'],
+                                                   mode='lines', name='Best Match Oil',
+                                                   line=dict(color=COLOR_OIL, width=3)), secondary_y=True)
+
+                fig_match.update_layout(title="<b>Final History Match</b>",
+                                        template="plotly_white", xaxis_title="Time (days)")
                 st.plotly_chart(fig_match, use_container_width=True)
 
-if selected_tab == "Uncertainty & Monte Carlo":
+# ======== Uncertainty & Monte Carlo ========
+elif selected_tab == "Uncertainty & Monte Carlo":
+    """
+    Quick Monte Carlo around selected parameters.
+    - Samples distributions and runs the fast proxy; aggregates P10/P50/P90.
+    """
     st.header("Uncertainty & Monte Carlo")
+
     p1, p2, p3 = st.columns(3)
     with p1:
-        uc_k = st.checkbox("k stdev", True)
+        uc_k   = st.checkbox("k stdev", True)
         k_mean = st.slider("k_stdev Mean", 0.0, 0.2, state['k_stdev'], 0.01)
-        k_std = st.slider("k_stdev Stdev", 0.0, 0.1, 0.02, 0.005)
+        k_std  = st.slider("k_stdev Stdev", 0.0, 0.1, 0.02, 0.005)
     with p2:
-        uc_xf = st.checkbox("xf_ft", True)
+        uc_xf  = st.checkbox("xf_ft", True)
         xf_mean = st.slider("xf_ft Mean (ft)", 100.0, 500.0, state['xf_ft'], 10.0)
-        xf_std = st.slider("xf_ft Stdev (ft)", 0.0, 100.0, 30.0, 5.0)
+        xf_std  = st.slider("xf_ft Stdev (ft)", 0.0, 100.0, 30.0, 5.0)
     with p3:
         uc_int = st.checkbox("pad_interf", False)
         int_min = st.slider("Interference Min", 0.0, 0.8, state['pad_interf'], 0.01)
         int_max = st.slider("Interference Max", 0.0, 0.8, 0.5, 0.01)
+
     num_runs = st.number_input("Number of Monte Carlo runs", 10, 500, 50, 10)
+
     if st.button("Run Monte Carlo Simulation", key="run_mc"):
         qg_runs, qo_runs, eur_g, eur_o = [], [], [], []
         bar_mc = st.progress(0, text="Running Monte Carlo simulation...")
         base_state = state.copy()
         rng_mc = np.random.default_rng(st.session_state.rng_seed + 1)
-        for i in range(num_runs):
-            temp_state = base_state.copy()
+
+        for i in range(int(num_runs)):
+            temp = base_state.copy()
             if uc_k:
-                temp_state['k_stdev'] = stats.truncnorm.rvs(
-                    (0 - k_mean) / k_std, (0.2 - k_mean) / k_std, loc=k_mean, scale=k_std, random_state=rng_mc
+                temp['k_stdev'] = stats.truncnorm.rvs(
+                    (0 - k_mean) / k_std, (0.2 - k_mean) / k_std,
+                    loc=k_mean, scale=k_std, random_state=rng_mc
                 )
             if uc_xf:
-                temp_state['xf_ft'] = stats.truncnorm.rvs(
-                    (100 - xf_mean) / xf_std, (500 - xf_mean) / xf_std, loc=xf_mean, scale=xf_std, random_state=rng_mc
+                temp['xf_ft'] = stats.truncnorm.rvs(
+                    (100 - xf_mean) / xf_std, (500 - xf_mean) / xf_std,
+                    loc=xf_mean, scale=xf_std, random_state=rng_mc
                 )
             if uc_int:
-                temp_state['pad_interf'] = stats.uniform.rvs(
+                temp['pad_interf'] = stats.uniform.rvs(
                     loc=int_min, scale=int_max - int_min, random_state=rng_mc
                 )
-            res = fallback_fast_solver(temp_state, rng_mc)
-            qg_runs.append(res['qg'])
-            qo_runs.append(res['qo'])
-            eur_g.append(res['EUR_g_BCF'])
-            eur_o.append(res['EUR_o_MMBO'])
-            bar_mc.progress((i + 1) / num_runs, f"Run {i+1}/{num_runs}")
+
+            res = fallback_fast_solver(temp, rng_mc)
+            qg_runs.append(res['qg']); qo_runs.append(res['qo'])
+            eur_g.append(res['EUR_g_BCF']); eur_o.append(res['EUR_o_MMBO'])
+            bar_mc.progress((i + 1) / int(num_runs), f"Run {i+1}/{int(num_runs)}")
+
         st.session_state.mc_results = {
             't': res['t'],
             'qg_runs': np.array(qg_runs),
@@ -2625,10 +2645,12 @@ if selected_tab == "Uncertainty & Monte Carlo":
             'eur_o': np.array(eur_o),
         }
         bar_mc.empty()
+
     if 'mc_results' in st.session_state:
         mc = st.session_state.mc_results
         p10_g, p50_g, p90_g = np.percentile(mc['qg_runs'], [90, 50, 10], axis=0)
         p10_o, p50_o, p90_o = np.percentile(mc['qo_runs'], [90, 50, 10], axis=0)
+
         c1, c2 = st.columns(2)
         with c1:
             fig = go.Figure([
@@ -2636,11 +2658,14 @@ if selected_tab == "Uncertainty & Monte Carlo":
                 go.Scatter(x=mc['t'], y=p10_g, fill='tonexty', mode='lines', line_color='lightgrey', name='P90'),
                 go.Scatter(x=mc['t'], y=p50_g, mode='lines', line_color='red', name='P50'),
             ])
-            st.plotly_chart(fig.update_layout(**semi_log_layout("Gas Rate Probabilistic Forecast", yaxis="Gas Rate (Mscf/d)")), use_container_width=True, theme="streamlit")
             st.plotly_chart(
-                px.histogram(x=mc['eur_g'], nbins=30, labels={'x': 'Gas EUR (BCF)'}).update_layout(
-                    title="<b>Distribution of Gas EUR</b>", template="plotly_white"
-                ), use_container_width=True, theme="streamlit"
+                fig.update_layout(**semi_log_layout("Gas Rate Probabilistic Forecast", yaxis="Gas Rate (Mscf/d)")),
+                use_container_width=True, theme="streamlit"
+            )
+            st.plotly_chart(
+                px.histogram(x=mc['eur_g'], nbins=30, labels={'x': 'Gas EUR (BCF)'})
+                  .update_layout(title="<b>Distribution of Gas EUR</b>", template="plotly_white"),
+                use_container_width=True, theme="streamlit"
             )
         with c2:
             fig = go.Figure([
@@ -2648,42 +2673,51 @@ if selected_tab == "Uncertainty & Monte Carlo":
                 go.Scatter(x=mc['t'], y=p10_o, fill='tonexty', mode='lines', line_color='lightgreen', name='P90'),
                 go.Scatter(x=mc['t'], y=p50_o, mode='lines', line_color='green', name='P50'),
             ])
-            st.plotly_chart(fig.update_layout(**semi_log_layout("Oil Rate Probabilistic Forecast", yaxis="Oil Rate (STB/d)")), use_container_width=True, theme="streamlit")
             st.plotly_chart(
-                px.histogram(x=mc['eur_o'], nbins=30, labels={'x': 'Oil EUR (MMSTB)'}, color_discrete_sequence=['green']).update_layout(
-                    title="<b>Distribution of Oil EUR</b>", template="plotly_white"
-                ), use_container_width=True, theme="streamlit"
+                fig.update_layout(**semi_log_layout("Oil Rate Probabilistic Forecast", yaxis="Oil Rate (STB/d)")),
+                use_container_width=True, theme="streamlit"
+            )
+            st.plotly_chart(
+                px.histogram(x=mc['eur_o'], nbins=30, labels={'x': 'Oil EUR (MMSTB)'},
+                             color_discrete_sequence=['green'])
+                  .update_layout(title="<b>Distribution of Oil EUR</b>", template="plotly_white"),
+                use_container_width=True, theme="streamlit"
             )
 
-if selected_tab == "Well Placement Optimization":
+# ======== Well Placement Optimization ========
+elif selected_tab == "Well Placement Optimization":
+    """
+    Simple heuristic placement search using your proxy model.
+    - Randomly proposes heel positions (x,y) subject to constraints.
+    - Scores each by selected objective (Oil or Gas EUR).
+    """
     st.header("Well Placement Optimization")
+
     st.markdown("#### 1. General Parameters")
     c1_opt, c2_opt, c3_opt = st.columns(3)
     with c1_opt:
-        objective = st.selectbox(
-            "Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective"
-        )
+        objective = st.selectbox("Objective Property", ["Maximize Oil EUR", "Maximize Gas EUR"], key="opt_objective")
     with c2_opt:
-        iterations = st.number_input(
-            "Number of optimization steps", min_value=5, max_value=1000, value=100, step=10
-        )
+        iterations = st.number_input("Number of optimization steps", min_value=5, max_value=1000, value=100, step=10)
     with c3_opt:
-        st.selectbox(
-            "Forbidden Zone", ["Numerical Faults"], help="The optimizer will avoid placing wells near the fault defined in the sidebar."
-        )
+        st.selectbox("Forbidden Zone", ["Numerical Faults"],
+                     help="The optimizer will avoid placing wells near the fault defined in the sidebar.")
+
     st.markdown("#### 2. Well Parameters")
     c1_well, c2_well = st.columns(2)
     with c1_well:
-        num_wells = st.number_input(
-            "Number of wells to place", min_value=1, max_value=1, value=1, disabled=True, help="Currently supports optimizing a single well location."
-        )
+        num_wells = st.number_input("Number of wells to place", min_value=1, max_value=1, value=1,
+                                    disabled=True, help="Currently supports optimizing a single well location.")
     with c2_well:
         st.text_input("Well name prefix", "OptiWell", disabled=True)
+
     launch_opt = st.button("🚀 Launch Optimization", use_container_width=True, type="primary")
     if launch_opt:
         opt_results = []
         base_state = state.copy()
         rng_opt = np.random.default_rng(int(st.session_state.rng_seed))
+
+        # Feasible domain checks
         reservoir_x_dim = base_state['nx'] * base_state['dx']
         x_max = reservoir_x_dim - base_state['L_ft']
         if x_max < 0:
@@ -2695,35 +2729,44 @@ if selected_tab == "Well Placement Optimization":
                 icon="⚠️",
             )
             st.stop()
+
         y_max = base_state['ny'] * base_state['dy']
         progress_bar = st.progress(0, text="Starting optimization...")
+
         for i in range(int(iterations)):
+            # Random heel sampling with a validity check
             is_valid = False
             guard = 0
-            while (not is_valid) and (guard < 10000):
+            while (not is_valid) and (guard < 10_000):
                 x_heel_ft = rng_opt.uniform(0, x_max)
                 y_heel_ft = rng_opt.uniform(50, y_max - 50)
                 is_valid = is_heel_location_valid(x_heel_ft, y_heel_ft, base_state)
                 guard += 1
+
             if not is_valid:
                 st.error("Could not find a valid heel location. Check grid size, L_ft, and fault settings.")
                 break
+
             temp_state = base_state.copy()
+            # Example heuristic: modulate pad interference based on heel x-position
             x_norm = x_heel_ft / (base_state['nx'] * base_state['dx'])
             temp_state['pad_interf'] = 0.4 * x_norm
+
             result = fallback_fast_solver(temp_state, rng_opt)
-            score = result['EUR_o_MMBO'] if "Oil" in objective else result['EUR_g_BCF']
-            opt_results.append({
-                "Step": i + 1, "x_ft": float(x_heel_ft), "y_ft": float(y_heel_ft), "Score": float(score),
-            })
-            progress_bar.progress(
-                (i + 1) / int(iterations), text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}"
-            )
-        st.session_state.opt_results = pd.DataFrame(opt_results)
+            score  = result['EUR_o_MMBO'] if "Oil" in objective else result['EUR_g_BCF']
+
+            opt_results.append({"Step": i + 1, "x_ft": float(x_heel_ft),
+                                "y_ft": float(y_heel_ft), "Score": float(score)})
+
+            progress_bar.progress((i + 1) / int(iterations), text=f"Step {i+1}/{int(iterations)} | Score: {score:.3f}")
+
+        st.session_state.opt_results = pd.DataFrame(opt_results) if opt_results else pd.DataFrame()
         progress_bar.empty()
+
     if 'opt_results' in st.session_state and not st.session_state.opt_results.empty:
         df_results = st.session_state.opt_results
         best_run = df_results.loc[df_results['Score'].idxmax()]
+
         st.markdown("---")
         st.markdown("### Optimization Results")
         c1_res, c2_res = st.columns(2)
@@ -2733,23 +2776,25 @@ if selected_tab == "Well Placement Optimization":
             st.metric(label=f"Best Score ({score_unit})", value=f"{best_run['Score']:.3f}")
             st.write(f"**Location (ft):** (x={best_run['x_ft']:.0f}, y={best_run['y_ft']:.0f})")
             st.write(f"Found at Step: {int(best_run['Step'])}")
+
         with c2_res:
             st.markdown("##### Optimization Steps Log")
             st.dataframe(df_results.sort_values("Score", ascending=False).head(10), height=210)
+
+        # Simple 2D map with porosity background + tested points
         fig_opt = go.Figure()
         phi_map = get_k_slice(
             st.session_state.get('phi', np.zeros((state['nz'], state['ny'], state['nx']))),
             state['nz'] // 2
         )
         fig_opt.add_trace(go.Heatmap(
-            z=phi_map, dx=state['dx'], dy=state['dy'], colorscale='viridis', colorbar=dict(title='Porosity')
+            z=phi_map, dx=state['dx'], dy=state['dy'],
+            colorscale='viridis', colorbar=dict(title='Porosity')
         ))
         fig_opt.add_trace(go.Scatter(
             x=df_results['x_ft'], y=df_results['y_ft'], mode='markers',
-            marker=dict(
-                color=df_results['Score'], colorscale='Reds', showscale=True,
-                colorbar=dict(title='Score'), size=8, opacity=0.7
-            ),
+            marker=dict(color=df_results['Score'], colorscale='Reds', showscale=True,
+                        colorbar=dict(title='Score'), size=8, opacity=0.7),
             name='Tested Locations'
         ))
         fig_opt.add_trace(go.Scatter(
@@ -2757,12 +2802,16 @@ if selected_tab == "Well Placement Optimization":
             marker=dict(color='cyan', size=16, symbol='star', line=dict(width=2, color='black')),
             name='Best Location'
         ))
+
         if state.get('use_fault'):
             fault_x = [state['fault_index'] * state['dx'], state['fault_index'] * state['dx']]
             fault_y = [0, state['ny'] * state['dy']]
             fig_opt.add_trace(go.Scatter(
-                x=fault_x, y=fault_y, mode='lines', line=dict(color='white', width=4, dash='dash'), name='Fault'
+                x=fault_x, y=fault_y, mode='lines',
+                line=dict(color='white', width=4, dash='dash'),
+                name='Fault'
             ))
+
         fig_opt.update_layout(
             title="<b>Well Placement Optimization Map</b>",
             xaxis_title="X position (ft)",
@@ -2772,7 +2821,9 @@ if selected_tab == "Well Placement Optimization":
         )
         st.plotly_chart(fig_opt, use_container_width=True, theme="streamlit")
 
-if selected_tab == "User’s Manual":
+# ======== User’s Manual ========
+elif selected_tab == "User’s Manual":
+    """Embedded user guide for quick reference."""
     st.header("User’s Manual")
     st.markdown("---")
     st.markdown("""
@@ -2780,49 +2831,30 @@ if selected_tab == "User’s Manual":
     Welcome to the **Full 3D Unconventional & Black-Oil Reservoir Simulator**. This application is designed for petroleum engineers to model, forecast, and optimize production from multi-stage fractured horizontal wells.
 
     ### 2. Quick Start Guide
-    1.  **Select a Play:** In the sidebar, choose a shale play from the **Preset** dropdown (e.g., "Permian – Midland (Oil)").
-    2.  **Apply Preset:** Click the **Apply Preset** button. This will load typical reservoir, fluid, and completion parameters for that play into the sidebar.
-    3.  **Generate Geology:** Go to the **Generate 3D property volumes** tab and click the large button. This creates the 3D permeability and porosity grids required for the simulation.
-    4.  **Run Simulation:** Navigate to the **Results** tab and click **Run simulation**.
-    5.  **Analyze:** Review the EUR gauges, rate-time plots, and cumulative production charts.
-    6.  **Iterate:** Adjust parameters in the sidebar (e.g., Frac half-length `xf_ft` or Pad BHP `pad_bhp_psi`) and re-run the simulation to see the impact.
+    1. **Select a Play:** Choose a shale play from the sidebar (e.g., "Permian – Midland (Oil)").
+    2. **Apply Preset:** Loads typical reservoir, fluid, and completion parameters for that play.
+    3. **Generate Geology:** Use *Generate 3D property volumes* to create permeability/porosity grids.
+    4. **Run Simulation:** Go to **Results** and click **Run simulation**.
+    5. **Analyze:** Check EUR gauges, rate-time and cumulative plots.
+    6. **Iterate:** Adjust parameters and re-run to see sensitivities.
 
-    ### 3. Key Tabs Explained
-
-    #### **Results Tab**
-    This is the primary dashboard for viewing simulation output. It provides EURs for oil and gas, along with standard production plots. The simulation is only run when you click the "Run simulation" button on this tab.
-
-    #### **Economics Tab**
-    This tab provides a full financial model based on the production profile from the **Results** tab.
-    -   **Inputs:** Enter your project's total upfront capital expenditure (CAPEX), commodity price decks, operating costs (OPEX), and fiscal terms (royalty, tax).
-    -   **Metrics:** The model automatically calculates key financial metrics:
-        -   **NPV (Net Present Value):** The value of all future cash flows, discounted to the present.
-        -   **IRR (Internal Rate of Return):** The discount rate at which the NPV of the project is zero.
-        -   **Payout Period:** The time it takes for the cumulative cash flow to turn positive, recovering the initial investment.
-    -   **Outputs:** View yearly and cumulative cash flow charts, plus a detailed annual table, to assess project profitability.
-
-    #### **Field Match & Automated Match Tabs**
-    These tabs are designed for history matching against real-world production data.
-    -   **Field Match (CSV):** For manual history matching. Upload a CSV with historical production data (columns must include 'Day', and either 'Oil_Rate_STBpd' or 'Gas_Rate_Mscfd'). Adjust sidebar parameters and re-run simulations until the simulated curves visually align with the field data markers.
-    -   **Automated Match:** Let the simulator find the best match for you using a genetic algorithm.
-        1.  Upload your historical data.
-        2.  Select which parameters you want the algorithm to tune (e.g., `xf_ft`, `k_stdev`).
-        3.  Define the minimum and maximum bounds for each selected parameter. The algorithm will search for a solution within this range.
-        4.  Click "Run Automated Match". The algorithm will run many simulations to find the parameter set that minimizes the error (RMSE) between the simulation and your data.
-
-    #### **3D & Slice Viewers**
-    Visualize the reservoir properties.
-    -   **3D Viewer:** Renders an interactive 3D isosurface plot of properties like permeability, porosity, or pressure after a simulation. Use the sliders to adjust the downsampling and the value being displayed.
-    -   **Slice Viewer:** Shows 2D cross-sections of the 3D property grids, allowing you to inspect heterogeneity layer by layer in any of the three principal directions (X, Y, or Z).
+    ### 3. Tabs
+    - **Results:** Main outputs + sanity checks.
+    - **Economics:** NPV/IRR/Payout using simulated profiles.
+    - **Field/Automated Match:** Manual/auto history matching.
+    - **3D & Slice Viewers:** Visualize 3D volumes and 2D slices.
 
     ### 4. Input Validation
-    The application includes input validation to improve user experience and prevent errors.
-    -   In the **Automated Match** tab, the interface will warn you if a minimum bound is set higher than its corresponding maximum bound.
-    -   On the **Results** tab, sanity checks are performed to ensure the final EURs are reasonable for the selected play type. If the results are physically inconsistent (e.g., an oil well producing an unrealistic amount of gas), an error message will be displayed, and the results will be withheld to prevent misinterpretation.
+    - Automated Match bounds are validated.
+    - Results tab warns on out-of-family EUR/GOR for the selected play.
     """)
-if selected_tab == "Solver & Profiling":
+
+# ======== Solver & Profiling ========
+elif selected_tab == "Solver & Profiling":
+    """Display current numerical settings and last run time."""
     st.header("Solver & Profiling")
     st.info("This tab shows numerical solver settings and performance of the last run.")
+
     st.markdown("### Current Numerical Solver Settings")
     solver_settings = {
         "Parameter": [
@@ -2830,30 +2862,38 @@ if selected_tab == "Solver & Profiling":
             "Use MKL", "Use PyAMG", "Use cuSPARSE"
         ],
         "Value": [
-            f"{state['newton_tol']:.1e}", state['max_newton'], "Auto" if state['threads'] == 0 else state['threads'],
-            "✅" if state['use_omp'] else "❌", "✅" if state['use_mkl'] else "❌",
-            "✅" if state['use_pyamg'] else "❌", "✅" if state['use_cusparse'] else "❌",
+            f"{state['newton_tol']:.1e}", state['max_newton'],
+            "Auto" if state['threads'] == 0 else state['threads'],
+            "✅" if state['use_omp'] else "❌",
+            "✅" if state['use_mkl'] else "❌",
+            "✅" if state['use_pyamg'] else "❌",
+            "✅" if state['use_cusparse'] else "❌",
         ],
     }
     st.table(pd.DataFrame(solver_settings))
+
     st.markdown("### Profiling")
     if st.session_state.get("sim") and 'runtime_s' in st.session_state.sim:
         st.metric(label="Last Simulation Runtime", value=f"{st.session_state.sim['runtime_s']:.2f} seconds")
     else:
         st.info("Run a simulation on the 'Results' tab to see performance profiling.")
 
-if selected_tab == "DFN Viewer":
+# ======== DFN Viewer ========
+elif selected_tab == "DFN Viewer":
+    """
+    Discrete Fracture Network (DFN) 3D line-segment viewer.
+    Expects a list-like `dfn_segments` in session_state, where each item is [x1,y1,z1,x2,y2,z2].
+    """
     st.header("DFN Viewer — 3D line segments")
     segs = st.session_state.get('dfn_segments')
+
     if segs is None or len(segs) == 0:
         st.info("No DFN loaded. Upload a CSV or use 'Generate DFN from stages' in the sidebar.")
     else:
         figd = go.Figure()
         for i, seg in enumerate(segs):
             figd.add_trace(go.Scatter3d(
-                x=[seg[0], seg[3]],
-                y=[seg[1], seg[4]],
-                z=[seg[2], seg[5]],
+                x=[seg[0], seg[3]], y=[seg[1], seg[4]], z=[seg[2], seg[5]],
                 mode="lines",
                 line=dict(width=4, color="red"),
                 name="DFN" if i == 0 else None,
@@ -2867,6 +2907,7 @@ if selected_tab == "DFN Viewer":
             title="<b>DFN Segments</b>",
         )
         st.plotly_chart(figd, use_container_width=True, theme="streamlit")
+
         with st.expander("Click for details"):
             st.markdown("""
             This plot shows a 3D visualization of the Discrete Fracture Network (DFN) segments loaded into the simulator.
