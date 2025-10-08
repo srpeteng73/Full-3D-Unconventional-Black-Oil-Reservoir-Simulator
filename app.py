@@ -80,11 +80,24 @@ def render_app() -> None:
             return False
         return True
 
+    # ---- PAGES (indentation of elif must match the if below) ----
     if selected_tab == "Overview":
         st.title("Full 3D Unconventional & Black-Oil Reservoir Simulator")
         st.markdown(r"""
-This is a minimal, known-good baseline. Expand each tab as needed.
-""")  # <-- properly closed
+<!-- BEGIN OVERVIEW MARKDOWN -->
+
+### 1. Introduction
+(paste all of your existing Overview markdown here)
+
+### 3. Key Tabs Explained
+(your “Results / Economics / Field Match & Automated Match / 3D & Slice Viewers” text)
+
+### 4. Input Validation
+- Automated Match warns if any min bound > max bound.
+- Results sanity checks enforce realistic EURs for the selected play.
+
+<!-- END OVERVIEW MARKDOWN -->
+        """)  # end Overview markdown
 
     elif selected_tab == "Inputs":
         st.header("Model Inputs")
@@ -105,8 +118,7 @@ This is a minimal, known-good baseline. Expand each tab as needed.
         if st.button("Run Simulation", type="primary"):
             inputs = st.session_state.inputs
             with st.spinner("Running simulation..."):
-                # Replace with your real call signature
-                results = simulate(inputs)
+                results = simulate(inputs)  # replace with your real call if different
             st.session_state.results = results
             st.success("Simulation complete. See **Results** tab.")
 
@@ -119,7 +131,10 @@ This is a minimal, known-good baseline. Expand each tab as needed.
         t = np.asarray(results.get("time_days", []))
         q = np.asarray(results.get("q_oil_stb_d", []))
         if t.size and q.size:
-            st.plotly_chart(px.line(x=t, y=q, labels={"x": "Days", "y": "Oil Rate (STB/D)"}), use_container_width=True)
+            st.plotly_chart(
+                px.line(x=t, y=q, labels={"x": "Days", "y": "Oil Rate (STB/D)"}),
+                use_container_width=True
+            )
 
     elif selected_tab == "Solver & Profiling":
         st.header("Solver & Profiling")
@@ -3680,11 +3695,14 @@ def safe_power(x, p):
     - **3D Viewer:** Interactive isosurfaces (perm/poro/pressure).  
     - **Slice Viewer:** 2D cross-sections in X/Y/Z for layer-by-layer inspection.
 
-    ### 4. Input Validation
+       ### 4. Input Validation
     - **Automated Match:** warns if any min bound > max bound.  
     - **Results:** sanity checks enforce realistic EURs for the selected play; physically inconsistent results are flagged or withheld.
-            """
-        )
+        """)  # end Overview markdown
+
+    elif selected_tab == "Solver & Profiling":
+        st.header("Solver & Profiling")
+
 
     elif selected_tab == "Solver & Profiling":
         st.header("Solver & Profiling")
