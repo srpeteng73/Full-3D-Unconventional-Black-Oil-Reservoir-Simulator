@@ -2450,7 +2450,6 @@ elif selected_tab == "Uncertainty & Monte Carlo":
         num_runs = st.number_input("Number of Monte Carlo runs", 10, 500, 50, 10)
 
     if st.button("Run Monte Carlo Simulation", key="run_mc"):
-        # (Existing Monte Carlo logic remains the same)
         qg_runs, qo_runs, eur_g, eur_o = [], [], [], []
         bar_mc = st.progress(0, text="Running Monte Carlo simulation...")
         base_state = state.copy()
@@ -2468,7 +2467,6 @@ elif selected_tab == "Uncertainty & Monte Carlo":
         bar_mc.empty()
 
     if 'mc_results' in st.session_state:
-        # (Existing Monte Carlo plotting logic remains the same)
         mc = st.session_state.mc_results
         p10_g, p50_g, p90_g = np.percentile(mc['qg_runs'], [90, 50, 10], axis=0)
         p10_o, p50_o, p90_o = np.percentile(mc['qo_runs'], [90, 50, 10], axis=0)
@@ -2491,12 +2489,11 @@ elif selected_tab == "Uncertainty & Monte Carlo":
 
     # --- Section 2: Deterministic Sensitivity (Tornado Chart) ---
     st.subheader("2. Sensitivity Analysis (Tornado Chart)")
-    st.info("This analysis varies one parameter at a time (from a low P10 to a high P90 value) to see which inputs have the biggest impact on the final result.")
+    st.info("This analysis varies one parameter at a time (from a low P90 to a high P10 value) to see which inputs have the biggest impact on the final result.")
 
     with st.expander("Configure Tornado Chart Parameters"):
         tornado_output = st.selectbox("Select Output for Tornado Chart", ["EUR Oil (MMBO)", "EUR Gas (BCF)"])
         
-        # Define parameters for sensitivity
         params_to_test = {
             "Frac Half-Length (xf_ft)": (state['xf_ft'] * 0.8, state['xf_ft'], state['xf_ft'] * 1.2),
             "Initial Pressure (p_init_psi)": (state['p_init_psi'] * 0.9, state['p_init_psi'], state['p_init_psi'] * 1.1),
@@ -2506,9 +2503,19 @@ elif selected_tab == "Uncertainty & Monte Carlo":
         
         tornado_params = {}
         st.markdown("###### Define Low (P90), Base (P50), and High (P10) values for each parameter:")
-        for name, (p90, p50, p10) in params_to_test.items():
-            key_name = name.split('(')[1].split(')')[0]
-            tornado_params[key_name] = st.slider(name, float(p90), float(p10), (float(p90), float(p50), float(p10)))
+        
+        # CORRECTED WIDGET IMPLEMENTATION
+        for name, (default_p90, default_p50, default_p10) in params_to_test.items():
+            key_name = name.split('(')[1].split(')')[0].strip()
+            st.markdown(f"**{name}**")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                p90_val = st.number_input("Low (P90)", value=float(default_p90), key=f"{key_name}_p90", format="%.2f")
+            with c2:
+                p50_val = st.number_input("Base (P50)", value=float(default_p50), key=f"{key_name}_p50", format="%.2f")
+            with c3:
+                p10_val = st.number_input("High (P10)", value=float(default_p10), key=f"{key_name}_p10", format="%.2f")
+            tornado_params[key_name] = (p90_val, p50_val, p10_val)
 
     if st.button("🚀 Run Tornado Analysis", use_container_width=True):
         base_state = state.copy()
@@ -2559,29 +2566,34 @@ elif selected_tab == "Uncertainty & Monte Carlo":
         st.markdown("---")
         st.markdown(f"#### Figure 3: Tornado Chart for {tornado_output}")
         
+        # Create the Tornado chart using Plotly
         fig_tornado = go.Figure()
+        # Add bars for the difference from the base case
         fig_tornado.add_trace(go.Bar(
             y=df_tornado["Parameter"],
-            x=df_tornado["Low_Value_EUR"],
-            name="Low Case (P90)",
+            x=df_tornado["High_Value_EUR"] - base_eur,
+            base=base_eur,
             orientation='h',
-            marker=dict(color='rgba(255, 0, 0, 0.6)')
+            name='High Case (P10) Impact',
+            marker_color='green'
         ))
         fig_tornado.add_trace(go.Bar(
             y=df_tornado["Parameter"],
-            x=df_tornado["High_Value_EUR"],
-            name="High Case (P10)",
+            x=df_tornado["Low_Value_EUR"] - base_eur,
+            base=base_eur,
             orientation='h',
-            marker=dict(color='rgba(0, 128, 0, 0.6)')
+            name='Low Case (P90) Impact',
+            marker_color='red'
         ))
         
         fig_tornado.update_layout(
-            barmode='overlay',
-            title=f"Sensitivity of {tornado_output}",
-            xaxis_title=tornado_output,
+            barmode='relative',
+            title_text=f"Sensitivity of {tornado_output}",
+            xaxis_title=f"Change in {tornado_output}",
             yaxis_title="Parameter",
             template="plotly_white",
-            height=400 + len(df_tornado) * 25
+            height=400 + len(df_tornado) * 25,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
         )
         fig_tornado.add_vline(x=base_eur, line_width=2, line_dash="dash", line_color="black", annotation_text="Base Case")
         st.plotly_chart(fig_tornado, use_container_width=True)
@@ -2589,10 +2601,10 @@ elif selected_tab == "Uncertainty & Monte Carlo":
             st.markdown(f"""
             This Tornado chart ranks the input parameters by their impact on the final **{tornado_output}**.
             - The **black dashed line** represents the Base Case EUR.
-            - Each horizontal bar shows the range of EUR outcomes when a single parameter is varied from its Low to High value, while all other parameters are held at their Base value.
+            - Each horizontal bar shows how much the EUR changes when a single parameter is varied from its Low to High value.
             - **Longer bars indicate a higher sensitivity**, meaning that uncertainty in that parameter has a larger effect on the forecast.
             """)
-# ======== Well Placement Optimization ========
+            # ======== Well Placement Optimization ========
 elif selected_tab == "Well Placement Optimization":
     """
     Simple heuristic placement search using your proxy model.
