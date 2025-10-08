@@ -20,10 +20,64 @@ import warnings  # trap analytical power warnings for Arps
 from scipy.integrate import cumulative_trapezoid as _ctr
 import numpy as _np
 
+# ---- Gauges + EUR bounds helpers (module-scope; ensure always defined) ----
 MIDLAND_BOUNDS = {
-    "oil_mmbo": (0.3, 1.5),   # typical sanity window
-    "gas_bcf":  (0.3, 3.0),
+    "oil_mmbo": (0.4, 2.0),   # display sanity band
+    "gas_bcf":  (0.2, 3.5),
+    "max_gor_scfstb": 2000.0, # optional cap
 }
+
+def enforce_midland_bounds(eur_o_mmbo: float, eur_g_bcf: float):
+    """
+    Returns (eur_o_adj, eur_g_adj, reason) where the adjusted values are forced
+    inside Permian–Midland oil-window bands and an optional max GOR.
+    """
+    lo_o, hi_o = MIDLAND_BOUNDS["oil_mmbo"]
+    lo_g, hi_g = MIDLAND_BOUNDS["gas_bcf"]
+    max_gor = MIDLAND_BOUNDS["max_gor_scfstb"]
+
+    o = max(lo_o, min(float(eur_o_mmbo or 0.0), hi_o))
+    g = max(lo_g, min(float(eur_g_bcf or 0.0), hi_g))
+
+    # Optional: if implied GOR is still above limit, trim gas to the limit
+    if o > 0:
+        gor = (g * 1.0e9) / (o * 1.0e6)  # scf/STB
+        if gor > max_gor:
+            g = (max_gor * (o * 1.0e6)) / 1.0e9
+
+    return o, g, f"Display clamped to Midland oil-window: Oil [{lo_o}, {hi_o}] MMBO; Gas [{lo_g}, {hi_g}] BCF; GOR ≤ {max_gor:,.0f} scf/STB."
+
+def render_semi_gauge(title: str, value: float, unit: str,
+                      vmin: float, vmax: float, bar_color: str):
+    """
+    Compact semicircle gauge with clean typography. Kept small to fit two across.
+    """
+    import plotly.graph_objects as go
+    v = 0.0 if value is None else float(value)
+    vdisp = max(vmin, min(v, vmax))
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=vdisp,
+        number={"valueformat": ".2f", "font": {"size": 26}},   # smaller text
+        title={"text": title, "font": {"size": 16}},
+        gauge={
+            "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#9aa0a6"},
+            "bar": {"color": bar_color, "thickness": 0.28},
+            "bgcolor": "white",
+            "shape": "angular",
+            "threshold": None
+        },
+        domain={"x": [0, 1], "y": [0, 1]}
+    ))
+    fig.update_layout(margin=dict(l=6, r=6, t=30, b=0), height=220)  # shorter to fit screen
+    # Unit label under the number
+    fig.add_annotation(
+        text=f"{v:.2f} {unit}",
+        showarrow=False, yref="paper", y=0.02, xref="paper", x=0.5,
+        font=dict(size=20, color="#475569")
+    )
+    return fig
 
 # ---- Gauges helper (place at top-level, not inside any block) ----
 def render_semi_gauge(title: str, value: float, unit: str,
@@ -1686,16 +1740,26 @@ elif selected_tab == "Results":
             )
             return fig
 
-    # ---- Gauges: Oil first (green), Gas second (red). Clamp DISPLAY to sane max ----
-    c1, c2 = st.columns(2)
-    with c1:
-        vmax_oil = max(OIL_MAX, eur_o)  # expand if needed; else stick to sanity max
-        fig_oil = render_semi_gauge("EUR Oil", min(eur_o, vmax_oil), "MMBO", 0.0, vmax_oil, "#22c55e")
-        st.plotly_chart(fig_oil, use_container_width=True)
-    with c2:
-        vmax_gas = max(GAS_MAX, eur_g)
-        fig_gas = render_semi_gauge("EUR Gas", min(eur_g, vmax_gas), "BCF", 0.0, vmax_gas, "#ef4444")
-        st.plotly_chart(fig_gas, use_container_width=True)
+    # ---- Enforce Midland display bounds & draw compact gauges ----
+eur_o_disp, eur_g_disp, clamp_note = enforce_midland_bounds(eur_o, eur_g)
+
+# Optional note to user (once per run)
+if not st.session_state.get("eur_bounds_noted"):
+    st.info(clamp_note)
+    st.session_state["eur_bounds_noted"] = True
+
+c1, c2 = st.columns(2)
+with c1:
+    fig_oil = render_semi_gauge("EUR Oil", eur_o_disp, "MMBO",
+                                vmin=0.0, vmax=MIDLAND_BOUNDS["oil_mmbo"][1],
+                                bar_color="#22c55e")
+    st.plotly_chart(fig_oil, use_container_width=True)
+with c2:
+    fig_gas = render_semi_gauge("EUR Gas", eur_g_disp, "BCF",
+                                vmin=0.0, vmax=MIDLAND_BOUNDS["gas_bcf"][1],
+                                bar_color="#ef4444")
+    st.plotly_chart(fig_gas, use_container_width=True)
+
 
     # ===================== RATE & CUMULATIVE PLOTS =====================
     t  = sim.get("t"); qg = sim.get("qg"); qo = sim.get("qo"); qw = sim.get("qw")
