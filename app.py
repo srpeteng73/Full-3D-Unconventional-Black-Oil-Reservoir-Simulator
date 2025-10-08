@@ -1708,60 +1708,87 @@ if run_clicked:
 
 
         
-        # --------- EUR GAUGES (with dynamic maxima & compact labels) ----------
-        gas_hi = b["gas_bcf"][1]
-        oil_hi = b["oil_mmbo"][1]
-        gmax = gauge_max(eur_g, gas_hi, floor=0.5, safety=0.15)
-        omax = gauge_max(eur_o, oil_hi, floor=0.2, safety=0.15)
+        # ======== Results tab ========
+if selected_tab == "Results":
+    # Pull simulation results safely
+    sim = st.session_state.get("sim") if "sim" in st.session_state else None
+    if not isinstance(sim, dict):
+        st.info("Click **Run simulation** to compute and display the full 3D results.")
+        st.stop()
 
-        c1, c2 = st.columns(2)
-        with c1:
-            gfig = go.Figure(
-                go.Indicator(
-                    mode="gauge+number",
-                    value=eur_g,
-                    number={"valueformat": ",.2f", "suffix": " BCF", "font": {"size": 44}},
-                    title={"text": "<b>EUR Gas</b>", "font": {"size": 22}},
-                    gauge=dict(
-                        axis=dict(range=[0, gmax], tickwidth=1.2),
-                        bar=dict(color=COLOR_GAS, thickness=0.28),
-                        steps=[dict(range=[0, 0.6 * gmax], color="rgba(0,0,0,0.05)")],
-                        threshold=dict(
-                            line=dict(color=COLOR_GAS, width=4), thickness=0.9, value=eur_g
-                        ),
-                    ),
-                )
-            )
-            gfig.update_layout(
-                height=280,
-                template="plotly_white",
-                margin=dict(l=10, r=10, t=50, b=10),
-            )
-            st.plotly_chart(gfig, use_container_width=True, theme=None)
+    # ---- Resolve EURs (use session_state first; fall back to local vars if you kept them) ----
+    eur_oil_mmbo = (
+        sim.get("eur_oil_mmbo")
+        or sim.get("EUR_Oil_MMBO")
+        or sim.get("eur_oil")
+        or locals().get("eur_o")     # fallback to your previous variables if still present
+    )
+    eur_gas_bcf = (
+        sim.get("eur_gas_bcf")
+        or sim.get("EUR_Gas_BCF")
+        or sim.get("eur_gas")
+        or locals().get("eur_g")     # fallback to your previous variables if still present
+    )
 
-        with c2:
-            ofig = go.Figure(
-                go.Indicator(
-                    mode="gauge+number",
-                    value=eur_o,
-                    number={"valueformat": ",.2f", "suffix": " MMBO", "font": {"size": 44}},
-                    title={"text": "<b>EUR Oil</b>", "font": {"size": 22}},
-                    gauge=dict(
-                        axis=dict(range=[0, omax], tickwidth=1.2),
-                        bar=dict(color=COLOR_OIL, thickness=0.28),
-                        steps=[dict(range=[0, 0.6 * omax], color="rgba(0,0,0,0.05)")],
-                        threshold=dict(
-                            line=dict(color=COLOR_OIL, width=4), thickness=0.9, value=eur_o
-                        ),
-                    ),
-                )
-            )
-            ofig.update_layout(
-                height=280,
-                template="plotly_white",
-                margin=dict(l=10, r=10, t=50, b=10),
-            )
-            st.plotly_chart(ofig, use_container_width=True, theme=None)
+    # Coerce to float if they are numpy scalars/None
+    eur_oil_mmbo = float(eur_oil_mmbo) if eur_oil_mmbo is not None else 0.0
+    eur_gas_bcf  = float(eur_gas_bcf)  if eur_gas_bcf  is not None else 0.0
+
+    # ---- Permian–Midland (oil window) sanity bands ----
+    OIL_MIN, OIL_MAX = 0.4, 2.0    # MMBO
+    GAS_MIN, GAS_MAX = 0.2, 3.5    # BCF
+    GOR_MAX = 2000                 # scf/STB
+
+    sanity_msgs = []
+    if eur_oil_mmbo < OIL_MIN or eur_oil_mmbo > OIL_MAX:
+        sanity_msgs.append(f"Oil EUR {eur_oil_mmbo:.2f} MMBO outside sanity ({OIL_MIN}, {OIL_MAX}) MMBO.")
+    if eur_gas_bcf < GAS_MIN or eur_gas_bcf > GAS_MAX:
+        sanity_msgs.append(f"Gas EUR {eur_gas_bcf:.2f} BCF outside sanity ({GAS_MIN}, {GAS_MAX}) BCF.")
+
+    # Implied GOR ≈ scf/STB
+    implied_gor = None
+    if eur_oil_mmbo > 0:
+        implied_gor = (eur_gas_bcf * 1e9) / (eur_oil_mmbo * 1e6)  # scf/STB
+        if implied_gor > GOR_MAX:
+            sanity_msgs.append(f"Implied EUR GOR {implied_gor:,.0f} scf/STB exceeds {GOR_MAX:,} scf/STB.")
+
+    if sanity_msgs:
+        st.warning(
+            "Sanity checks flagged issues (Analytical engine).\n\n"
+            + "\n".join(f"- {m}" for m in sanity_msgs)
+            + "\n\n**Tip:** If gas looks too high for the oil window, try increasing **Pad BHP (psi)** "
+              "toward **pb_psi** to reduce gas liberation."
+        )
+
+    # ---- Layout: Oil (left, green) then Gas (right, red) ----
+    c1, c2 = st.columns(2)
+
+    with c1:
+        # vmax ensures the needle always fits; prefers sanity max but expands if needed
+        vmax_oil = max(OIL_MAX, eur_oil_mmbo if eur_oil_mmbo > 0 else OIL_MAX)
+        fig_oil = render_semi_gauge(
+            title="EUR Oil",
+            value=eur_oil_mmbo,
+            unit="MMBO",
+            vmin=0.0,
+            vmax=vmax_oil,
+            bar_color="#22c55e",  # green
+        )
+        st.plotly_chart(fig_oil, use_container_width=True)
+
+    with c2:
+        vmax_gas = max(GAS_MAX, eur_gas_bcf if eur_gas_bcf > 0 else GAS_MAX)
+        fig_gas = render_semi_gauge(
+            title="EUR Gas",
+            value=eur_gas_bcf,
+            unit="BCF",
+            vmin=0.0,
+            vmax=vmax_gas,
+            bar_color="#ef4444",  # red
+        )
+        st.plotly_chart(fig_gas, use_container_width=True)
+
+    # (Optional) keep your existing sections for rate/cumulative below this point
 
  # ======== Page view selection (radio) ========
 selected_tab = st.sidebar.radio(
@@ -1769,6 +1796,47 @@ selected_tab = st.sidebar.radio(
     ["Results", "3D Viewer", "Debug"],
     index=0
 )
+
+import plotly.graph_objects as go
+
+def render_semi_gauge(title: str, value: float, unit: str,
+                      vmin: float, vmax: float, bar_color: str) -> go.Figure:
+    """Semicircle gauge (0–180°) with crisp typography and responsive sizing."""
+    if value is None:
+        value = 0.0
+
+    # Clamp to range for display
+    vdisp = max(vmin, min(value, vmax))
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=vdisp,
+        number={"valueformat": ".2f", "font": {"size": 36}},
+        title={"text": title, "font": {"size": 18}},
+        gauge={
+            "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
+            "bar": {"color": bar_color},
+            "bgcolor": "rgba(0,0,0,0)",
+            "shape": "angular",
+            "threshold": None
+        },
+        domain={"x": [0, 1], "y": [0, 1]}
+    ))
+
+    # Make it a semicircle by cropping top half via layout
+    fig.update_layout(
+        margin=dict(l=10, r=10, t=30, b=10),
+        height=310,
+    )
+    # Visual cue of the full range arc
+    fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
+    fig.add_annotation(
+        text=f"{value:.2f} {unit}",
+        showarrow=False,
+        yref="paper", y=0.0, xref="paper", x=0.5, font=dict(size=28)
+    )
+    return fige
+
 
 # ======== Results tab ========
 if selected_tab == "Results":
