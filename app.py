@@ -3,8 +3,6 @@ import time
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-
-
 import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.io as pio
@@ -26,6 +24,39 @@ MIDLAND_BOUNDS = {
     "oil_mmbo": (0.3, 1.5),   # typical sanity window
     "gas_bcf":  (0.3, 3.0),
 }
+
+# ---- Gauges helper (place at top-level, not inside any block) ----
+def render_semi_gauge(title: str, value: float, unit: str,
+                      vmin: float, vmax: float, bar_color: str):
+    """Semicircle gauge (0–180°) with crisp typography and responsive sizing."""
+    if value is None:
+        value = 0.0
+
+    vdisp = max(vmin, min(float(value), float(vmax)))  # clamp for display
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=vdisp,
+        number={"valueformat": ".2f", "font": {"size": 36}},
+        title={"text": title, "font": {"size": 18}},
+        gauge={
+            "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#999"},
+            "bar": {"color": bar_color},
+            "bgcolor": "rgba(0,0,0,0)",
+            "shape": "angular",
+            "threshold": None
+        },
+        domain={"x": [0, 1], "y": [0, 1]}
+    ))
+
+    fig.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=310)
+    fig.update_traces(gauge_axis={"tickfont": {"size": 12}})
+    fig.add_annotation(
+        text=f"{value:.2f} {unit}",
+        showarrow=False, yref="paper", y=0.0, xref="paper", x=0.5, font=dict(size=28)
+    )
+    return fig
+
 
 def _cum_trapz_days(t_days, y_per_day):
     if y_per_day is None:
@@ -62,7 +93,6 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
     from scipy.integrate import cumulative_trapezoid
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-
 
     out = {}
 
@@ -106,7 +136,6 @@ def _compute_eurs_and_cums(t, qg=None, qo=None, qw=None):
         out["eur_gor_scfstb"] = float(gas_scf / oil_stb)
 
     return out
-
 
 def _apply_play_bounds_to_results(sim_like: dict, play_name: str, engine_name: str):
     """
@@ -1710,7 +1739,7 @@ if run_clicked:
 
 
         
-        # ======== Results tab ========
+ # ======== Results tab ========
 if selected_tab == "Results":
     # Pull simulation results safely
     sim = st.session_state.get("sim") if "sim" in st.session_state else None
@@ -1718,7 +1747,7 @@ if selected_tab == "Results":
         st.info("Click **Run simulation** to compute and display the full 3D results.")
         st.stop()
 
-    # ---- Resolve EURs (use session_state first; fall back to local vars if you kept them) ----
+    # ---- Resolve EURs (prefer session_state; fall back to old locals if present) ----
     eur_oil_mmbo = (
         sim.get("eur_oil_mmbo")
         or sim.get("EUR_Oil_MMBO")
@@ -1732,7 +1761,7 @@ if selected_tab == "Results":
         or locals().get("eur_g")     # fallback to your previous variables if still present
     )
 
-    # Coerce to float if they are numpy scalars/None
+    # Coerce to floats (handles numpy types / None)
     eur_oil_mmbo = float(eur_oil_mmbo) if eur_oil_mmbo is not None else 0.0
     eur_gas_bcf  = float(eur_gas_bcf)  if eur_gas_bcf  is not None else 0.0
 
@@ -1790,7 +1819,7 @@ if selected_tab == "Results":
         )
         st.plotly_chart(fig_gas, use_container_width=True)
 
-    # (Optional) keep your existing sections for rate/cumulative below this point
+    # (Optional) keep your existing rate/cumulative sections below this point
 
  # ======== Page view selection (radio) ========
 selected_tab = st.sidebar.radio(
