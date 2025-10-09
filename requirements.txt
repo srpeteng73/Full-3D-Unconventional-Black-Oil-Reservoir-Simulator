@@ -7,3 +7,4 @@ scipy>=1.14.1
 numpy-financial>=1.0.0
 scikit-learn
 xgboost
+openai
