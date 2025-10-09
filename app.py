@@ -1033,8 +1033,8 @@ def run_simulation_engine(state):
 
     # --- Step 3: Enforce Realism for Analytical Oil Plays ---
     if "Analytical" in chosen_engine and "oil" in current_play.lower() and qo is not None and qg is not None and len(t) > 1:
-        REALISTIC_GOR_CAP_SCFTSTB = 3000.0
-        # CORRECTED: Replaced deprecated np.trapz with trapezoid
+        # CORRECTED: Aligned the realism cap with the warning threshold
+        REALISTIC_GOR_CAP_SCFTSTB = 2000.0
         total_oil_stb = trapezoid(qo, t)
         total_gas_scf = trapezoid(qg, t) * 1000.0
         if total_oil_stb > 1e-6: # Avoid division by zero
