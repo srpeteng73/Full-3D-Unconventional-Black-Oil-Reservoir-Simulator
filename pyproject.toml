@@ -10,3 +10,4 @@ ignore = ["E501"]
 
 [tool.isort]
 profile = "black"
+OPENAI_API_KEY="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"
