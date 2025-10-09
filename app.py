@@ -998,55 +998,35 @@ def run_simulation_engine(state):
     current_play = st.session_state.get("play_sel", "")
     out = None
 
-    # --- Step 1: Run the selected simulation engine ---
     try:
+        # CORRECTED: This logic now correctly separates the two engine paths.
         if "Analytical" in chosen_engine:
             st.info("Running Fast Analytical Proxy Model...")
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always", RuntimeWarning)
-                out = fallback_fast_solver(state, rng)
-                bad_power = any(("invalid value encountered in power" in str(x.message)) for x in w)
-                if bad_power or _looks_nan_like(out):
-                    st.info("Analytical model unstable. Retrying with safe decline parameters…")
-                    safe_state = _sanitize_decline_params(state.copy())
-                    out = fallback_fast_solver(safe_state, rng)
+            out = fallback_fast_solver(state, rng)
+            # Post-process analytical results for realism
+            if "oil" in current_play.lower() and out.get('qo') is not None and out.get('qg') is not None:
+                t_analytical = np.asarray(out.get("t", []))
+                qo_analytical = np.asarray(out.get("qo", []))
+                qg_analytical = np.asarray(out.get("qg", []))
+                if len(t_analytical) > 1:
+                    total_oil_stb = trapezoid(qo_analytical, t_analytical)
+                    total_gas_scf = trapezoid(qg_analytical, t_analytical) * 1000.0
+                    if total_oil_stb > 1e-6:
+                        current_gor = total_gas_scf / total_oil_stb
+                        if current_gor > 2000.0:
+                            st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
+                            scale_factor = 2000.0 / current_gor
+                            out["qg"] = qg_analytical * scale_factor
         else:
-            # CORRECTED: Implemented the full 3D engine call
+            # This is the 3D Implicit Engine Path
             st.info("Running Full 3D Three-Phase Implicit Simulator...")
             if st.session_state.get('kx') is None:
                 st.warning("3D rock properties not found. Generating them first...")
                 generate_property_volumes(state)
 
             # Assemble the detailed input dictionary for the 3D engine
-            inputs = {
-                "engine": "implicit",
-                "nx": int(state.get("nx", 300)),
-                "ny": int(state.get("ny", 60)),
-                "nz": int(state.get("nz", 12)),
-                "dx": float(state.get("dx", 40.0)),
-                "dy": float(state.get("dy", 40.0)),
-                "dz": float(state.get("dz", 15.0)),
-                "phi": st.session_state.get("phi"),
-                "kx_md": st.session_state.get("kx"),
-                "ky_md": st.session_state.get("ky"),
-                "p_init_psi": float(state.get("p_init_psi", 5800.0)),
-                "pb_psi": float(state.get("pb_psi", 5200.0)),
-                "Bo_pb_rb_stb": float(state.get("Bo_pb_rb_stb", 1.35)),
-                "Rs_pb_scf_stb": float(state.get("Rs_pb_scf_stb", 650.0)),
-                "mu_o_cp": float(state.get("muo_pb_cp", 1.2)),
-                "mu_g_cp": float(state.get("mug_pb_cp", 0.02)),
-                "control": str(state.get("pad_ctrl", "BHP")),
-                "bhp_psi": float(state.get("pad_bhp_psi", 5300.0)),
-                "rate_mscfd": float(state.get("pad_rate_mscfd", 100000.0)),
-                "dt_days": 30.0,
-                "t_end_days": 10 * 365.25, # Run for 10 years for 3D
-                "L_ft": float(state.get("L_ft", 10000.0)),
-                "hf_ft": float(state.get("hf_ft", 180.0)),
-                "xf_ft": float(state.get("xf_ft", 300.0)),
-                "stage_spacing_ft": float(state.get("stage_spacing_ft", 250.0)),
-                "n_laterals": int(state.get("n_laterals", 2)),
-            }
+            inputs = {**state, "engine": "implicit"} # Pass all state variables
             out = simulate(inputs)
 
     except Exception as e:
@@ -1058,37 +1038,20 @@ def run_simulation_engine(state):
         st.error("Simulation engine failed to return valid data.")
         return None
 
-    # --- Step 2: Extract and clean raw rate arrays ---
-    t = np.nan_to_num(np.asarray(out.get("t"), float), nan=0.0)
-    qg = np.nan_to_num(np.asarray(out.get("qg"), float), nan=0.0) if out.get("qg") is not None else None
-    qo = np.nan_to_num(np.asarray(out.get("qo"), float), nan=0.0) if out.get("qo") is not None else None
-    qw = np.nan_to_num(np.asarray(out.get("qw"), float), nan=0.0) if out.get("qw") is not None else None
-
-    # --- Step 3: Enforce Realism for Analytical Oil Plays ---
-    if "Analytical" in chosen_engine and "oil" in current_play.lower() and qo is not None and qg is not None and len(t) > 1:
-        REALISTIC_GOR_CAP_SCFTSTB = 2000.0
-        total_oil_stb = trapezoid(qo, t)
-        total_gas_scf = trapezoid(qg, t) * 1000.0
-        if total_oil_stb > 1e-6:
-            current_gor = total_gas_scf / total_oil_stb
-            if current_gor > REALISTIC_GOR_CAP_SCFTSTB:
-                st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
-                scale_factor = REALISTIC_GOR_CAP_SCFTSTB / current_gor
-                qg *= scale_factor
-                out["qg"] = qg
-
-    # --- Step 4: Calculate Cumulatives and Final EURs ---
+    # --- Final Post-processing for both engines ---
     sim = dict(out)
+    t = np.asarray(sim.get("t", []))
+    qo = sim.get("qo")
+    qg = sim.get("qg")
+    qw = sim.get("qw")
+    
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
-
-    # --- Step 5: Final processing ---
     sim["runtime_s"] = time.time() - t0
     sim["_sim_signature"] = _sim_signature_from_state()
     if "eur_gas_BCF" in sim: sim["EUR_g_BCF"] = sim["eur_gas_BCF"]
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
-
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
