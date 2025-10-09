@@ -1000,23 +1000,24 @@ def run_simulation_engine(state):
 
     try:
         # ======================================================================
-        # CORRECTED: This logic now correctly and cleanly separates the two engine paths.
+        # FINAL CORRECTED LOGIC: This cleanly separates the two engine paths.
         # ======================================================================
         if "Analytical" in chosen_engine:
             st.info("Running Fast Analytical Proxy Model...")
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
-            # Directly call the fast analytical solver
+            # Directly call the fast analytical solver from engines/fast.py
             out = fallback_fast_solver(state, rng)
 
-        else: # This is the 3D Implicit Engine Path
+        else:  # This is the 3D Implicit Engine Path
             st.info("Running Full 3D Three-Phase Implicit Simulator...")
             if st.session_state.get('kx') is None:
                 st.warning("3D rock properties not found. Generating them first...")
                 generate_property_volumes(state)
 
-            # Assemble the detailed input dictionary for the 3D engine
+            # Assemble the detailed input dictionary for the 3D engine.
             # This will be passed to the simulate() function in full3d.py
             inputs = {**state, "engine": "implicit"}
+            # Directly call the main 3D simulator from full3d.py
             out = simulate(inputs)
 
     except Exception as e:
@@ -1061,7 +1062,6 @@ def run_simulation_engine(state):
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
-
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
