@@ -1640,16 +1640,15 @@ except Exception:
 
 # ------------------------------ REPLACEMENT: simulate ------------------------
 
+# =============================================================================
+# Please replace your existing simulate function in full3d.py with this one.
+# =============================================================================
+
 def simulate(inputs: dict):
-    """Main simulation entry point."""
-    engine = inputs.get("engine", "analytical").lower().strip()
+    """Main 3D simulation entry point."""
+    engine = inputs.get("engine", "implicit").lower().strip()
 
-    if engine == "analytical":
-        # Call the robust analytical solver from engines/fast.py (or stub)
-        rng = np.random.default_rng(inputs.get("rng_seed", 1234))
-        return fallback_fast_solver(inputs, rng)
-
-    elif engine == "implicit":
+    if engine == "implicit":
         state0, grid, rock, relperm, init, schedule, options, pvt = _build_inputs_for_blackoil(inputs)
         out = newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt)
 
@@ -1680,8 +1679,8 @@ def simulate(inputs: dict):
         return out
 
     else:
-        raise ValueError(f"Unknown engine '{engine}'")
-
+        # This case should no longer be reached, but it's a good safeguard.
+        raise ValueError(f"The 3D simulator was called with an incorrect engine type: '{engine}'")
 
 # ------------------------------ Public EUR helper ----------------------------
 
