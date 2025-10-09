@@ -1206,6 +1206,7 @@ tab_names = [
     "EUR vs Lateral Length",
     "Field Match (CSV)",
     "Machine Learning",  # <-- ADD THIS LINE HERE
+    "AI Co-Pilot"
     "Automated Match",
     "Uncertainty & Monte Carlo",
     "Well Placement Optimization",
