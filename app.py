@@ -2271,7 +2271,11 @@ elif selected_tab == "Machine Learning":
         
         if st.button("🚀 Generate Training Data"):
             ml_data = []
-            progress_bar = st.progress(0, "Generating synthetic data...")
+            
+            # CORRECTED: Create placeholders for real-time feedback
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
             base_state = state.copy()
             rng_ml = np.random.default_rng(st.session_state.rng_seed)
 
@@ -2293,10 +2297,17 @@ elif selected_tab == "Machine Learning":
                     'EUR_Oil_MMBO': sim_result.get('EUR_o_MMBO', 0.0),
                     'EUR_Gas_BCF': sim_result.get('EUR_g_BCF', 0.0)
                 })
-                progress_bar.progress((i + 1) / num_points, f"Generated point {i+1}/{num_points}")
+                
+                # CORRECTED: Update the placeholders inside the loop
+                progress_percentage = (i + 1) / num_points
+                progress_bar.progress(progress_percentage)
+                status_text.text(f"Generated point {i+1} of {num_points} ({progress_percentage:.0%})")
             
             st.session_state.ml_training_data = pd.DataFrame(ml_data)
+            
+            # CORRECTED: Clear the placeholders and show a final success message
             progress_bar.empty()
+            status_text.empty()
             st.success(f"Successfully generated {num_points} data points!")
 
     # --- 2. Model Training and Prediction ---
@@ -2393,7 +2404,7 @@ elif selected_tab == "Machine Learning":
             template='plotly_white'
         )
         st.plotly_chart(fig_imp, use_container_width=True)
-
+        
 # ======== Automated Match ========
 elif selected_tab == "Automated Match":
     """
