@@ -1191,6 +1191,7 @@ with st.sidebar:
     st.markdown("---")
 #### Part 3: Main Application UI - Primary Workflow Tabs ####
 # --- Tab list ---
+# --- Tab list ---
 tab_names = [
     "Setup Preview",
     "Generate 3D property volumes",
@@ -1204,7 +1205,8 @@ tab_names = [
     "Economics",
     "EUR vs Lateral Length",
     "Field Match (CSV)",
-    "Automated Match", # <-- NEW TAB
+    "Machine Learning",  # <-- ADD THIS LINE HERE
+    "Automated Match",
     "Uncertainty & Monte Carlo",
     "Well Placement Optimization",
     "User’s Manual",
@@ -2391,10 +2393,6 @@ elif selected_tab == "Machine Learning":
             template='plotly_white'
         )
         st.plotly_chart(fig_imp, use_container_width=True)
-
-
-
-
 
 # ======== Automated Match ========
 elif selected_tab == "Automated Match":
