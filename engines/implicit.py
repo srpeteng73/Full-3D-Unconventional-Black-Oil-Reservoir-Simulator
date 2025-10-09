@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
+import time
 
 # Always use the new PVT implementation
 from core.blackoil_pvt1 import BlackOilPVT
@@ -27,9 +28,9 @@ class EngineOptions:
     ls_max_backtracks: int = 6
     armijo_c1: float = 1e-4
     # time stepping
-    dt_init_days: float = (30.0 * 365.0) / 360.0  # ~1 month / 12 ≈ 30-day months
-    dt_min_days:  float = 0.25                    # 6 hours
-    dt_max_days:  float = 90.0                    # ~quarterly
+    dt_init_days: float = (30.0 * 365.0) / 360.0
+    dt_min_days:  float = 0.25
+    dt_max_days:  float = 90.0
     dt_grow:      float = 1.25
     dt_shrink:    float = 0.5
     # fail safety
@@ -37,26 +38,13 @@ class EngineOptions:
 
 
 def _enforce_pvt_iface(pvt: object) -> None:
-    """
-    Make sure we got the new BlackOilPVT API and not the legacy 'Fluid'.
-    This is the guard that prevents the 'Fluid has no attribute Rs' crash.
-    """
-    required = (
-        "Bo", "Bw", "Bg", "Rs",
-        "dBo_dP", "dBw_dP", "dBg_dP", "dRs_dP",
-        "mu_oil", "mu_gas", "mu_water",
-    )
+    required = ("Bo", "Bw", "Bg", "Rs", "dBo_dP", "dBw_dP", "dBg_dP", "dRs_dP", "mu_oil", "mu_gas", "mu_water")
     missing = [name for name in required if not hasattr(pvt, name)]
     if missing:
-        raise TypeError(
-            f"PVT must be BlackOilPVT; got {type(pvt).__name__} missing {missing}. "
-            "This usually means something still imported the old core.blackoil_pvt.Fluid. "
-            "Fix by re-exporting BlackOilPVT in core/blackoil_pvt.py (shim)."
-        )
+        raise TypeError(f"PVT must be BlackOilPVT; got {type(pvt).__name__} missing {missing}.")
 
 
 def _res_norm(R: np.ndarray) -> float:
-    # infinity norm is robust for accept/reject decisions
     return float(np.linalg.norm(R, ord=np.inf))
 
 
@@ -64,10 +52,6 @@ def _newton_with_linesearch(
     asm: Assembler, x_start: np.ndarray, x_prev: np.ndarray,
     dt_days: float, opts: EngineOptions
 ) -> Tuple[bool, np.ndarray, int, int, float]:
-    """
-    Try to take one implicit step using Newton + Armijo backtracking.
-    Returns: (success, x_next, newton_iters, backtracks_used, final_norm)
-    """
     x_n = x_start.copy()
     for it in range(opts.max_newton):
         R, J = asm.residual_and_jacobian(x_n, x_prev, dt_days)
@@ -75,10 +59,7 @@ def _newton_with_linesearch(
         if norm0 < opts.newton_tol:
             return True, x_n, it, 0, norm0
 
-        # Solve J dx = -R
         dx = solve_linear(J, -R, max_iter=opts.max_lin)
-
-        # Armijo backtracking line search
         alpha = 1.0
         accepted = False
         for bt in range(opts.ls_max_backtracks + 1):
@@ -86,7 +67,6 @@ def _newton_with_linesearch(
             asm.clamp_state_inplace(x_try)
             R_try, _ = asm.residual_and_jacobian(x_try, x_prev, dt_days)
             norm_try = _res_norm(R_try)
-            # sufficient decrease: f(x+αdx) <= (1 - c1*α) f(x)
             if norm_try <= (1.0 - opts.armijo_c1 * alpha) * norm0:
                 x_n = x_try
                 accepted = True
@@ -94,21 +74,21 @@ def _newton_with_linesearch(
             alpha *= 0.5
 
         if not accepted:
-            # Line search failed at this Newton iteration
             return False, x_n, it + 1, opts.ls_max_backtracks, norm0
 
-    # Max Newton iterations hit
     R_end, _ = asm.residual_and_jacobian(x_n, x_prev, dt_days)
-    return False, x_n, opts.max_newton, 0, _res_norm(R_end))
+    return False, x_n, opts.max_newton, 0, _res_norm(R_end)
 
 
 def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
     """Three-phase implicit driver with line-search + adaptive dt."""
+    t_start = time.time()
+    
     # --- Build model objects
-    grid = Grid.from_inputs(inputs["grid"], inputs.get("rock", {}))
-    pvt  = BlackOilPVT.from_inputs(inputs["pvt"])
-    kr   = CoreyRelPerm.from_inputs(inputs["relperm"])
-    wells = WellSet.from_inputs(inputs.get("msw", {}), inputs.get("schedule", {}), grid, inputs)
+    grid = Grid.from_inputs(inputs)
+    pvt  = BlackOilPVT.from_inputs(inputs)
+    kr   = CoreyRelPerm.from_inputs(inputs)
+    wells = WellSet.from_inputs(inputs, grid)
     _enforce_pvt_iface(pvt)
 
     opts = EngineOptions(
@@ -117,104 +97,73 @@ def simulate_3phase_implicit(inputs: Dict[str, Any]) -> Dict[str, Any]:
         max_lin=int(inputs.get("max_lin", 200)),
     )
 
-    # --- State layout: [P, Sw, Sg] per cell (+ optional extra well DOFs for RATE)
+    # --- Initial State
     ncell = grid.num_cells
-    P0  = np.full(ncell, float(inputs["init"]["p_init_psi"]))
-    Sw0 = np.full(ncell, float(inputs["relperm"]["Swc"]))
+    P0  = np.full(ncell, float(inputs["p_init_psi"]))
+    Sw0 = np.full(ncell, float(inputs["Swc"]))
     Sg0 = np.zeros(ncell)
     x_cells = np.stack([P0, Sw0, Sg0], axis=1).reshape(-1)
-
     asm = Assembler(grid=grid, pvt=pvt, kr=kr, wells=wells, opts=vars(opts))
-
-    nextra = 0
-    if hasattr(asm, "n_extra_dof") and callable(getattr(asm, "n_extra_dof")):
-        try:
-            nextra = int(asm.n_extra_dof())
-        except Exception:
-            nextra = 0
-
-    if nextra > 0:
-        pwf_init = float(inputs.get("pad_bhp_psi", P0[0] - 500.0))
-        x = np.concatenate([x_cells, np.full(nextra, pwf_init)])
-    else:
-        x = x_cells.copy()
+    x = x_cells.copy()
 
     # --- Adaptive time integration
-    total_days = 30.0 * 365.0
+    total_days = float(inputs.get("t_end_days", 10 * 365.25))
     t, dt = 0.0, opts.dt_init_days
-    t_days, qg_list, qo_list = [], [], []
+    t_days, qg_list, qo_list, qw_list = [0.0], [0.0], [0.0], [0.0]
     x_prev = x.copy()
 
     step_index = 0
     while t < total_days - 1e-9:
-        dt = min(dt, total_days - t)  # don't overshoot final time
+        dt = min(dt, total_days - t)
         retries = 0
-
         while True:
             ok, x_next, iters, bts, norm_end = _newton_with_linesearch(asm, x, x_prev, dt, opts)
             if ok:
-                # accept step
-                x_prev = x_next.copy()
-                x      = x_next
-                t     += dt
+                x_prev, x = x_next.copy(), x_next
+                t += dt
                 step_index += 1
-
-                # report rates (optionally with pwf overrides for RATE wells)
-                pwf_overrides = None
-                if nextra > 0 and hasattr(asm, "rate_well_indices") and hasattr(asm, "ixWell"):
-                    try:
-                        pwf_overrides = {wi: x[asm.ixWell(extra_i)]
-                                         for extra_i, wi in enumerate(asm.rate_well_indices)}
-                    except Exception:
-                        pwf_overrides = None
-
-                try:
-                    qo, qg, _ = wells.surface_rates(x, grid, pvt, kr, pwf_overrides=pwf_overrides)
-                except TypeError:
-                    qo, qg, _ = wells.surface_rates(x, grid, pvt, kr)
-
-                t_days.append(t); qg_list.append(qg); qo_list.append(qo)
-
-                # successful -> grow dt a bit (within bounds)
+                qo, qg, qw = wells.surface_rates(x, grid, pvt, kr)
+                t_days.append(t); qg_list.append(qg); qo_list.append(qo); qw_list.append(qw)
                 dt = min(dt * opts.dt_grow, opts.dt_max_days)
-
                 if step_index % 10 == 0:
                     print(f"[implicit] t={t:8.2f} d, dt={dt:6.2f}, iters={iters}, norm={norm_end:.3e}")
-
-                break  # proceed to next global step
-
-            # not ok -> shrink dt and retry
+                break
+            
             retries += 1
             dt = max(dt * opts.dt_shrink, opts.dt_min_days)
-
-            print(f"[implicit] step reject: dt-> {dt:.3f} d (retry {retries}/{opts.max_step_retries}), "
-                  f"iters={iters}, norm={norm_end:.3e}")
-
+            print(f"[implicit] step reject: dt-> {dt:.3f} d (retry {retries}/{opts.max_step_retries}), iters={iters}, norm={norm_end:.3e}")
             if retries >= opts.max_step_retries:
-                # give up on implicit for this path — return what we have so far
-                print("[implicit] giving up this step after retries; returning partial time series.")
-                t_arr  = np.asarray(t_days, float)
-                qg_arr = np.asarray(qg_list, float)
-                qo_arr = np.asarray(qo_list, float)
-                EUR_g_BCF  = np.trapz(qg_arr, t_arr) / 1e6 if len(t_arr) else 0.0
-                EUR_o_MMBO = np.trapz(qo_arr, t_arr) / 1e6 if len(t_arr) else 0.0
-                return dict(
-                    t=t_arr, qg=qg_arr, qo=qo_arr,
-                    EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO,
-                    p_init_3d=np.full((grid.nz, grid.ny, grid.nx), P0[0]),
-                    press_matrix=None, pm_mid_psi=None, ooip_3d=None, runtime_s=0.0
-                )
-
-    # --- pack results
+                print("[implicit] giving up after max retries.")
+                t = total_days # Force exit
+                break
+    
+    # --- CORRECTED: Pack final 3D results ---
     t_arr  = np.asarray(t_days, float)
-    qg_arr = np.asarray(qg_list, float)  # Mscf/d
-    qo_arr = np.asarray(qo_list, float)  # STB/d
-    EUR_g_BCF  = np.trapz(qg_arr, t_arr) / 1e6 if len(t_arr) else 0.0
-    EUR_o_MMBO = np.trapz(qo_arr, t_arr) / 1e6 if len(t_arr) else 0.0
+    qg_arr = np.asarray(qg_list, float)
+    qo_arr = np.asarray(qo_list, float)
+    qw_arr = np.asarray(qw_list, float)
+
+    # Unpack final state into 3D arrays
+    final_state_grid = x[:ncell*3].reshape((ncell, 3))
+    P_final = final_state_grid[:, 0]
+    Sw_final = final_state_grid[:, 1]
+    Sg_final = final_state_grid[:, 2]
+    So_final = 1.0 - Sw_final - Sg_final
+    
+    press_matrix = P_final.reshape((grid.nz, grid.ny, grid.nx))
+    
+    # Calculate OOIP
+    Vp = grid.dx * grid.dy * grid.dz * grid.phi.flatten() # Pore volume
+    Soi = 1.0 - Sw0 # Initial oil saturation
+    Boi = pvt.Bo(P0) # Initial oil formation volume factor
+    ooip_per_cell = (Vp * Soi) / Boi
+    ooip_3d = ooip_per_cell.reshape((grid.nz, grid.ny, grid.nx))
 
     return dict(
-        t=t_arr, qg=qg_arr, qo=qo_arr,
-        EUR_g_BCF=EUR_g_BCF, EUR_o_MMBO=EUR_o_MMBO,
-        p_init_3d=np.full((grid.nz, grid.ny, grid.nx), P0[0]),
-        press_matrix=None, pm_mid_psi=None, ooip_3d=None, runtime_s=0.0
+        t=t_arr, qg=qg_arr, qo=qo_arr, qw=qw_arr,
+        p_init_3d=P0.reshape((grid.nz, grid.ny, grid.nx)),
+        press_matrix=press_matrix,
+        pm_mid_psi=np.mean(press_matrix, axis=(0,1,2)),
+        ooip_3d=ooip_3d,
+        runtime_s=time.time() - t_start
     )
