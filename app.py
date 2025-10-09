@@ -2414,16 +2414,13 @@ elif selected_tab == "AI Co-Pilot":
     st.header("🤖 AI Co-Pilot")
     st.info("Ask questions in natural language about your simulation results. The AI Co-Pilot uses your specific inputs and outputs (RAG) to provide expert analysis.")
 
-    # CORRECTED: Securely access the API key from Streamlit Secrets
     try:
         import openai
-        # This is the SAFE and CORRECT way to access your secret key
         openai.api_key = st.secrets["OPENAI_API_KEY"]
     except Exception:
         st.error("OpenAI API key not found. Please add it to your Streamlit Secrets to enable the AI Co-Pilot.")
         st.stop()
 
-    # --- Check if a simulation has been run ---
     if 'sim' not in st.session_state or st.session_state.sim is None:
         st.warning("Please run a simulation on the 'Results' tab first to activate the AI Co-Pilot.")
         st.stop()
@@ -2432,7 +2429,6 @@ elif selected_tab == "AI Co-Pilot":
     sim_results = st.session_state.sim
     ml_results = st.session_state.get('ml_models')
     
-    # Create a detailed context string
     context = "--- Simulation Context ---\n"
     context += "INPUT PARAMETERS:\n"
     context += f"- Play: {state.get('play_sel', 'N/A')}\n"
@@ -2453,9 +2449,7 @@ elif selected_tab == "AI Co-Pilot":
 
     if ml_results:
         context += "MACHINE LEARNING INSIGHTS:\n"
-        df_importance = pd.DataFrame({
-            'Importance': ml_results['rf'].feature_importances_
-        }, index=ml_results['features']).sort_values(by='Importance', ascending=False)
+        df_importance = pd.DataFrame({'Importance': ml_results['rf'].feature_importances_}, index=ml_results['features']).sort_values(by='Importance', ascending=False)
         context += f"- The most important parameter driving EUR is: {df_importance.index[0]}\n"
         context += f"- The least important parameter is: {df_importance.index[-1]}\n"
     context += "--- End of Context ---\n\n"
@@ -2463,7 +2457,10 @@ elif selected_tab == "AI Co-Pilot":
     # --- User Interaction ---
     st.markdown("#### Ask the Co-Pilot a question about this run:")
     
-    # Pre-defined questions
+    # CORRECTED: Added a model selector for flexibility
+    model_options = ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"]
+    selected_model = st.selectbox("Select AI Model:", model_options, help="gpt-4o is the latest, fastest, and most capable model.")
+
     question_options = [
         "Summarize the key findings of this simulation run in a few bullet points.",
         "Is this a good well for the Permian-Midland play? Justify your answer.",
@@ -2480,13 +2477,13 @@ elif selected_tab == "AI Co-Pilot":
 
     if st.button("Get AI Analysis"):
         system_prompt = "You are an expert petroleum reservoir engineer named 'ResSim Co-Pilot'. Your role is to analyze simulation results and provide clear, concise, and actionable insights to other engineers. Use the provided context to answer the user's question. Always be direct and justify your answers with the data given."
-        
         full_prompt = f"{context}User Question: {user_question}"
 
         with st.spinner("Co-Pilot is analyzing the results..."):
             try:
+                # CORRECTED: Use the selected model from the dropdown
                 response = openai.chat.completions.create(
-                    model="gpt-4-turbo",
+                    model=selected_model,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": full_prompt}
