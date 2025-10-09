@@ -56,7 +56,8 @@ def render_semi_gauge(title: str, value: float, unit: str,
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=vdisp,
-        number={"valueformat": ".2f", "font": {"size": 36}},
+        # CORRECTED: Added the 'unit' as a suffix to the number display
+        number={"valueformat": ".2f", "font": {"size": 36}, "suffix": f" {unit}"},
         title={"text": title, "font": {"size": 18}},
         gauge={
             "axis": {"range": [vmin, vmax], "tickwidth": 1, "tickcolor": "#9aa0a6"},
@@ -67,7 +68,6 @@ def render_semi_gauge(title: str, value: float, unit: str,
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-    # CORRECTED: Increased top margin from 40 to 60 to prevent title clipping
     fig.update_layout(margin=dict(l=10, r=10, t=60, b=10), height=220)
     return fig
 # =====================================================================
