@@ -7,6 +7,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.io as pio
 import streamlit as st
+from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy import stats
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import differential_evolution
@@ -66,8 +67,8 @@ def render_semi_gauge(title: str, value: float, unit: str,
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-    fig.update_layout(margin=dict(l=10, r=10, t=40, b=10), height=220)
-    # The redundant annotation below the gauge has been removed.
+    # CORRECTED: Increased top margin from 40 to 60 to prevent title clipping
+    fig.update_layout(margin=dict(l=10, r=10, t=60, b=10), height=220)
     return fig
 # =====================================================================
 
@@ -469,6 +470,7 @@ PLAY_PRESETS = {
         hf_ft=180.0,
         Rs_pb_scf_stb=650.0,
         pb_psi=5200.0,
+        pad_bhp_psi=5300.0,  # <-- ADDED: Sets BHP above bubble point by default
         Bo_pb_rb_stb=1.35,
         p_init_psi=5800.0,
     ),
@@ -1009,15 +1011,10 @@ def run_simulation_engine(state):
                     safe_state = _sanitize_decline_params(state.copy())
                     out = fallback_fast_solver(safe_state, rng)
         else:
-            # Full 3D implicit simulator logic here...
-            # (assuming this part is correct and focusing on analytical path)
             st.warning("3D Implicit Engine path is not fully detailed in this stub.")
-            # For demonstration, we'll return a placeholder if 3D is selected
             if st.session_state.get('kx') is None:
                 generate_property_volumes(state)
-            # This is a simplified placeholder call
             out = fallback_fast_solver(state, np.random.default_rng(1))
-
 
     except Exception as e:
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
@@ -1035,33 +1032,30 @@ def run_simulation_engine(state):
     qw = np.nan_to_num(np.asarray(out.get("qw"), float), nan=0.0) if out.get("qw") is not None else None
 
     # --- Step 3: Enforce Realism for Analytical Oil Plays ---
-    if "Analytical" in chosen_engine and "oil" in current_play.lower() and qo is not None and qg is not None:
+    if "Analytical" in chosen_engine and "oil" in current_play.lower() and qo is not None and qg is not None and len(t) > 1:
         REALISTIC_GOR_CAP_SCFTSTB = 3000.0
-        total_oil_stb = np.trapz(qo, t)
-        total_gas_scf = np.trapz(qg, t) * 1000.0
-        if total_oil_stb > 0:
+        # CORRECTED: Replaced deprecated np.trapz with trapezoid
+        total_oil_stb = trapezoid(qo, t)
+        total_gas_scf = trapezoid(qg, t) * 1000.0
+        if total_oil_stb > 1e-6: # Avoid division by zero
             current_gor = total_gas_scf / total_oil_stb
             if current_gor > REALISTIC_GOR_CAP_SCFTSTB:
                 st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
                 scale_factor = REALISTIC_GOR_CAP_SCFTSTB / current_gor
                 qg *= scale_factor
-                out["qg"] = qg # Update the dictionary for downstream use
+                out["qg"] = qg
 
-    # --- Step 4: Calculate Cumulatives and Final EURs from (potentially adjusted) rates ---
+    # --- Step 4: Calculate Cumulatives and Final EURs ---
     sim = dict(out)
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
 
-    # --- Step 5: Final processing and returning the result ---
+    # --- Step 5: Final processing ---
     sim["runtime_s"] = time.time() - t0
     sim["_sim_signature"] = _sim_signature_from_state()
-
-    # Compatibility keys
     if "eur_gas_BCF" in sim: sim["EUR_g_BCF"] = sim["eur_gas_BCF"]
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
-    # Return the final, processed simulation dictionary
     return sim
-
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
@@ -2052,11 +2046,12 @@ elif selected_tab == "Economics":
             for year, g in df.groupby('year'):
                 d = g['days'].values
                 if len(d) > 1:
+                    # CORRECTED: Replaced deprecated np.trapz with trapezoid
                     rows.append({
                         'year': year,
-                        'oil_stb':   float(np.trapz(g['oil_stb_d'].values, d)),
-                        'gas_mscf':  float(np.trapz(g['gas_mscf_d'].values, d)),
-                        'water_stb': float(np.trapz(g['water_stb_d'].values, d)),
+                        'oil_stb':   float(trapezoid(g['oil_stb_d'].values, d)),
+                        'gas_mscf':  float(trapezoid(g['gas_mscf_d'].values, d)),
+                        'water_stb': float(trapezoid(g['water_stb_d'].values, d)),
                     })
             if rows:
                 df_yearly = pd.DataFrame(rows)
@@ -2134,7 +2129,6 @@ elif selected_tab == "Economics":
             }),
             use_container_width=True
         )
-
 # ======== EUR vs Lateral Length ========
 elif selected_tab == "EUR vs Lateral Length":
     st.header("EUR vs Lateral Length Sensitivity")
