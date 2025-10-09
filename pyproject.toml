@@ -10,4 +10,4 @@ ignore = ["E501"]
 
 [tool.isort]
 profile = "black"
-OPENAI_API_KEY="sk-YourSecretKeyGoesHere"
+
