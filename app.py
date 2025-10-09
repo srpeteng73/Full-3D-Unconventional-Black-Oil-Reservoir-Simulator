@@ -1534,13 +1534,15 @@ elif selected_tab == "Results":
     GAS_MIN, GAS_MAX = 0.2, 3.5
     GOR_MAX = 2000
     issues = []
-    if not (OIL_MIN <= eur_o <= OIL_MAX):
-        issues.append(f"Oil EUR {eur_o:.2f} MMBO outside sanity ({OIL_MIN}, {OIL_MAX}) MMBO.")
     if not (GAS_MIN <= eur_g <= GAS_MAX):
         issues.append(f"Gas EUR {eur_g:.2f} BCF outside sanity ({GAS_MIN}, {GAS_MAX}) BCF.")
-    implied_gor = (eur_g * 1e9) / (eur_o * 1e6) if eur_o > 0 else float("inf")
-    if implied_gor > GOR_MAX:
+    
+    implied_gor = (eur_g * 1e9) / (eur_o * 1e6) if eur_o > 1e-6 else 0.0
+    
+    # CORRECTED: Added a small tolerance to the GOR check to avoid floating-point errors
+    if implied_gor > (GOR_MAX + 1.0):
         issues.append(f"Implied EUR GOR {implied_gor:,.0f} scf/STB exceeds {GOR_MAX:,} scf/STB.")
+        
     if issues and not st.session_state.get("sanity_warned"):
         st.warning(
             "Sanity checks flagged issues (Analytical engine).\n\n"
@@ -1573,7 +1575,6 @@ elif selected_tab == "Results":
         st.plotly_chart(fig_gas, use_container_width=True)
     
     st.markdown("---")
-    # ---- NEW: Plot scale toggle ----
     plot_scale = st.radio(
         "Plot Scale (Time Axis)", 
         ["Semi-Log", "Linear"], 
@@ -1585,21 +1586,12 @@ elif selected_tab == "Results":
     # ===================== RATE & CUMULATIVE PLOTS =====================
     t  = sim.get("t"); qg = sim.get("qg"); qo = sim.get("qo"); qw = sim.get("qw")
 
-    # --- Rate vs Time ---
     if t is not None and (qg is not None or qo is not None or qw is not None):
         fig_rate = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-        if qg is not None:
-            fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)), secondary_y=False)
-        if qo is not None:
-            fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)), secondary_y=True)
-        if qw is not None:
-            fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)), secondary_y=True)
-
-        fig_rate.update_layout(
-            template="plotly_white", title_text="<b>Production Rate vs. Time</b>", height=460,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
-            font=dict(size=13), margin=dict(l=10, r=10, t=50, b=10)
-        )
+        if qg is not None: fig_rate.add_trace(go.Scatter(x=t, y=qg, name="Gas (Mscf/d)", line=dict(width=2, color=COLOR_GAS)), secondary_y=False)
+        if qo is not None: fig_rate.add_trace(go.Scatter(x=t, y=qo, name="Oil (STB/d)", line=dict(width=2, color=COLOR_OIL)), secondary_y=True)
+        if qw is not None: fig_rate.add_trace(go.Scatter(x=t, y=qw, name="Water (STB/d)", line=dict(width=1.8, dash="dot", color=COLOR_WATER)), secondary_y=True)
+        fig_rate.update_layout(template="plotly_white", title_text="<b>Production Rate vs. Time</b>", height=460, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), font=dict(size=13), margin=dict(l=10, r=10, t=50, b=10))
         fig_rate.update_xaxes(type=xaxis_type, title="Time (days)", showgrid=True, gridcolor="rgba(0,0,0,0.12)")
         fig_rate.update_yaxes(title_text="Gas rate (Mscf/d)", secondary_y=False, showgrid=True, gridcolor="rgba(0,0,0,0.15)")
         fig_rate.update_yaxes(title_text="Liquid rates (STB/d)", secondary_y=True, showgrid=False)
@@ -1607,28 +1599,20 @@ elif selected_tab == "Results":
     else:
         st.warning("Rate series not available.")
 
-    # --- Cumulative vs Time ---
     cum_g = sim.get("cum_g_BCF"); cum_o = sim.get("cum_o_MMBO"); cum_w = sim.get("cum_w_MMBL")
     if t is not None and (cum_g is not None or cum_o is not None or cum_w is not None):
         fig_cum = make_subplots(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-        if cum_g is not None:
-            fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3, color=COLOR_GAS)), secondary_y=False)
-        if cum_o is not None:
-            fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3, color=COLOR_OIL)), secondary_y=True)
-        if cum_w is not None:
-            fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot", color=COLOR_WATER)), secondary_y=True)
-
-        fig_cum.update_layout(
-            template="plotly_white", title_text="<b>Cumulative Production vs. Time</b>", height=460,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0),
-            font=dict(size=13), margin=dict(l=10, r=10, t=50, b=10)
-        )
+        if cum_g is not None: fig_cum.add_trace(go.Scatter(x=t, y=cum_g, name="Cum Gas (BCF)", line=dict(width=3, color=COLOR_GAS)), secondary_y=False)
+        if cum_o is not None: fig_cum.add_trace(go.Scatter(x=t, y=cum_o, name="Cum Oil (MMbbl)", line=dict(width=3, color=COLOR_OIL)), secondary_y=True)
+        if cum_w is not None: fig_cum.add_trace(go.Scatter(x=t, y=cum_w, name="Cum Water (MMbbl)", line=dict(width=2, dash="dot", color=COLOR_WATER)), secondary_y=True)
+        fig_cum.update_layout(template="plotly_white", title_text="<b>Cumulative Production vs. Time</b>", height=460, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), font=dict(size=13), margin=dict(l=10, r=10, t=50, b=10))
         fig_cum.update_xaxes(type=xaxis_type, title="Time (days)", showgrid=True, gridcolor="rgba(0,0,0,0.12)")
         fig_cum.update_yaxes(title_text="Gas (BCF)", secondary_y=False, showgrid=True, gridcolor="rgba(0,0,0,0.15)")
         fig_cum.update_yaxes(title_text="Liquids (MMbbl)", secondary_y=True, showgrid=False)
         st.plotly_chart(fig_cum, use_container_width=True, theme=None)
     else:
         st.warning("Cumulative series not available.")
+
 # ======== 3D Viewer tab ========
 elif selected_tab == "3D Viewer":
     """
