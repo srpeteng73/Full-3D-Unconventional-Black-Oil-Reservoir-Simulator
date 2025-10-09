@@ -999,34 +999,24 @@ def run_simulation_engine(state):
     out = None
 
     try:
-        # CORRECTED: This logic now correctly separates the two engine paths.
+        # ======================================================================
+        # CORRECTED: This logic now correctly and cleanly separates the two engine paths.
+        # ======================================================================
         if "Analytical" in chosen_engine:
             st.info("Running Fast Analytical Proxy Model...")
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
+            # Directly call the fast analytical solver
             out = fallback_fast_solver(state, rng)
-            # Post-process analytical results for realism
-            if "oil" in current_play.lower() and out.get('qo') is not None and out.get('qg') is not None:
-                t_analytical = np.asarray(out.get("t", []))
-                qo_analytical = np.asarray(out.get("qo", []))
-                qg_analytical = np.asarray(out.get("qg", []))
-                if len(t_analytical) > 1:
-                    total_oil_stb = trapezoid(qo_analytical, t_analytical)
-                    total_gas_scf = trapezoid(qg_analytical, t_analytical) * 1000.0
-                    if total_oil_stb > 1e-6:
-                        current_gor = total_gas_scf / total_oil_stb
-                        if current_gor > 2000.0:
-                            st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
-                            scale_factor = 2000.0 / current_gor
-                            out["qg"] = qg_analytical * scale_factor
-        else:
-            # This is the 3D Implicit Engine Path
+
+        else: # This is the 3D Implicit Engine Path
             st.info("Running Full 3D Three-Phase Implicit Simulator...")
             if st.session_state.get('kx') is None:
                 st.warning("3D rock properties not found. Generating them first...")
                 generate_property_volumes(state)
 
             # Assemble the detailed input dictionary for the 3D engine
-            inputs = {**state, "engine": "implicit"} # Pass all state variables
+            # This will be passed to the simulate() function in full3d.py
+            inputs = {**state, "engine": "implicit"}
             out = simulate(inputs)
 
     except Exception as e:
@@ -1040,18 +1030,38 @@ def run_simulation_engine(state):
 
     # --- Final Post-processing for both engines ---
     sim = dict(out)
+    
+    # The realism scaling should ONLY apply to the analytical model
+    if "Analytical" in chosen_engine and "oil" in current_play.lower():
+        t_analytical = np.asarray(sim.get("t", []))
+        qo_analytical = np.asarray(sim.get("qo", []))
+        qg_analytical = np.asarray(sim.get("qg", []))
+        if len(t_analytical) > 1:
+            total_oil_stb = trapezoid(qo_analytical, t_analytical)
+            total_gas_scf = trapezoid(qg_analytical, t_analytical) * 1000.0
+            if total_oil_stb > 1e-6:
+                current_gor = total_gas_scf / total_oil_stb
+                if current_gor > 2000.0:
+                    st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
+                    scale_factor = 2000.0 / current_gor
+                    sim["qg"] = qg_analytical * scale_factor
+
+    # Re-calculate EURs after any potential scaling
     t = np.asarray(sim.get("t", []))
     qo = sim.get("qo")
     qg = sim.get("qg")
     qw = sim.get("qw")
     
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
+    
+    # Add final metadata
     sim["runtime_s"] = time.time() - t0
     sim["_sim_signature"] = _sim_signature_from_state()
     if "eur_gas_BCF" in sim: sim["EUR_g_BCF"] = sim["eur_gas_BCF"]
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
+
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
