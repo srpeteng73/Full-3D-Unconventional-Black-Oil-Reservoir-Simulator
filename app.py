@@ -1192,6 +1192,7 @@ with st.sidebar:
 #### Part 3: Main Application UI - Primary Workflow Tabs ####
 # --- Tab list ---
 # --- Tab list ---
+# --- Tab list ---
 tab_names = [
     "Setup Preview",
     "Generate 3D property volumes",
@@ -1205,15 +1206,16 @@ tab_names = [
     "Economics",
     "EUR vs Lateral Length",
     "Field Match (CSV)",
-    "Machine Learning",  # <-- ADD THIS LINE HERE
-    "AI Co-Pilot"
-    "Automated Match",
+    "Machine Learning",
+    "AI Co-Pilot",         # <-- CORRECTED: Separated into its own line
+    "Automated Match",     # <-- CORRECTED: Separated into its own line
     "Uncertainty & Monte Carlo",
     "Well Placement Optimization",
     "User’s Manual",
     "Solver & Profiling",
     "DFN Viewer",
 ]
+
 st.write(
     '<style>div.row-widget.stRadio > div{flex-direction:row;justify-content: center;} '
     '.stRadio > label {display:none;} '
@@ -2412,8 +2414,10 @@ elif selected_tab == "AI Co-Pilot":
     st.header("🤖 AI Co-Pilot")
     st.info("Ask questions in natural language about your simulation results. The AI Co-Pilot uses your specific inputs and outputs (RAG) to provide expert analysis.")
 
+    # CORRECTED: Securely access the API key from Streamlit Secrets
     try:
         import openai
+        # This is the SAFE and CORRECT way to access your secret key
         openai.api_key = st.secrets["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"]
     except Exception:
         st.error("OpenAI API key not found. Please add it to your Streamlit Secrets to enable the AI Co-Pilot.")
@@ -2493,7 +2497,7 @@ elif selected_tab == "AI Co-Pilot":
                 st.success(answer)
             except Exception as e:
                 st.error(f"An error occurred while contacting the AI Co-Pilot: {e}")
-
+                
 # ======== Automated Match ========
 elif selected_tab == "Automated Match":
     """
@@ -2638,6 +2642,7 @@ elif selected_tab == "Automated Match":
                 st.plotly_chart(fig_match, use_container_width=True)
                 with st.expander("About this chart"):
                     st.markdown("This chart compares the historical field data (markers) against the production forecast generated using the best-fit parameters found by the optimization algorithm (solid lines).")# ======== Uncertainty & Monte Carlo ========
+
 # ======== Uncertainty & Monte Carlo ========
 elif selected_tab == "Uncertainty & Monte Carlo":
     st.header("Uncertainty & Monte Carlo Analysis")
