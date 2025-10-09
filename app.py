@@ -2257,6 +2257,144 @@ elif selected_tab == "Field Match (CSV)":
                 )
         else:
             st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+# ======== Machine Learning Tab ========
+elif selected_tab == "Machine Learning":
+    st.header("Machine Learning Surrogate Models")
+    st.info("This tab uses the fast analytical model to generate a synthetic dataset, then trains ML models (Random Forest, XGBoost) to predict EURs instantly and analyze parameter sensitivities.")
+
+    # --- 1. Data Generation ---
+    with st.expander("Step 1: Generate Synthetic Training Data", expanded=True):
+        st.markdown("Click the button below to run the analytical simulator multiple times with random inputs. This creates the dataset needed to train the ML models.")
+        num_points = st.number_input("Number of synthetic data points to generate", 100, 5000, 500, 100)
+        
+        if st.button("🚀 Generate Training Data"):
+            ml_data = []
+            progress_bar = st.progress(0, "Generating synthetic data...")
+            base_state = state.copy()
+            rng_ml = np.random.default_rng(st.session_state.rng_seed)
+
+            for i in range(int(num_points)):
+                temp_state = base_state.copy()
+                # Randomize key parameters within reasonable bounds
+                temp_state['xf_ft'] = rng_ml.uniform(150, 450)
+                temp_state['p_init_psi'] = rng_ml.uniform(4000, 7000)
+                temp_state['k_stdev'] = rng_ml.uniform(0.01, 0.15)
+                temp_state['pad_interf'] = rng_ml.uniform(0.0, 0.7)
+                
+                sim_result = fallback_fast_solver(temp_state, rng_ml)
+                
+                ml_data.append({
+                    'xf_ft': temp_state['xf_ft'],
+                    'p_init_psi': temp_state['p_init_psi'],
+                    'k_stdev': temp_state['k_stdev'],
+                    'pad_interf': temp_state['pad_interf'],
+                    'EUR_Oil_MMBO': sim_result.get('EUR_o_MMBO', 0.0),
+                    'EUR_Gas_BCF': sim_result.get('EUR_g_BCF', 0.0)
+                })
+                progress_bar.progress((i + 1) / num_points, f"Generated point {i+1}/{num_points}")
+            
+            st.session_state.ml_training_data = pd.DataFrame(ml_data)
+            progress_bar.empty()
+            st.success(f"Successfully generated {num_points} data points!")
+
+    # --- 2. Model Training and Prediction ---
+    if 'ml_training_data' in st.session_state:
+        df_train = st.session_state.ml_training_data
+        st.markdown("#### Table 1: Generated Training Data Preview")
+        st.dataframe(df_train.head())
+
+        with st.expander("Step 2: Train Models and View Results", expanded=True):
+            target_eur = st.selectbox("Select Target EUR to Predict", ["EUR Oil (MMBO)", "EUR Gas (BCF)"])
+
+            if st.button("🧠 Train Models & Predict"):
+                from sklearn.ensemble import RandomForestRegressor
+                from sklearn.metrics import r2_score
+                import xgboost as xgb
+
+                features = ['xf_ft', 'p_init_psi', 'k_stdev', 'pad_interf']
+                X = df_train[features]
+                y = df_train[target_eur]
+
+                with st.spinner("Training models..."):
+                    # Train Random Forest
+                    rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+                    rf_model.fit(X, y)
+                    rf_r2 = rf_model.score(X, y)
+                    
+                    # Train XGBoost
+                    xgb_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
+                    xgb_model.fit(X, y)
+                    xgb_r2 = xgb_model.score(X, y)
+
+                    st.session_state.ml_models = {
+                        'rf': rf_model, 'xgb': xgb_model, 
+                        'rf_r2': rf_r2, 'xgb_r2': xgb_r2,
+                        'features': features
+                    }
+                st.success("Models trained successfully!")
+
+    # --- 3. Display Results ---
+    if 'ml_models' in st.session_state:
+        st.markdown("---")
+        st.subheader("Model Performance & Predictions")
+        
+        models = st.session_state.ml_models
+        sim_result = st.session_state.get('sim')
+
+        # Get current inputs from sidebar
+        current_inputs = pd.DataFrame([{
+            'xf_ft': state['xf_ft'],
+            'p_init_psi': state['p_init_psi'],
+            'k_stdev': state['k_stdev'],
+            'pad_interf': state['pad_interf']
+        }])[models['features']] # Ensure column order is correct
+
+        # Make predictions
+        rf_pred = models['rf'].predict(current_inputs)[0]
+        xgb_pred = models['xgb'].predict(current_inputs)[0]
+        
+        # Get physics-based result
+        if sim_result:
+            physics_eur = sim_result.get('EUR_o_MMBO' if 'Oil' in target_eur else 'EUR_g_BCF', 'N/A')
+        else:
+            physics_eur = "N/A (Run simulation first)"
+
+        st.markdown("#### Table 2: Prediction Comparison for Current Inputs")
+        st.markdown("This table compares the EUR predicted by the physics-based model against the instant predictions from the trained ML models.")
+        
+        comparison_data = {
+            "Model": ["Physics-Based Simulator", "Random Forest", "XGBoost"],
+            "Predicted EUR": [physics_eur, rf_pred, xgb_pred],
+            "R² Score (Training)": ["N/A", f"{models['rf_r2']:.3f}", f"{models['xgb_r2']:.3f}"]
+        }
+        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+        with st.expander("About R² Score"):
+            st.markdown("The R² (R-squared) score measures how well the model's predictions match the actual data it was trained on. A score of 1.0 is a perfect fit. High scores (e.g., >0.95) indicate that the ML models have successfully learned the patterns from the physics-based simulator.")
+
+        st.markdown("---")
+        st.markdown("#### Figure 1: Feature Importance")
+        st.markdown("This chart shows which input parameters have the most significant impact on the EUR prediction, according to the ML models. This helps build confidence and understanding of the key drivers in the reservoir system.")
+
+        # Create Feature Importance plot
+        rf_importance = pd.Series(models['rf'].feature_importances_, index=models['features'])
+        xgb_importance = pd.Series(models['xgb'].feature_importances_, index=models['features'])
+        df_importance = pd.DataFrame({'Random Forest': rf_importance, 'XGBoost': xgb_importance}).sort_values(by='Random Forest', ascending=True)
+
+        fig_imp = go.Figure()
+        fig_imp.add_trace(go.Bar(y=df_importance.index, x=df_importance['Random Forest'], name='Random Forest', orientation='h'))
+        fig_imp.add_trace(go.Bar(y=df_importance.index, x=df_importance['XGBoost'], name='XGBoost', orientation='h'))
+        fig_imp.update_layout(
+            title="Which Parameters Drive EUR the Most?",
+            xaxis_title="Importance Score",
+            yaxis_title="Input Parameter",
+            barmode='group',
+            template='plotly_white'
+        )
+        st.plotly_chart(fig_imp, use_container_width=True)
+
+
+
+
 
 # ======== Automated Match ========
 elif selected_tab == "Automated Match":
