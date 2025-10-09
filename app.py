@@ -2418,7 +2418,7 @@ elif selected_tab == "AI Co-Pilot":
     try:
         import openai
         # This is the SAFE and CORRECT way to access your secret key
-        openai.api_key = st.secrets["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"]
+        openai.api_key = st.secrets["OPENAI_API_KEY"]
     except Exception:
         st.error("OpenAI API key not found. Please add it to your Streamlit Secrets to enable the AI Co-Pilot.")
         st.stop()
