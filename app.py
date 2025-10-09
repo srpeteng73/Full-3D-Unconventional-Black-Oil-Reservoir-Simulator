@@ -2406,7 +2406,94 @@ elif selected_tab == "Machine Learning":
             template='plotly_white'
         )
         st.plotly_chart(fig_imp, use_container_width=True)
+
+# ======== AI Co-Pilot Tab ========
+elif selected_tab == "AI Co-Pilot":
+    st.header("🤖 AI Co-Pilot")
+    st.info("Ask questions in natural language about your simulation results. The AI Co-Pilot uses your specific inputs and outputs (RAG) to provide expert analysis.")
+
+    try:
+        import openai
+        openai.api_key = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        st.error("OpenAI API key not found. Please add it to your Streamlit Secrets to enable the AI Co-Pilot.")
+        st.stop()
+
+    # --- Check if a simulation has been run ---
+    if 'sim' not in st.session_state or st.session_state.sim is None:
+        st.warning("Please run a simulation on the 'Results' tab first to activate the AI Co-Pilot.")
+        st.stop()
+
+    # --- Gather Context for the RAG process ---
+    sim_results = st.session_state.sim
+    ml_results = st.session_state.get('ml_models')
+    
+    # Create a detailed context string
+    context = "--- Simulation Context ---\n"
+    context += "INPUT PARAMETERS:\n"
+    context += f"- Play: {state.get('play_sel', 'N/A')}\n"
+    context += f"- Pad Control: {state.get('pad_ctrl', 'N/A')}\n"
+    context += f"- Pad BHP: {state.get('pad_bhp_psi', 'N/A')} psi\n"
+    context += f"- Bubble Point (pb): {state.get('pb_psi', 'N/A')} psi\n"
+    context += f"- Initial Pressure: {state.get('p_init_psi', 'N/A')} psi\n"
+    context += f"- Frac Half-Length: {state.get('xf_ft', 'N/A')} ft\n"
+    context += f"- Pad Interference: {state.get('pad_interf', 'N/A')}\n\n"
+    
+    context += "SIMULATION RESULTS:\n"
+    eur_o = sim_results.get('EUR_o_MMBO', 0.0)
+    eur_g = sim_results.get('EUR_g_BCF', 0.0)
+    implied_gor = (eur_g * 1e9) / (eur_o * 1e6) if eur_o > 0 else 0
+    context += f"- EUR Oil: {eur_o:.2f} MMBO\n"
+    context += f"- EUR Gas: {eur_g:.2f} BCF\n"
+    context += f"- Implied EUR GOR: {implied_gor:,.0f} scf/STB\n\n"
+
+    if ml_results:
+        context += "MACHINE LEARNING INSIGHTS:\n"
+        df_importance = pd.DataFrame({
+            'Importance': ml_results['rf'].feature_importances_
+        }, index=ml_results['features']).sort_values(by='Importance', ascending=False)
+        context += f"- The most important parameter driving EUR is: {df_importance.index[0]}\n"
+        context += f"- The least important parameter is: {df_importance.index[-1]}\n"
+    context += "--- End of Context ---\n\n"
+
+    # --- User Interaction ---
+    st.markdown("#### Ask the Co-Pilot a question about this run:")
+    
+    # Pre-defined questions
+    question_options = [
+        "Summarize the key findings of this simulation run in a few bullet points.",
+        "Is this a good well for the Permian-Midland play? Justify your answer.",
+        "My GOR seems high. Based on the inputs, what is the likely cause and what should I do to fix it?",
+        "Based on the feature importance, which parameter should I focus on optimizing next?",
+        "Write a short report paragraph for my manager explaining these results."
+    ]
+    
+    user_question = st.selectbox("Select a question or type your own below:", question_options, index=0)
+    custom_question = st.text_input("Or, type your own question here:")
+
+    if custom_question:
+        user_question = custom_question
+
+    if st.button("Get AI Analysis"):
+        system_prompt = "You are an expert petroleum reservoir engineer named 'ResSim Co-Pilot'. Your role is to analyze simulation results and provide clear, concise, and actionable insights to other engineers. Use the provided context to answer the user's question. Always be direct and justify your answers with the data given."
         
+        full_prompt = f"{context}User Question: {user_question}"
+
+        with st.spinner("Co-Pilot is analyzing the results..."):
+            try:
+                response = openai.chat.completions.create(
+                    model="gpt-4-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": full_prompt}
+                    ]
+                )
+                answer = response.choices[0].message.content
+                st.markdown("#### Co-Pilot's Analysis:")
+                st.success(answer)
+            except Exception as e:
+                st.error(f"An error occurred while contacting the AI Co-Pilot: {e}")
+
 # ======== Automated Match ========
 elif selected_tab == "Automated Match":
     """
