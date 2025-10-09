@@ -2259,6 +2259,7 @@ elif selected_tab == "Field Match (CSV)":
                 )
         else:
             st.info("Demo/Field data loaded. Run a simulation on the 'Results' tab to view the comparison plot.")
+
 # ======== Machine Learning Tab ========
 elif selected_tab == "Machine Learning":
     st.header("Machine Learning Surrogate Models")
@@ -2271,17 +2272,13 @@ elif selected_tab == "Machine Learning":
         
         if st.button("🚀 Generate Training Data"):
             ml_data = []
-            
-            # CORRECTED: Create placeholders for real-time feedback
             progress_bar = st.progress(0)
             status_text = st.empty()
-            
             base_state = state.copy()
             rng_ml = np.random.default_rng(st.session_state.rng_seed)
 
             for i in range(int(num_points)):
                 temp_state = base_state.copy()
-                # Randomize key parameters within reasonable bounds
                 temp_state['xf_ft'] = rng_ml.uniform(150, 450)
                 temp_state['p_init_psi'] = rng_ml.uniform(4000, 7000)
                 temp_state['k_stdev'] = rng_ml.uniform(0.01, 0.15)
@@ -2298,14 +2295,11 @@ elif selected_tab == "Machine Learning":
                     'EUR_Gas_BCF': sim_result.get('EUR_g_BCF', 0.0)
                 })
                 
-                # CORRECTED: Update the placeholders inside the loop
                 progress_percentage = (i + 1) / num_points
                 progress_bar.progress(progress_percentage)
                 status_text.text(f"Generated point {i+1} of {num_points} ({progress_percentage:.0%})")
             
             st.session_state.ml_training_data = pd.DataFrame(ml_data)
-            
-            # CORRECTED: Clear the placeholders and show a final success message
             progress_bar.empty()
             status_text.empty()
             st.success(f"Successfully generated {num_points} data points!")
@@ -2317,24 +2311,29 @@ elif selected_tab == "Machine Learning":
         st.dataframe(df_train.head())
 
         with st.expander("Step 2: Train Models and View Results", expanded=True):
-            target_eur = st.selectbox("Select Target EUR to Predict", ["EUR Oil (MMBO)", "EUR Gas (BCF)"])
-
+            # CORRECTED: Create a mapping from pretty names to actual column names
+            target_options = {
+                "EUR Oil (MMBO)": "EUR_Oil_MMBO",
+                "EUR Gas (BCF)": "EUR_Gas_BCF"
+            }
+            selected_target_pretty = st.selectbox("Select Target EUR to Predict", list(target_options.keys()))
+            
             if st.button("🧠 Train Models & Predict"):
                 from sklearn.ensemble import RandomForestRegressor
-                from sklearn.metrics import r2_score
                 import xgboost as xgb
+
+                # CORRECTED: Use the mapping to get the correct column name
+                target_column_name = target_options[selected_target_pretty]
 
                 features = ['xf_ft', 'p_init_psi', 'k_stdev', 'pad_interf']
                 X = df_train[features]
-                y = df_train[target_eur]
+                y = df_train[target_column_name] # This line is now correct
 
                 with st.spinner("Training models..."):
-                    # Train Random Forest
                     rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
                     rf_model.fit(X, y)
                     rf_r2 = rf_model.score(X, y)
                     
-                    # Train XGBoost
                     xgb_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
                     xgb_model.fit(X, y)
                     xgb_r2 = xgb_model.score(X, y)
@@ -2342,7 +2341,9 @@ elif selected_tab == "Machine Learning":
                     st.session_state.ml_models = {
                         'rf': rf_model, 'xgb': xgb_model, 
                         'rf_r2': rf_r2, 'xgb_r2': xgb_r2,
-                        'features': features
+                        'features': features,
+                        'target_column': target_column_name, # Store the target for later
+                        'target_pretty': selected_target_pretty
                     }
                 st.success("Models trained successfully!")
 
@@ -2353,42 +2354,42 @@ elif selected_tab == "Machine Learning":
         
         models = st.session_state.ml_models
         sim_result = st.session_state.get('sim')
+        target_column_name = models['target_column']
+        target_pretty_name = models['target_pretty']
 
-        # Get current inputs from sidebar
         current_inputs = pd.DataFrame([{
             'xf_ft': state['xf_ft'],
             'p_init_psi': state['p_init_psi'],
             'k_stdev': state['k_stdev'],
             'pad_interf': state['pad_interf']
-        }])[models['features']] # Ensure column order is correct
+        }])[models['features']]
 
-        # Make predictions
         rf_pred = models['rf'].predict(current_inputs)[0]
         xgb_pred = models['xgb'].predict(current_inputs)[0]
         
-        # Get physics-based result
         if sim_result:
-            physics_eur = sim_result.get('EUR_o_MMBO' if 'Oil' in target_eur else 'EUR_g_BCF', 'N/A')
+            # CORRECTED: Use the stored target column name to get the physics result
+            physics_eur_key = 'EUR_o_MMBO' if 'Oil' in target_pretty_name else 'EUR_g_BCF'
+            physics_eur = sim_result.get(physics_eur_key, 'N/A')
         else:
             physics_eur = "N/A (Run simulation first)"
 
         st.markdown("#### Table 2: Prediction Comparison for Current Inputs")
-        st.markdown("This table compares the EUR predicted by the physics-based model against the instant predictions from the trained ML models.")
+        st.markdown(f"This table compares the **{target_pretty_name}** predicted by the physics-based model against the instant predictions from the trained ML models.")
         
         comparison_data = {
             "Model": ["Physics-Based Simulator", "Random Forest", "XGBoost"],
-            "Predicted EUR": [physics_eur, rf_pred, xgb_pred],
+            f"Predicted {target_pretty_name}": [physics_eur, rf_pred, xgb_pred],
             "R² Score (Training)": ["N/A", f"{models['rf_r2']:.3f}", f"{models['xgb_r2']:.3f}"]
         }
-        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True)
+        st.dataframe(pd.DataFrame(comparison_data).style.format({f"Predicted {target_pretty_name}": "{:.2f}"}), use_container_width=True)
         with st.expander("About R² Score"):
             st.markdown("The R² (R-squared) score measures how well the model's predictions match the actual data it was trained on. A score of 1.0 is a perfect fit. High scores (e.g., >0.95) indicate that the ML models have successfully learned the patterns from the physics-based simulator.")
 
         st.markdown("---")
         st.markdown("#### Figure 1: Feature Importance")
-        st.markdown("This chart shows which input parameters have the most significant impact on the EUR prediction, according to the ML models. This helps build confidence and understanding of the key drivers in the reservoir system.")
+        st.markdown(f"This chart shows which input parameters have the most significant impact on the **{target_pretty_name}** prediction, according to the ML models.")
 
-        # Create Feature Importance plot
         rf_importance = pd.Series(models['rf'].feature_importances_, index=models['features'])
         xgb_importance = pd.Series(models['xgb'].feature_importances_, index=models['features'])
         df_importance = pd.DataFrame({'Random Forest': rf_importance, 'XGBoost': xgb_importance}).sort_values(by='Random Forest', ascending=True)
@@ -2397,7 +2398,7 @@ elif selected_tab == "Machine Learning":
         fig_imp.add_trace(go.Bar(y=df_importance.index, x=df_importance['Random Forest'], name='Random Forest', orientation='h'))
         fig_imp.add_trace(go.Bar(y=df_importance.index, x=df_importance['XGBoost'], name='XGBoost', orientation='h'))
         fig_imp.update_layout(
-            title="Which Parameters Drive EUR the Most?",
+            title=f"Which Parameters Drive {target_pretty_name} the Most?",
             xaxis_title="Importance Score",
             yaxis_title="Input Parameter",
             barmode='group',
