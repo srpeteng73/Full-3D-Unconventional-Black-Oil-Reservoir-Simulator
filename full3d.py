@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import math
 import numpy as np
-
+from scipy.integrate import trapezoid
 from scipy.sparse import lil_matrix
 from scipy.sparse.linalg import spsolve
 
@@ -1435,7 +1435,9 @@ def _build_inputs_for_blackoil(inputs):
     return state0, grid, rock, relperm, init, schedule, options, pvt
 
 
-# ------------------------- REPLACEMENT: newton_solve_blackoil ----------------
+# =============================================================================
+# Please replace your existing newton_solve_blackoil function with this one.
+# =============================================================================
 
 def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt):
     nx, ny, nz = int(grid["nx"]), int(grid["ny"]), int(grid["nz"])
@@ -1561,7 +1563,6 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
 
             new_state = state_k + dx
 
-            # Project saturations and renormalize So (matrix cells only)
             eps = 1e-9
             Pn  = new_state[0:3*N:3]
             Swn = np.clip(new_state[1:3*N:3], eps, 1.0 - eps)
@@ -1579,16 +1580,13 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
             new_state[2:3*N:3] = Sgn
             state_k = new_state
 
-        # Accept step (strip extra unknowns)
         state = state_k[:3*N]
         P = state[0::3]; Sw = state[1::3]; Sg = state[2::3]; So = 1.0 - Sw - Sg
 
-        # Save aquifer pressures for next step
         if len(aquifer_unknown_map) > 0:
             for aq_idx, col in aquifer_unknown_map.items():
                 aquifer_state_prev[aq_idx] = float(state_k[col])
 
-        # Post-step well rates
         Bo = np.asarray(pvt.Bo(P)); Bg = np.asarray(pvt.Bg(P)); Rs = np.asarray(pvt.Rs(P))
         mu_o = np.asarray(pvt.mu_o(P)); mu_g = np.asarray(pvt.mu_g(P))
         mu_w = np.asarray(pvt.mu_w(P)); Bw = np.asarray(pvt.Bw(P))
@@ -1605,18 +1603,19 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
 
         Pm, Swm, Sgm = P.copy(), Sw.copy(), Sg.copy()
 
-    # HARMONIZE OUTPUT KEYS to match app expectations
+    # This is the only part of the function that has changed.
     return {
         "t": np.asarray(t_hist, float),
         "qo": np.asarray(qo_hist, float),
         "qg": np.asarray(qg_hist, float),
         "qw": np.asarray(qw_hist, float),
-        "p_initial": P0_vec.reshape(nz, ny, nx),
-        "p_final": state[0::3].reshape(nz, ny, nx),
+        # CORRECTED: Renamed 'p_initial' to 'p_init_3d' to match the UI's expectation.
+        "p_init_3d": P0_vec.reshape(nz, ny, nx),
+        # CORRECTED: Renamed 'p_final' to 'press_matrix' to match the UI's expectation.
+        "press_matrix": state[0::3].reshape(nz, ny, nx),
         "ooip_3d": ((Vcell_ft3 * phi_vec * So0_vec) / (Bo0_vec * 5.614583)).reshape(nz, ny, nx),
         "p_avg_psi": np.asarray(p_avg_hist, float),
     }
-
 
 # =============================================================================
 # End Part 3/4
