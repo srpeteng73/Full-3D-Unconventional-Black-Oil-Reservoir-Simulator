@@ -481,6 +481,7 @@ PLAY_PRESETS = {
         hf_ft=200.0,
         Rs_pb_scf_stb=700.0,
         pb_psi=5400.0,
+        pad_bhp_psi=5500.0,  # <-- ADDED: Sets BHP above bubble point by default
         Bo_pb_rb_stb=1.36,
         p_init_psi=6000.0,
     ),
