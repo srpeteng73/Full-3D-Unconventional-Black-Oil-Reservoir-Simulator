@@ -1002,11 +1002,9 @@ def run_simulation_engine(state):
     out = None
 
     try:
-        # This logic now correctly and cleanly separates the two engine paths.
         if "Analytical" in chosen_engine:
             st.info("Running Fast Analytical Proxy Model...")
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
-            # Directly call the fast analytical solver
             out = fallback_fast_solver(state, rng)
 
         else:  # This is the 3D Implicit Engine Path
@@ -1015,10 +1013,8 @@ def run_simulation_engine(state):
                 st.warning("3D rock properties not found. Generating them first...")
                 generate_property_volumes(state)
             
-            # Assemble the detailed input dictionary for the 3D engine.
-            # This will be passed to the simulate() function in full3d.py
             inputs = {**state, "engine": "implicit"}
-            # Directly call the main 3D simulator from full3d.py
+            # CORRECTED: The function call now matches the imported name.
             out = simulate_3d_implicit(inputs)
 
     except Exception as e:
@@ -1033,7 +1029,6 @@ def run_simulation_engine(state):
     # --- Final Post-processing for both engines ---
     sim = dict(out)
     
-    # The realism scaling should ONLY apply to the analytical model
     if "Analytical" in chosen_engine:
         current_play = st.session_state.get("play_sel", "")
         if "oil" in current_play.lower():
@@ -1050,18 +1045,15 @@ def run_simulation_engine(state):
                         scale_factor = 2000.0 / current_gor
                         sim["qg"] = qg_analytical * scale_factor
 
-    # Re-calculate EURs after any potential scaling
     t, qo, qg, qw = sim.get("t"), sim.get("qo"), sim.get("qg"), sim.get("qw")
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
     
-    # Add final metadata
     sim["runtime_s"] = time.time() - t0
     sim["_sim_signature"] = _sim_signature_from_state()
     if "eur_gas_BCF" in sim: sim["EUR_g_BCF"] = sim["eur_gas_BCF"]
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
-
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
