@@ -1436,9 +1436,8 @@ def _build_inputs_for_blackoil(inputs):
 
 
 # =============================================================================
-# Please replace your existing newton_solve_blackoil function with this one.
+# In full3d.py, REPLACE your existing newton_solve_blackoil function with this one.
 # =============================================================================
-
 def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt):
     nx, ny, nz = int(grid["nx"]), int(grid["ny"]), int(grid["nz"])
     N = nx * ny * nz
@@ -1603,20 +1602,16 @@ def newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, 
 
         Pm, Swm, Sgm = P.copy(), Sw.copy(), Sg.copy()
 
-    # This is the only part of the function that has changed.
     return {
         "t": np.asarray(t_hist, float),
         "qo": np.asarray(qo_hist, float),
         "qg": np.asarray(qg_hist, float),
         "qw": np.asarray(qw_hist, float),
-        # CORRECTED: Renamed 'p_initial' to 'p_init_3d' to match the UI's expectation.
-        "p_init_3d": P0_vec.reshape(nz, ny, nx),
-        # CORRECTED: Renamed 'p_final' to 'press_matrix' to match the UI's expectation.
-        "press_matrix": state[0::3].reshape(nz, ny, nx),
+        "p_init_3d": P0_vec.reshape(nz, ny, nx),      # CORRECTED: Renamed from p_initial
+        "press_matrix": state[0::3].reshape(nz, ny, nx), # CORRECTED: Renamed from p_final
         "ooip_3d": ((Vcell_ft3 * phi_vec * So0_vec) / (Bo0_vec * 5.614583)).reshape(nz, ny, nx),
         "p_avg_psi": np.asarray(p_avg_hist, float),
     }
-
 # =============================================================================
 # End Part 3/4
 # =============================================================================
@@ -1638,21 +1633,17 @@ except Exception:
         return _simulate_analytical_proxy(inputs)
 
 
-# ------------------------------ REPLACEMENT: simulate ------------------------
-
 # =============================================================================
-# Please replace your existing simulate function in full3d.py with this one.
+# In full3d.py, REPLACE your existing simulate function with this one.
 # =============================================================================
-
 def simulate(inputs: dict):
-    """Main 3D simulation entry point."""
+    """Main 3D simulation entry point. This function ONLY runs the implicit solver."""
     engine = inputs.get("engine", "implicit").lower().strip()
 
     if engine == "implicit":
         state0, grid, rock, relperm, init, schedule, options, pvt = _build_inputs_for_blackoil(inputs)
         out = newton_solve_blackoil(state0, grid, rock, relperm, init, schedule, options, pvt)
 
-        # Post-process for EUR and other derived quantities
         (t_cap, cum_o_stb, cum_g_mscf, eur_o_mmbo, eur_g_bcf) = _compute_eur_and_cum(
             out.get("t"), out.get("qo"), out.get("qg"),
             oil_cutoff_stbd=options.get("eur_oil_cutoff_stbd", 30.0),
@@ -1677,10 +1668,8 @@ def simulate(inputs: dict):
             "eur_validation": eur_validation,
         })
         return out
-
     else:
-        # This case should no longer be reached, but it's a good safeguard.
-        raise ValueError(f"The 3D simulator was called with an incorrect engine type: '{engine}'")
+        raise ValueError(f"The 3D simulator file (full3d.py) was called with an incorrect engine type: '{engine}'. This should not happen.")
 
 # ------------------------------ Public EUR helper ----------------------------
 
