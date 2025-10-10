@@ -989,6 +989,9 @@ def _sanity_bounds_for_play(play_name: str):
         bounds = dict(oil_mmbo=(0.3, 2.0), gas_bcf=(0.2, 3.5), max_eur_gor_scfstb=2000.0)
     return bounds
 
+# =============================================================================
+# FINAL CORRECTED SIMULATION ENGINE FUNCTION
+# =============================================================================
 def run_simulation_engine(state):
     """
     Main function to run the selected simulation engine, process results,
@@ -996,30 +999,27 @@ def run_simulation_engine(state):
     """
     t0 = time.time()
     chosen_engine = st.session_state.get("engine_type", "")
-    current_play = st.session_state.get("play_sel", "")
     out = None
 
     try:
-        # ======================================================================
-        # FINAL CORRECTED LOGIC: This cleanly separates the two engine paths.
-        # ======================================================================
+        # This logic now correctly and cleanly separates the two engine paths.
         if "Analytical" in chosen_engine:
             st.info("Running Fast Analytical Proxy Model...")
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
-            # Directly call the fast analytical solver from engines/fast.py
+            # Directly call the fast analytical solver
             out = fallback_fast_solver(state, rng)
 
         else:  # This is the 3D Implicit Engine Path
             st.info("Running Full 3D Three-Phase Implicit Simulator...")
-            if st.session_state.get('kx') is None:
+            if 'kx' not in st.session_state:
                 st.warning("3D rock properties not found. Generating them first...")
                 generate_property_volumes(state)
-
+            
             # Assemble the detailed input dictionary for the 3D engine.
             # This will be passed to the simulate() function in full3d.py
             inputs = {**state, "engine": "implicit"}
             # Directly call the main 3D simulator from full3d.py
-            out = simulate(inputs)
+            out = simulate_3d_implicit(inputs)
 
     except Exception as e:
         st.error(f"FATAL SIMULATOR CRASH in '{chosen_engine}':")
@@ -1034,26 +1034,24 @@ def run_simulation_engine(state):
     sim = dict(out)
     
     # The realism scaling should ONLY apply to the analytical model
-    if "Analytical" in chosen_engine and "oil" in current_play.lower():
-        t_analytical = np.asarray(sim.get("t", []))
-        qo_analytical = np.asarray(sim.get("qo", []))
-        qg_analytical = np.asarray(sim.get("qg", []))
-        if len(t_analytical) > 1:
-            total_oil_stb = trapezoid(qo_analytical, t_analytical)
-            total_gas_scf = trapezoid(qg_analytical, t_analytical) * 1000.0
-            if total_oil_stb > 1e-6:
-                current_gor = total_gas_scf / total_oil_stb
-                if current_gor > 2000.0:
-                    st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
-                    scale_factor = 2000.0 / current_gor
-                    sim["qg"] = qg_analytical * scale_factor
+    if "Analytical" in chosen_engine:
+        current_play = st.session_state.get("play_sel", "")
+        if "oil" in current_play.lower():
+            t_analytical = np.asarray(sim.get("t", []))
+            qo_analytical = np.asarray(sim.get("qo", []))
+            qg_analytical = np.asarray(sim.get("qg", []))
+            if len(t_analytical) > 1:
+                total_oil_stb = trapezoid(qo_analytical, t_analytical)
+                total_gas_scf = trapezoid(qg_analytical, t_analytical) * 1000.0
+                if total_oil_stb > 1e-6:
+                    current_gor = total_gas_scf / total_oil_stb
+                    if current_gor > 2000.0:
+                        st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
+                        scale_factor = 2000.0 / current_gor
+                        sim["qg"] = qg_analytical * scale_factor
 
     # Re-calculate EURs after any potential scaling
-    t = np.asarray(sim.get("t", []))
-    qo = sim.get("qo")
-    qg = sim.get("qg")
-    qw = sim.get("qw")
-    
+    t, qo, qg, qw = sim.get("t"), sim.get("qo"), sim.get("qg"), sim.get("qw")
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
     
     # Add final metadata
@@ -1063,6 +1061,7 @@ def run_simulation_engine(state):
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
+
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
