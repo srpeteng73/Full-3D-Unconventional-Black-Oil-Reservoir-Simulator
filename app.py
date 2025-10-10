@@ -1,5 +1,5 @@
 # =============================================================================
-# CORRECTED IMPORT BLOCK - REPLACE THIS AT THE TOP OF YOUR app.py FILE
+# In app.py, REPLACE the entire import section at the top with this block.
 # =============================================================================
 import time
 import numpy as np
@@ -7,14 +7,13 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import plotly.io as pio
 import streamlit as st
 from scipy import stats
 from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.optimize import differential_evolution
 from scipy.interpolate import interp1d
 import numpy_financial as npf
-import warnings  # trap analytical power warnings for Arps
+import warnings
 
 # --- Correct, Direct Imports for Simulators ---
 from full3d import simulate as simulate_3d_implicit
@@ -993,7 +992,7 @@ def _sanity_bounds_for_play(play_name: str):
     return bounds
 
 # =============================================================================
-# CORRECTED FUNCTION - REPLACE THE EXISTING run_simulation_engine
+# In app.py, REPLACE your existing run_simulation_engine function with this one.
 # =============================================================================
 def run_simulation_engine(state):
     """
@@ -1053,7 +1052,6 @@ def run_simulation_engine(state):
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
-
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
