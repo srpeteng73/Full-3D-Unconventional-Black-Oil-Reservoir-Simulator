@@ -1,5 +1,5 @@
 # =============================================================================
-# CORRECTED IMPORT BLOCK - Ensure this is at the top of app.py
+# In app.py, REPLACE the entire import section at the top with this block.
 # =============================================================================
 import time
 import numpy as np
@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import plotly.io as pio  # <-- THIS IS THE LINE TO ADD/CONFIRM
+import plotly.io as pio  # <-- THIS IS THE CRITICAL LINE TO ADD/CONFIRM
 import streamlit as st
 from scipy import stats
 from scipy.integrate import cumulative_trapezoid, trapezoid
