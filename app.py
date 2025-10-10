@@ -1,4 +1,6 @@
-# Forcing a redeploy on Streamlit Cloud
+# =============================================================================
+# CORRECTED IMPORT BLOCK - REPLACE THIS AT THE TOP OF YOUR app.py FILE
+# =============================================================================
 import time
 import numpy as np
 import pandas as pd
@@ -7,15 +9,16 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import plotly.io as pio
 import streamlit as st
-from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy import stats
-from scipy.integrate import cumulative_trapezoid
+from scipy.integrate import cumulative_trapezoid, trapezoid
 from scipy.optimize import differential_evolution
 from scipy.interpolate import interp1d
 import numpy_financial as npf
-from core.full3d import simulate
-from engines.fast import fallback_fast_solver  # used in preview & fallbacks
 import warnings  # trap analytical power warnings for Arps
+
+# --- Correct, Direct Imports for Simulators ---
+from full3d import simulate as simulate_3d_implicit
+from engines.fast import fallback_fast_solver
 
 # ========= EUR display policy & compact gauge (module-scope) =========
 MIDLAND_BOUNDS = {
@@ -990,7 +993,7 @@ def _sanity_bounds_for_play(play_name: str):
     return bounds
 
 # =============================================================================
-# FINAL CORRECTED SIMULATION ENGINE FUNCTION
+# CORRECTED FUNCTION - REPLACE THE EXISTING run_simulation_engine
 # =============================================================================
 def run_simulation_engine(state):
     """
@@ -1006,15 +1009,13 @@ def run_simulation_engine(state):
             st.info("Running Fast Analytical Proxy Model...")
             rng = np.random.default_rng(int(st.session_state.get("rng_seed", 1234)))
             out = fallback_fast_solver(state, rng)
-
-        else:  # This is the 3D Implicit Engine Path
+        else:
             st.info("Running Full 3D Three-Phase Implicit Simulator...")
             if 'kx' not in st.session_state:
                 st.warning("3D rock properties not found. Generating them first...")
                 generate_property_volumes(state)
             
             inputs = {**state, "engine": "implicit"}
-            # CORRECTED: The function call now matches the imported name.
             out = simulate_3d_implicit(inputs)
 
     except Exception as e:
@@ -1037,13 +1038,11 @@ def run_simulation_engine(state):
             qg_analytical = np.asarray(sim.get("qg", []))
             if len(t_analytical) > 1:
                 total_oil_stb = trapezoid(qo_analytical, t_analytical)
-                total_gas_scf = trapezoid(qg_analytical, t_analytical) * 1000.0
                 if total_oil_stb > 1e-6:
-                    current_gor = total_gas_scf / total_oil_stb
+                    current_gor = (trapezoid(qg_analytical, t_analytical) * 1000.0) / total_oil_stb
                     if current_gor > 2000.0:
                         st.info(f"Analytical model produced high GOR ({current_gor:,.0f} scf/STB). Scaling gas rate for realism.")
-                        scale_factor = 2000.0 / current_gor
-                        sim["qg"] = qg_analytical * scale_factor
+                        sim["qg"] = qg_analytical * (2000.0 / current_gor)
 
     t, qo, qg, qw = sim.get("t"), sim.get("qo"), sim.get("qg"), sim.get("qw")
     sim.update(_compute_eurs_and_cums(t, qg=qg, qo=qo, qw=qw))
@@ -1054,6 +1053,7 @@ def run_simulation_engine(state):
     if "eur_oil_MMBO" in sim: sim["EUR_o_MMBO"] = sim["eur_oil_MMBO"]
     
     return sim
+
 # ------------------------ Engine & Presets (SIDEBAR) ------------------------
 with st.sidebar:
     st.markdown("## Simulation Setup")
